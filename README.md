@@ -5,7 +5,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 confidence-scored output through custom MCP tools.
 
 > **Status: Day 1 scaffold.** The stack comes up and the contracts are frozen.
-> Nothing is wired yet. See [`EXECUTION_PLAN.md`](EXECUTION_PLAN.md) for what lands when.
+> Nothing is wired yet. See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ---
 
@@ -13,8 +13,8 @@ confidence-scored output through custom MCP tools.
 
 | Document | What it answers |
 |---|---|
-| [`BUILD_PLAN.md`](BUILD_PLAN.md) | What we're building, and why each piece exists |
-| [`EXECUTION_PLAN.md`](EXECUTION_PLAN.md) | Who builds it, on which day, and how we know it's done |
+| [`BUILD_PLAN.md`](docs/BUILD_PLAN.md) | What we're building, and why each piece exists |
+| [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) | Who builds it, on which day, and how we know it's done |
 | [`docs/CONTRACTS.md`](docs/CONTRACTS.md) | **Frozen.** Every data shape crossing between the two layers |
 
 `docs/CONTRACTS.md` is frozen at `1.0.0`. Changing anything in it requires both
