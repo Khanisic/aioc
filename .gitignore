@@ -1,0 +1,48 @@
+# ---- secrets -------------------------------------------------------------
+# .env.example is committed (no values). .env never is.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---- python --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# ---- editors / OS --------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln.docstates
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- data / local state --------------------------------------------------
+# Postgres and Redis live in named Docker volumes, not the working tree.
+# Anything that lands here is scratch and should not be committed.
+*.sqlite
+*.db
+data/
+tmp/
+scratch/
+
+# ---- generated artifacts -------------------------------------------------
+# Eval *results* are committed on purpose (Day 20 baseline).
+# Raw run logs are not.
+evaluations/runs/
+*.trace.json
