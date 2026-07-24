@@ -1,0 +1,101 @@
+[project]
+name = "aioc"
+version = "0.1.0"
+description = "Enterprise AI Operations Center - a coordinator routing to four deep subagents over custom MCP tools."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+# Pinned to 3.12 rather than >=3.12 on purpose. Both engineers and CI run the
+# same minor version, so a 3.13 behaviour difference can never be the reason an
+# integration fails.
+
+dependencies = [
+    # Contract layer. CONTRACTS.md section 1 names Pydantic v2 as normative for
+    # everything internal to the Reasoning Layer.
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+
+    # Day 2 - Claude API harness
+    "anthropic>=0.40",
+
+    # Day 6 onward - MCP tool servers
+    "mcp>=1.2",
+
+    # Day 1 - datastores
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
+    "redis>=5.1",
+
+    # Shared HTTP client (Prometheus, GitHub, anything else over the wire)
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aioc"]
+
+
+# -----------------------------------------------------------------------------
+# Lint / format
+# -----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle + pyflakes
+    "I",             # import sorting
+    "UP",            # pyupgrade
+    "B",             # bugbear
+    "ASYNC",         # async correctness - relevant once parallel Task calls land
+    "S",             # bandit; catches hardcoded secrets before the Day 27 audit
+]
+ignore = [
+    "S101",  # assert is fine in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+
+
+# -----------------------------------------------------------------------------
+# Types
+# -----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+packages = ["aioc"]
+mypy_path = "src"
+strict = true
+# The contract's own rule: a null must never be a guess. Making Optional
+# explicit at the type level is the cheapest enforcement of that available.
+no_implicit_optional = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["pgvector.*"]
+ignore_missing_imports = true
+
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: requires the docker compose stack to be running",
+]
