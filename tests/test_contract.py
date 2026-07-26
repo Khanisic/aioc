@@ -43,8 +43,13 @@ def _worked_example() -> dict:
 
 def _assessment(value: object, confidence: float, evidence: list[str]) -> dict:
     """A minimal Assessment payload for envelope tests."""
-    return {"value": value, "confidence": confidence, "evidence": evidence,
-            "reasoning": "r", "detail": None}
+    return {
+        "value": value,
+        "confidence": confidence,
+        "evidence": evidence,
+        "reasoning": "r",
+        "detail": None,
+    }
 
 
 # --------------------------------------------------------------------------- anchor
@@ -115,8 +120,14 @@ def test_evidence_other_needs_detail():
 
 def test_gap_agent_needs_query():
     with pytest.raises(ValidationError):
-        Gap(id="gap_1", description="d", kind="missing_data", suggested_agent="deployment",
-            suggested_query=None, resolvable=True)
+        Gap(
+            id="gap_1",
+            description="d",
+            kind="missing_data",
+            suggested_agent="deployment",
+            suggested_query=None,
+            resolvable=True,
+        )
 
 
 # ----------------------------------------------------------- tool call / error taxonomy
@@ -124,26 +135,56 @@ def test_gap_agent_needs_query():
 
 def test_toolcall_error_class_must_match_ok():
     with pytest.raises(ValidationError):
-        ToolCallRef(id="tc_1", tool_name="t", server="s", started_at="2026-07-23T14:07:03Z",
-                    duration_ms=10, ok=False, error_class=None, truncated=False)
+        ToolCallRef(
+            id="tc_1",
+            tool_name="t",
+            server="s",
+            started_at="2026-07-23T14:07:03Z",
+            duration_ms=10,
+            ok=False,
+            error_class=None,
+            truncated=False,
+        )
 
 
 def test_only_transient_is_retryable():
     with pytest.raises(ValidationError):
-        ToolError.model_validate({"class": "validation", "code": "X", "message": "m",
-                                  "retryable": True, "remediation": "r"})
+        ToolError.model_validate(
+            {
+                "class": "validation",
+                "code": "X",
+                "message": "m",
+                "retryable": True,
+                "remediation": "r",
+            }
+        )
 
 
 def test_transient_needs_retry_after():
     with pytest.raises(ValidationError):
-        ToolError.model_validate({"class": "transient", "code": "X", "message": "m",
-                                  "retryable": True, "retry_after_ms": None, "remediation": "r"})
+        ToolError.model_validate(
+            {
+                "class": "transient",
+                "code": "X",
+                "message": "m",
+                "retryable": True,
+                "retry_after_ms": None,
+                "remediation": "r",
+            }
+        )
 
 
 def test_transient_ok():
-    err = ToolError.model_validate({"class": "transient", "code": "PROMETHEUS_TIMEOUT",
-                                    "message": "m", "retryable": True, "retry_after_ms": 2000,
-                                    "remediation": "retry"})
+    err = ToolError.model_validate(
+        {
+            "class": "transient",
+            "code": "PROMETHEUS_TIMEOUT",
+            "message": "m",
+            "retryable": True,
+            "retry_after_ms": 2000,
+            "remediation": "retry",
+        }
+    )
     assert err.error_class.value == "transient"
 
 
@@ -152,8 +193,14 @@ def test_transient_ok():
 
 def test_high_risk_requires_approval():
     with pytest.raises(ValidationError):
-        RecommendedAction(id="act_1", action="a", rationale="r", risk="high",
-                          reversible=True, requires_approval=False)
+        RecommendedAction(
+            id="act_1",
+            action="a",
+            rationale="r",
+            risk="high",
+            reversible=True,
+            requires_approval=False,
+        )
 
 
 def test_deployment_approval_is_const_true():
@@ -171,8 +218,14 @@ def test_unsupported_claim_when_no_sources():
 
 def test_coverage_must_partition_sub_questions():
     with pytest.raises(ValidationError):
-        Coverage(sub_questions=["q1", "q2"], answered=["q1"], unanswered=[],
-                 documents_searched=1, documents_retrieved=1, documents_cited=1)
+        Coverage(
+            sub_questions=["q1", "q2"],
+            answered=["q1"],
+            unanswered=[],
+            documents_searched=1,
+            documents_retrieved=1,
+            documents_cited=1,
+        )
 
 
 # ------------------------------------------------------------- orchestration invariants
@@ -180,20 +233,41 @@ def test_coverage_must_partition_sub_questions():
 
 def test_context_passed_must_be_non_empty():
     with pytest.raises(ValidationError):
-        AgentInvocation(invocation_id="inv_1", agent="incident", reason="r", mode="parallel",
-                        depends_on=[], context_passed="   ", round=0)
+        AgentInvocation(
+            invocation_id="inv_1",
+            agent="incident",
+            reason="r",
+            mode="parallel",
+            depends_on=[],
+            context_passed="   ",
+            round=0,
+        )
 
 
 def test_parallel_has_no_dependencies():
     with pytest.raises(ValidationError):
-        AgentInvocation(invocation_id="inv_1", agent="incident", reason="r", mode="parallel",
-                        depends_on=["inv_0"], context_passed="ctx", round=0)
+        AgentInvocation(
+            invocation_id="inv_1",
+            agent="incident",
+            reason="r",
+            mode="parallel",
+            depends_on=["inv_0"],
+            context_passed="ctx",
+            round=0,
+        )
 
 
 def test_sequential_requires_dependencies():
     with pytest.raises(ValidationError):
-        AgentInvocation(invocation_id="inv_2", agent="deployment", reason="r", mode="sequential",
-                        depends_on=[], context_passed="ctx", round=0)
+        AgentInvocation(
+            invocation_id="inv_2",
+            agent="deployment",
+            reason="r",
+            mode="sequential",
+            depends_on=[],
+            context_passed="ctx",
+            round=0,
+        )
 
 
 # ------------------------------------------------------------- envelope invariants
@@ -221,9 +295,16 @@ def _incident_response() -> dict:
             "similar_incidents": [],
         },
         "evidence": [
-            {"id": "ev_1", "source_type": "metric", "source_type_detail": None,
-             "source_ref": "x", "excerpt": "y", "observed_at": None, "uri": None,
-             "tool_call_id": None}
+            {
+                "id": "ev_1",
+                "source_type": "metric",
+                "source_type_detail": None,
+                "source_ref": "x",
+                "excerpt": "y",
+                "observed_at": None,
+                "uri": None,
+                "tool_call_id": None,
+            }
         ],
         "gaps": [],
         "overall_confidence": 0.7,
@@ -246,9 +327,18 @@ def test_assessment_referencing_unknown_evidence_rejected():
 def test_complete_status_rejected_when_value_null():
     data = _incident_response()
     data["findings"]["root_cause"] = _assessment(None, 0.2, [])
-    data["gaps"] = [{"id": "gap_1", "description": "d", "kind": "missing_data", "kind_detail": None,
-                     "blocks_field": "findings.root_cause.value", "suggested_agent": None,
-                     "suggested_query": None, "resolvable": False}]
+    data["gaps"] = [
+        {
+            "id": "gap_1",
+            "description": "d",
+            "kind": "missing_data",
+            "kind_detail": None,
+            "blocks_field": "findings.root_cause.value",
+            "suggested_agent": None,
+            "suggested_query": None,
+            "resolvable": False,
+        }
+    ]
     # value is null -> status must be partial or weaker.
     with pytest.raises(ValidationError):
         IncidentAgentResponse.model_validate(data)
@@ -258,9 +348,18 @@ def test_null_value_partial_with_gap_ok():
     data = _incident_response()
     data["status"] = "partial"
     data["findings"]["root_cause"] = _assessment(None, 0.2, [])
-    data["gaps"] = [{"id": "gap_1", "description": "d", "kind": "missing_data", "kind_detail": None,
-                     "blocks_field": "findings.root_cause.value", "suggested_agent": "deployment",
-                     "suggested_query": "diff the release", "resolvable": True}]
+    data["gaps"] = [
+        {
+            "id": "gap_1",
+            "description": "d",
+            "kind": "missing_data",
+            "kind_detail": None,
+            "blocks_field": "findings.root_cause.value",
+            "suggested_agent": "deployment",
+            "suggested_query": "diff the release",
+            "resolvable": True,
+        }
+    ]
     assert IncidentAgentResponse.model_validate(data).status.value == "partial"
 
 
