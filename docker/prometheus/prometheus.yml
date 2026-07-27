@@ -1,0 +1,23 @@
+# Prometheus scrape config for the AIOC demo app (Day 3).
+#
+# Targets use compose service DNS names on the internal port (8000), not the
+# host-mapped ports - Prometheus runs inside the compose network.
+# A 5s interval keeps the demo responsive: a chaos injection (Day 4) shows up
+# in a query within seconds rather than a minute.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: demo-app
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - checkout-api:8000
+          - payments-api:8000
+          - inventory-api:8000

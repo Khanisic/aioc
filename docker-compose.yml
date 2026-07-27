@@ -1,13 +1,32 @@
 # AIOC local development stack.
 #
-# Day 1 scope: Postgres (with pgvector) + Redis. Nothing else.
-# Day 3 adds the demo app services and Prometheus; Day 24 decides what, if
-# anything, follows this stack to Railway/Render.
+# Day 1: Postgres (with pgvector) + Redis.
+# Day 3: the demo app (checkout-api -> payments-api + inventory-api) and
+# Prometheus scraping it. Day 24 decides what, if anything, follows this
+# stack to Railway/Render.
 #
 # Tags are pinned deliberately. A floating :latest here means "reproducible on
 # my machine only", which breaks the Day 29 fresh-clone test.
 
 name: aioc
+
+x-demo-service: &demo-service
+  # All three demo services share one image; SERVICE_NAME/DOWNSTREAM_URLS pick
+  # the role. `build` appears once (checkout-api); the others reuse the image.
+  image: aioc-demo-service:day3
+  restart: unless-stopped
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "python",
+        "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)",
+      ]
+    interval: 5s
+    timeout: 5s
+    retries: 12
+    start_period: 10s
 
 services:
   # pgvector/pgvector, NOT plain postgres. This single image choice is what
@@ -62,6 +81,75 @@ services:
       retries: 12
       start_period: 5s
 
+  # ---------------------------------------------------------------------------
+  # Demo app (Day 3): three services, one image. checkout-api fans out to the
+  # two leaves per request and generates its own background traffic so every
+  # service emits moving metrics with nothing else running.
+  # ---------------------------------------------------------------------------
+  checkout-api:
+    <<: *demo-service
+    build: ./demo-app/services
+    container_name: aioc-checkout-api
+    environment:
+      SERVICE_NAME: checkout-api
+      DOWNSTREAM_URLS: http://payments-api:8000,http://inventory-api:8000
+      SELF_TRAFFIC_SECONDS: "2"
+      DEMO_GIT_SHA: ${DEMO_GIT_SHA:-baseline}
+    ports:
+      - "${CHECKOUT_PORT:-8001}:8000"
+    depends_on:
+      - payments-api
+      - inventory-api
+
+  payments-api:
+    <<: *demo-service
+    container_name: aioc-payments-api
+    environment:
+      SERVICE_NAME: payments-api
+      DEMO_GIT_SHA: ${DEMO_GIT_SHA:-baseline}
+    ports:
+      - "${PAYMENTS_PORT:-8002}:8000"
+
+  inventory-api:
+    <<: *demo-service
+    container_name: aioc-inventory-api
+    environment:
+      SERVICE_NAME: inventory-api
+      DEMO_GIT_SHA: ${DEMO_GIT_SHA:-baseline}
+    ports:
+      - "${INVENTORY_PORT:-8003}:8000"
+
+  # Prometheus (Day 3) - self-hosted, required by the plan, not a signup.
+  # v3.5.x is the LTS line; pinned for the Day 29 fresh-clone test.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: aioc-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - checkout-api
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/-/ready",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
 # Named volumes, not bind mounts or anonymous volumes. The Day 5 seed data
 # (15-20 synthetic incidents) is both the RAG corpus and the eval set - it must
 # survive `docker compose down`. It does NOT survive `down -v`, which is what
@@ -71,3 +159,7 @@ volumes:
     name: aioc-postgres-data
   redis-data:
     name: aioc-redis-data
+  # Prometheus history survives `down` so a chaos experiment's before/after is
+  # still queryable the next morning; `make db-reset` wipes it with the rest.
+  prometheus-data:
+    name: aioc-prometheus-data
