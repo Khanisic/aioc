@@ -63,6 +63,7 @@ make test          # unit tests only (skips those needing the stack)
 ## Layout
 
 ```
+.claude/           rules, slash commands, skills, and the shared permission layer
 src/aioc/
   contracts/       jointly owned — the executable form of docs/CONTRACTS.md
   coordinator/     intent classification, dynamic agent selection, refinement loop
@@ -79,6 +80,24 @@ evaluations/       eval sets and committed results
 `src/aioc/contracts/` is the one package both engineers import. Note that the
 MCP boundary is JSON Schema, not Pydantic — a tool server must not depend on the
 reasoning layer's models. See §6 of the contract.
+
+---
+
+## Working on this repo with Claude Code
+
+`.claude/` is committed on purpose - it's the Domain 3 evidence, not local scratch.
+Path-scoped rules in `.claude/rules/` load only when you open a file they cover, so the
+per-area conventions cost nothing on sessions that don't touch that area. `/contract`
+surfaces the governing rules before you change part of the contract, and `/validate-schema`
+checks a JSON payload against the Pydantic models.
+
+`.claude/settings.json` is the shared permission layer: the inner dev loop runs without
+prompting, the three destructive commands (`make db-reset`, `docker compose down -v`,
+`git push`) prompt, and `.env`/`secrets/`/`*.pem`/`*.key` are unreadable. Your own
+overrides go in `.claude/settings.local.json`, which is gitignored.
+
+See [`docs/design-notes/domain-3-config-layer.md`](docs/design-notes/domain-3-config-layer.md)
+for why each piece sits where it does.
 
 ---
 
