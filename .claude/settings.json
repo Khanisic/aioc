@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(make install:*)",
+      "Bash(make test:*)",
+      "Bash(make test-all:*)",
+      "Bash(make lint:*)",
+      "Bash(make fmt:*)",
+      "Bash(make verify:*)",
+      "Bash(make up:*)",
+      "Bash(make down:*)",
+      "Bash(make logs:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(docker compose up:*)",
+      "Bash(docker compose down:*)"
+    ],
+    "ask": [
+      "Bash(make db-reset:*)",
+      "Bash(docker compose down -v:*)",
+      "Bash(docker compose down --volumes:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Read(/.env)",
+      "Read(/secrets/**)",
+      "Read(/**/*.pem)",
+      "Read(/**/*.key)"
+    ]
+  }
+}

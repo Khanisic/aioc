@@ -21,6 +21,14 @@ htmlcov/
 dist/
 build/
 
+# ---- claude code ---------------------------------------------------------
+# .claude/ is committed on purpose - it is the Domain 3 evidence (rules,
+# commands, skills, and the shared permission layer in settings.json).
+# Only the per-developer layers stay out: settings.local.json is where
+# "yes, don't ask again" writes, and CLAUDE.local.md is personal notes.
+.claude/settings.local.json
+CLAUDE.local.md
+
 # ---- editors / OS --------------------------------------------------------
 .vs/
 .vscode/
