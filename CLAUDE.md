@@ -10,10 +10,14 @@ A coordinator dynamically routes operational queries to four deep subagents (Inc
 Every major decision maps to a CCA-F domain, so changes should be legible as evidence for a specific domain, not just functional.
 The domain-to-decision mapping and phased build order live in `docs/BUILD_PLAN.md`; the day-by-day execution schedule and definition of done live in `docs/EXECUTION_PLAN.md`.
 
-## Current status: Day 1 scaffold + contract layer
+## Current status: Day 4 - first agent returns validated output, chaos is injectable
 
-The repository is at the end of Day 1: Engineer B's scaffold (Docker stack, `Makefile`, package skeleton) plus the frozen contract implemented as Pydantic v2 models under `src/aioc/contracts/`, with a contract-conformance test suite.
-Everything downstream - the four subagents (`src/aioc/agents/`), the coordinator (`src/aioc/coordinator/`), and the MCP tools (`src/aioc/tools/`) - is an empty package awaiting Phases 1-2.
+The repository is at the end of Day 4.
+Day 1 delivered Engineer B's scaffold (Docker stack, `Makefile`, package skeleton) plus the frozen contract implemented as Pydantic v2 models under `src/aioc/contracts/`, with a contract-conformance test suite.
+Day 2 added Engineer A's Claude API harness under `src/aioc/llm/` (messages, streaming, and a manual `tool_use` loop, unit-tested against a scripted fake client) and completed Engineer B's Domain 3 configuration layer under `.claude/`.
+Day 3 added Engineer A's Incident agent skeleton under `src/aioc/agents/` (expert-SRE prompt, single-turn prose) and Engineer B's demo app under `demo-app/` (three containerized services scraped by Prometheus).
+Day 4 turned that skeleton's free-text tail into schema-validated output - `IncidentAgent.diagnose` returns a contract `IncidentAgentResponse` via `tool_use` + `tool_choice` - and added Engineer B's chaos injector (`demo-app/chaos/inject.py`), which drives the four `FailureMode` scenarios over the demo app's `/_chaos` knobs.
+Still downstream - the coordinator (`src/aioc/coordinator/`), the Docs/GitHub/Deployment agents, and the MCP tools (`src/aioc/tools/`) - are empty packages awaiting their days.
 When you add code, follow the structure and sequencing in `docs/BUILD_PLAN.md` (phases) and `docs/EXECUTION_PLAN.md` (days); do not invent a different architecture.
 
 The three source documents, in priority order:
@@ -88,12 +92,16 @@ Heavy infrastructure (Kubernetes, Terraform, Kafka, multi-region) is deliberatel
 Source layout (`src/` layout, package `aioc`):
 
 - `src/aioc/contracts/` - jointly owned; the executable form of `docs/CONTRACTS.md` as Pydantic v2 models (`primitives`, `envelope`, `coordinator`, the four findings modules, `tools`, `enums`). All models subclass `StrictModel` (`extra="forbid"`). This is the one package both engineers import. Note the MCP boundary itself is JSON Schema, not Pydantic (contract §6) - a tool server must not depend on these models.
-- `src/aioc/agents/` - Reasoning Layer subagents (Phase 1 stub).
+- `src/aioc/llm/` - the Claude API harness (Day 2, Reasoning Layer): `LLMClient` with `complete` (messages), `stream_text` (streaming), and `run_tool_loop` (a manual `tool_use` loop with per-call `ToolCallRecord` audit records); `ToolSpec`/`ToolResult`; `LLMSettings` via pydantic-settings. Deliberately decoupled from `aioc.contracts` - the contract's `ToolCallRef` and error taxonomy describe the MCP boundary, which lands in Phase 2. The agents and the coordinator build on this package.
+- `src/aioc/agents/` - Reasoning Layer subagents. `incident.py` is live (Days 3-4): `IncidentAgent.investigate` returns prose; `IncidentAgent.diagnose` returns a schema-validated `IncidentAgentResponse`, forcing the model through a single structured-output tool whose JSON Schema is generated from the frozen models. Docs/GitHub/Deployment land on Days 8/11/12.
 - `src/aioc/coordinator/` - the orchestrator: intent classification, dynamic selection, refinement loop (Phase 1 stub).
 - `src/aioc/tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/` (Phase 2 stub, Engineer B).
 - `src/aioc/{memory,observability,hitl}/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and the human-in-the-loop gate (later phases).
 - `tests/test_contract.py` - validates the models against the CONTRACTS.md §8 worked example plus one negative test per invariant.
-- `demo-app/`, `docker/`, `docker-compose.yml`, `Makefile` - the local stack (Postgres + pgvector, Redis) and its chaos scripts, owned by the Platform Layer.
+- `tests/test_llm_harness.py` - drives the harness `tool_use` loop with a scripted fake client; no network and no API key. `examples/llm_round_trip.py` is the live counterpart (needs a real key).
+- `tests/test_incident_agent.py` - drives both Incident agent paths with a scripted fake client (prose accounting, context passing, and the Day 4 structured `diagnose` including a contract-violating payload that must be rejected). `examples/incident_structured_demo.py` is the live counterpart.
+- `tests/test_chaos_inject.py` - checks the chaos injector's failure-mode -> knob mapping offline (complete, consistent, unambiguous 1:1 with `FailureMode`).
+- `demo-app/`, `docker/`, `docker-compose.yml`, `Makefile` - the local stack (Postgres + pgvector, Redis), the demo app (three services + Prometheus), and `demo-app/chaos/inject.py` (Day 4), owned by the Platform Layer.
 
 CCA-F Domain 3 config (`.claude/`, in place): six path-scoped rules under `.claude/rules/` keyed on `paths:` (contracts, coordinator, agents, tools, tests, platform); a directory-scoped `src/aioc/CLAUDE.md` completing the user → project → directory hierarchy; two slash commands (`/validate-schema`, `/contract`); a `context: fork` project skill `contract-audit` that runs a read-only drift check against the contract; and a committed `.claude/settings.json` carrying the shared permission layer.
 Rules are context and `settings.json` is enforcement - put a preference in a rule, put a boundary in `permissions`.
