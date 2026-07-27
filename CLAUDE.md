@@ -95,7 +95,11 @@ Source layout (`src/` layout, package `aioc`):
 - `tests/test_contract.py` - validates the models against the CONTRACTS.md §8 worked example plus one negative test per invariant.
 - `demo-app/`, `docker/`, `docker-compose.yml`, `Makefile` - the local stack (Postgres + pgvector, Redis) and its chaos scripts, owned by the Platform Layer.
 
-CCA-F Domain 3 config (`.claude/`, in place): path-scoped rules under `.claude/rules/` keyed on `paths:` (contracts, agents, tools, tests); a directory-scoped `src/aioc/CLAUDE.md` completing the user → project → directory hierarchy; two slash commands (`/validate-schema`, `/contract`); and a `context: fork` project skill `contract-audit` that runs a read-only drift check against the contract.
+CCA-F Domain 3 config (`.claude/`, in place): six path-scoped rules under `.claude/rules/` keyed on `paths:` (contracts, coordinator, agents, tools, tests, platform); a directory-scoped `src/aioc/CLAUDE.md` completing the user → project → directory hierarchy; two slash commands (`/validate-schema`, `/contract`); a `context: fork` project skill `contract-audit` that runs a read-only drift check against the contract; and a committed `.claude/settings.json` carrying the shared permission layer.
+Rules are context and `settings.json` is enforcement - put a preference in a rule, put a boundary in `permissions`.
+`settings.json` allows the inner dev loop, sends the three destructive commands (`make db-reset`, `docker compose down -v`, `git push`) to `ask`, and denies reads of `.env`, `secrets/**`, `*.pem`, and `*.key`.
+Per-developer overrides belong in the gitignored `.claude/settings.local.json`, never in the committed file.
+The rationale, the rules-vs-CLAUDE.md split, and the verification procedure are in `docs/design-notes/domain-3-config-layer.md`.
 
 ## Commands
 
