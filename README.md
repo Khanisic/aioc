@@ -4,8 +4,11 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** — each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 1 scaffold.** The stack comes up and the contracts are frozen.
-> Nothing is wired yet. See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
+> **Status: Day 4.** The stack comes up, the contracts are frozen, and the Claude API
+> harness and Claude Code config layer are in place. The Incident agent now returns
+> schema-validated output (`tool_use` + `tool_choice`), and the demo app's four failure
+> modes are injectable with `make chaos-<mode>`. Coordinator and the other three agents
+> are next. See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ---
 
@@ -56,6 +59,9 @@ make db-reset      # DESTRUCTIVE: drop volumes, re-run docker/postgres/init
 make psql          # postgres shell
 make lint          # ruff + mypy
 make test          # unit tests only (skips those needing the stack)
+
+make chaos-downstream-latency   # inject a failure mode (four exist; see the Makefile)
+make chaos-reset                # return the demo app to a healthy baseline
 ```
 
 ---
@@ -66,6 +72,7 @@ make test          # unit tests only (skips those needing the stack)
 .claude/           rules, slash commands, skills, and the shared permission layer
 src/aioc/
   contracts/       jointly owned — the executable form of docs/CONTRACTS.md
+  llm/             Claude API harness - messages, streaming, the tool_use loop
   coordinator/     intent classification, dynamic agent selection, refinement loop
   agents/          incident · docs · github · deployment
   tools/           custom MCP servers
