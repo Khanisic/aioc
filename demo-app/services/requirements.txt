@@ -1,0 +1,6 @@
+# Pinned exactly: this file is baked into the demo image, and a floating version
+# here is the same "reproducible on my machine only" failure the compose tags avoid.
+fastapi==0.115.12
+uvicorn==0.34.0
+prometheus-client==0.21.1
+httpx==0.28.1

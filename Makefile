@@ -56,12 +56,20 @@ redis-cli: ## Open a redis shell
 # -----------------------------------------------------------------------------
 
 .PHONY: verify
-verify: ## Day 1 checkpoint: stack healthy, pgvector present, redis answering
+verify: ## Stack usable: pgvector present, redis answering, demo app exposing metrics, Prometheus scraping
 	@$(COMPOSE) ps --format '{{.Service}}\t{{.Status}}'
 	@$(PSQL) -tAc "SELECT 'pgvector ' || extversion FROM pg_extension WHERE extname='vector'" \
 		| grep -q pgvector && echo "OK   pgvector installed" || (echo "FAIL pgvector missing" && exit 1)
 	@$(COMPOSE) exec -T redis redis-cli ping | grep -q PONG \
 		&& echo "OK   redis responding" || (echo "FAIL redis not responding" && exit 1)
+	@$(COMPOSE) exec -T checkout-api python -c "import urllib.request; assert b'http_requests_total' in urllib.request.urlopen('http://localhost:8000/metrics', timeout=5).read()" \
+		&& echo "OK   checkout-api exposing metrics" || (echo "FAIL checkout-api metrics missing" && exit 1)
+	@$(COMPOSE) exec -T payments-api python -c "import urllib.request; assert b'http_requests_total' in urllib.request.urlopen('http://localhost:8000/metrics', timeout=5).read()" \
+		&& echo "OK   payments-api exposing metrics" || (echo "FAIL payments-api metrics missing" && exit 1)
+	@$(COMPOSE) exec -T inventory-api python -c "import urllib.request; assert b'http_requests_total' in urllib.request.urlopen('http://localhost:8000/metrics', timeout=5).read()" \
+		&& echo "OK   inventory-api exposing metrics" || (echo "FAIL inventory-api metrics missing" && exit 1)
+	@$(COMPOSE) exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/query?query=up{job=\"demo-app\"}' \
+		| grep -q '"value"' && echo "OK   prometheus scraping demo-app" || (echo "FAIL prometheus not scraping demo-app" && exit 1)
 
 .PHONY: lint
 lint: ## Lint and type-check
