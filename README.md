@@ -19,6 +19,7 @@ confidence-scored output through custom MCP tools.
 | [`BUILD_PLAN.md`](docs/BUILD_PLAN.md) | What we're building, and why each piece exists |
 | [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) | Who builds it, on which day, and how we know it's done |
 | [`docs/CONTRACTS.md`](docs/CONTRACTS.md) | **Frozen.** Every data shape crossing between the two layers |
+| [`docs/guides/`](docs/guides/) | How-to guides: [running the tests](docs/guides/running-tests.md), [the incidents table](docs/guides/incidents-table.md) |
 
 `docs/CONTRACTS.md` is frozen at `1.0.0`. Changing anything in it requires both
 engineers to agree in writing, a version bump, and a changelog row.

@@ -26,6 +26,8 @@ The three source documents, in priority order:
 - `docs/BUILD_PLAN.md` - what to build, why, and in what phase; the CCA-F domain mapping.
 - `docs/EXECUTION_PLAN.md` - who builds what on which day, the accounts/services checklist, and the risk register.
 
+Task-level how-to guides live in `docs/guides/`: `running-tests.md` (the offline suite, the billed live checks, and how to read `test-results/`) and `incidents-table.md` (the Day 5 corpus schema for `docker/postgres/init/`).
+
 ## The one hard rule: the contract is frozen
 
 `docs/CONTRACTS.md` (schema version `1.0.0`) is the integration surface between the two layers and is **frozen**.
