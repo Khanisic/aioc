@@ -26,6 +26,7 @@ built yet, so a bad payload surfaces loudly rather than being silently patched.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -118,8 +119,154 @@ class IncidentReport(StrictModel):
     overall_confidence: float = Field(ge=0.0, le=1.0)
 
 
+# ------------------------------------------------------------------- schema annotation
+#
+# `model_json_schema()` gives the right *shape* but says nothing about the contract's
+# cross-field invariants: pydantic emits a `title` per field and nothing else, so the wire sees
+# `kind_detail: string | null` with no hint that it must be null unless `kind` is `other`.
+# Stating those rules only in the system prompt is not enough - measured against the live API,
+# both Haiku 4.5 and Sonnet 5 filled every `*_detail` field regardless of its enum, and the
+# response failed validation. The schema is where a model looks hardest, so the rules belong on
+# the fields they constrain.
+#
+# This is annotation only: descriptions are added, no shape is touched, and `aioc.contracts`
+# stays untouched (the contract is frozen, and these are prompt affordances rather than data).
+# `_apply_guidance` fails at import if a target no longer exists, so renaming a contract field
+# breaks loudly here instead of silently dropping the guidance a model depends on.
+
+_ROOT = "$root"
+
+_TOP_LEVEL_DESCRIPTION = """\
+The complete incident diagnosis. Every property below is a top-level argument of this tool -
+pass them directly; do not nest them inside a wrapper object.
+
+Three rules are validated after you answer, and a violation rejects the whole report:
+1. Any `*_detail` field must be null unless its partner field is exactly `other`.
+2. Every evidence id you cite must exist in the top-level `evidence` list.
+3. A null assessment `value` requires a matching entry in `gaps` naming the field it blocks."""
+
+# Keyed by `$defs` name, or `_ROOT` for the top-level object.
+_FIELD_GUIDANCE: dict[str, dict[str, str]] = {
+    _ROOT: {
+        "status": (
+            "`complete` only when no analytic `value` in findings is null. Use `partial` when "
+            "some are, or `insufficient_evidence` when almost nothing could be established."
+        ),
+        "status_detail": (
+            "Null unless `status` is `other`. Do not describe a `partial` status here."
+        ),
+        "summary": "One or two sentences: what is happening and to which service.",
+        "evidence": (
+            "Every evidence id cited anywhere in `findings` must appear here, each with a "
+            "verbatim `excerpt` from the provided context. Cite nothing you cannot quote."
+        ),
+        "gaps": (
+            "What you could not establish. Required whenever an assessment `value` is null - "
+            "set that gap's `blocks_field` to the field it blocks."
+        ),
+        "overall_confidence": "Your confidence in the diagnosis as a whole, on the band table.",
+    },
+    "Assessment_Severity_": {
+        "value": "Null if your confidence is below 0.25. Never guess a severity.",
+        "confidence": "Calibrated to the band table in the system prompt.",
+        "evidence": "Ids of the evidence entries supporting this, all present in `evidence`.",
+        "reasoning": "One line: how the evidence leads to this value.",
+        "detail": "Null unless `value` is exactly `other`.",
+    },
+    "Assessment_FailureMode_": {
+        "value": "Null if your confidence is below 0.25. Never guess a failure mode.",
+        "confidence": "Calibrated to the band table in the system prompt.",
+        "evidence": "Ids of the evidence entries supporting this, all present in `evidence`.",
+        "reasoning": "One line: how the evidence leads to this value.",
+        "detail": "Null unless `value` is exactly `other`.",
+    },
+    "Assessment_str_": {
+        "value": "Free text, or null if your confidence is below 0.25.",
+        "confidence": "Calibrated to the band table in the system prompt.",
+        "evidence": "Ids of the evidence entries supporting this, all present in `evidence`.",
+        "reasoning": "One line: how the evidence leads to this value.",
+        "detail": (
+            "Always null here. This value is free text, so it has no `other` member to detail."
+        ),
+    },
+    "Evidence": {
+        "id": "Opaque id starting `ev_`, referenced by the assessments that rely on it.",
+        "excerpt": "Quoted verbatim from the provided context. Never paraphrase or invent.",
+        "source_type_detail": "Null unless `source_type` is exactly `other`.",
+    },
+    "Gap": {
+        "kind_detail": "Null unless `kind` is exactly `other`.",
+        "blocks_field": (
+            "Dotted path of the field this gap blocks, e.g. `findings.root_cause.value`. "
+            "Required when this gap explains a null assessment value."
+        ),
+        "resolvable": (
+            "True only if another agent or more data could close this gap. False stops the "
+            "coordinator's refinement loop, so set it honestly."
+        ),
+        "suggested_query": "The question to ask next, when `resolvable` is true.",
+    },
+    "RecommendedAction": {
+        "risk_detail": "Null unless `risk` is exactly `other`.",
+        "requires_approval": (
+            "True for anything that mutates production state or is medium/high risk."
+        ),
+        "command": "Refer to configuration by key name only - never include a config value.",
+    },
+    "TimelineEvent": {
+        "kind_detail": "Null unless `kind` is exactly `other`.",
+        "at": (
+            "RFC 3339 with an explicit `Z`. Entries must be listed oldest first - a timeline "
+            "out of ascending order by this field is rejected."
+        ),
+    },
+    "Impact": {
+        "error_rate_before": "Null if not observed. Never estimate a number you did not see.",
+        "requests_affected": "Null if not observed. Never estimate a number you did not see.",
+    },
+    "IncidentFindings": {
+        "affected_services": (
+            "Empty list means you looked and found none; that is different from not looking, "
+            "which is a gap."
+        ),
+        "timeline": (
+            "Oldest event first, strictly ascending by `at`. Sort before you emit; a timeline "
+            "in any other order is rejected outright."
+        ),
+        "similar_incidents": (
+            "Empty list unless the context actually names prior incidents. Do not invent ids."
+        ),
+    },
+}
+
+
+def _apply_guidance(schema: dict[str, Any]) -> dict[str, Any]:
+    """Attach the invariant guidance to the generated schema, failing loudly on drift."""
+    annotated: dict[str, Any] = deepcopy(schema)
+    annotated["description"] = _TOP_LEVEL_DESCRIPTION
+
+    missing: list[str] = []
+    for def_name, fields in _FIELD_GUIDANCE.items():
+        target = annotated if def_name is _ROOT else annotated.get("$defs", {}).get(def_name)
+        properties = (target or {}).get("properties", {})
+        for field, text in fields.items():
+            if field not in properties:
+                missing.append(f"{def_name}.{field}")
+                continue
+            # A `$ref` sibling is legal in JSON Schema 2020-12, so this works for plain fields,
+            # `anyOf` unions, and `$ref`s alike.
+            properties[field]["description"] = text
+
+    if missing:
+        raise RuntimeError(
+            "incident emit schema guidance is out of sync with aioc.contracts; no such field: "
+            + ", ".join(sorted(missing))
+        )
+    return annotated
+
+
 # Generated once at import from the frozen models - never hand-written, so it cannot drift.
-_EMIT_SCHEMA: dict[str, Any] = IncidentReport.model_json_schema()
+_EMIT_SCHEMA: dict[str, Any] = _apply_guidance(IncidentReport.model_json_schema())
 
 INCIDENT_STRUCTURED_SYSTEM_PROMPT = f"""\
 {_GROUND_RULES}
@@ -243,6 +390,16 @@ class IncidentAgent:
             tools=[_EMIT_TOOL],
             tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
         )
+        # Check truncation before validating. A report cut off mid-JSON still yields a tool_use
+        # block holding whatever parsed, so pydantic reports it as a missing required field -
+        # which reads as "the model forgot `overall_confidence`" when the real cause is the token
+        # budget. Measured: Opus fills 4096 output tokens on this schema without finishing.
+        if resp.stop_reason == "max_tokens":
+            raise IncidentAgentError(
+                f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
+                f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
+                "Raise AIOC_MAX_TOKENS or narrow the query."
+            )
         payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
 
         data: dict[str, Any] = dict(payload)

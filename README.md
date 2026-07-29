@@ -62,7 +62,23 @@ make test          # unit tests only (skips those needing the stack)
 
 make chaos-downstream-latency   # inject a failure mode (four exist; see the Makefile)
 make chaos-reset                # return the demo app to a healthy baseline
+
+# live checks (need ANTHROPIC_API_KEY; these cost real tokens)
+uv run python scripts/check_structured_output.py    # does diagnose() hold the contract, per model?
 ```
+
+### Test results
+
+Every `pytest` run records itself under [`test-results/`](test-results/README.md) as JSON: what
+ran, what failed, how long it took, and against which commit. Any other command can be wrapped:
+
+```bash
+uv run python scripts/runlog.py --kind lint --name ruff -- uv run ruff check .
+grep '"outcome": "failed"' test-results/index.jsonl   # every failing run, newest last
+```
+
+The records are gitignored - they are machine-local evidence, not source. `AIOC_RUNLOG=0` opts
+out. See that directory's README for the record schema.
 
 ---
 
@@ -82,6 +98,8 @@ src/aioc/
 demo-app/          containerized services to break, plus chaos/ injection scripts
 infrastructure/    Kubernetes manifests — documentation, not a deployment path
 evaluations/       eval sets and committed results
+scripts/           dev tooling — run logging, live API checks
+test-results/      structured records of every run (gitignored; schema in its README)
 ```
 
 `src/aioc/contracts/` is the one package both engineers import. Note that the
