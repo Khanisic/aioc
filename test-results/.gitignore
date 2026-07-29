@@ -1,0 +1,8 @@
+# Run records are machine-local evidence, not source: they are per-machine, per-clock, and
+# grow without bound. Only this file and the README are committed, so a fresh clone gets the
+# directory and its schema without anyone else's history.
+#
+# Promote a run into evaluations/ if it needs to be shared - that directory is where the build
+# plan puts committed results.
+runs/
+index.jsonl
