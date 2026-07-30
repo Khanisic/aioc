@@ -10,14 +10,17 @@ A coordinator dynamically routes operational queries to four deep subagents (Inc
 Every major decision maps to a CCA-F domain, so changes should be legible as evidence for a specific domain, not just functional.
 The domain-to-decision mapping and phased build order live in `docs/BUILD_PLAN.md`; the day-by-day execution schedule and definition of done live in `docs/EXECUTION_PLAN.md`.
 
-## Current status: Day 4 - first agent returns validated output, chaos is injectable
+## Current status: Day 6 - live metrics in, coordinator plans, first MCP tool serves
 
-The repository is at the end of Day 4.
+The repository is at the end of Day 6.
 Day 1 delivered Engineer B's scaffold (Docker stack, `Makefile`, package skeleton) plus the frozen contract implemented as Pydantic v2 models under `src/aioc/contracts/`, with a contract-conformance test suite.
-Day 2 added Engineer A's Claude API harness under `src/aioc/llm/` (messages, streaming, and a manual `tool_use` loop, unit-tested against a scripted fake client) and completed Engineer B's Domain 3 configuration layer under `.claude/`.
-Day 3 added Engineer A's Incident agent skeleton under `src/aioc/agents/` (expert-SRE prompt, single-turn prose) and Engineer B's demo app under `demo-app/` (three containerized services scraped by Prometheus).
-Day 4 turned that skeleton's free-text tail into schema-validated output - `IncidentAgent.diagnose` returns a contract `IncidentAgentResponse` via `tool_use` + `tool_choice` - and added Engineer B's chaos injector (`demo-app/chaos/inject.py`), which drives the four `FailureMode` scenarios over the demo app's `/_chaos` knobs.
-Still downstream - the coordinator (`src/aioc/coordinator/`), the Docs/GitHub/Deployment agents, and the MCP tools (`src/aioc/tools/`) - are empty packages awaiting their days.
+Day 2 added Engineer A's Claude API harness under `src/aioc/llm/` and completed Engineer B's Domain 3 configuration layer under `.claude/`.
+Day 3 added the Incident agent skeleton (expert-SRE prompt, single-turn prose) and the demo app (three containerized services scraped by Prometheus).
+Day 4 turned that skeleton's free-text tail into schema-validated output - `IncidentAgent.diagnose` returns a contract `IncidentAgentResponse` via `tool_use` + `tool_choice` - and added the chaos injector (`demo-app/chaos/inject.py`) driving the four `FailureMode` scenarios.
+Day 5 replaced the agent's hand-written context with live Prometheus data (`src/aioc/observability/prometheus.py`) and seeded the incident corpus (18 incidents, 65 timeline events, `docker/postgres/init/`). Checkpoint verified live: chaos injected, agent produced contract-valid JSON naming the right failure mode.
+Day 6 added the coordinator's planning half (`src/aioc/coordinator/planner.py`) and the first custom MCP tool as a real stdio server (`src/aioc/tools/incident/timeline_server.py`).
+Still downstream: task delegation (Day 7), the Docs/GitHub/Deployment agents (Days 8/11/12), retrieval (Day 8), tracing (Day 9), and the eval harness (Day 19).
+`docs/interview-prep/` carries the war stories, decisions, and measured numbers - useful orientation on *why* things are shaped the way they are.
 When you add code, follow the structure and sequencing in `docs/BUILD_PLAN.md` (phases) and `docs/EXECUTION_PLAN.md` (days); do not invent a different architecture.
 
 The three source documents, in priority order:
@@ -101,15 +104,19 @@ Source layout (`src/` layout, package `aioc`):
   The annotation layer exists because a generated schema states shape but not invariants: with the `other`/`detail` pairing rule living only in the system prompt, every model tested filled `*_detail` on non-`other` enums and the response failed validation.
   Descriptions are added, never shape, and `aioc.contracts` stays untouched; the guard raises at import if a field it annotates no longer exists.
   Docs/GitHub/Deployment land on Days 8/11/12.
-- `src/aioc/coordinator/` - the orchestrator: intent classification, dynamic selection, refinement loop (Phase 1 stub).
-- `src/aioc/tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/` (Phase 2 stub, Engineer B).
-- `src/aioc/{memory,observability,hitl}/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and the human-in-the-loop gate (later phases).
+- `src/aioc/coordinator/` - the orchestrator. `planner.py` is live (Day 6): `Coordinator.plan` returns a validated `SelectionPlan` (intent, selected agents with their explicit context, skipped agents with reasons). The graded Domain 1 behaviours are enforced by validators, not prompt text - all four agents must be accounted for, `depends_on` must resolve inside the plan, and `context_passed` must be non-empty *and* not merely restate the query. Reads `AIOC_COORDINATOR_MODEL`, which is the seam the Day 23 routing experiment measures. Task delegation is Day 7; the refinement loop is Day 14.
+- `src/aioc/tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/`. `envelope.py` is the shared contract wire envelope (sec 6) and `incident/timeline_server.py` is `get_incident_timeline` as a real stdio MCP server (Day 6), reading the seeded corpus. **Neither imports `aioc.contracts`** - the MCP boundary is JSON Schema (contract sec 6), so enums and input schemas are longhand, with a test asserting the copies still match the Python enums. Framework input validation is deliberately off: it returns plain text where the contract requires a structured `validation` error.
+- `src/aioc/observability/` - both directions of one concern. `prometheus.py` is live (Day 5): a thin PromQL client plus `build_incident_context`, which renders live demo-app metrics as the Incident agent's explicit context block. **`chaos_knob_value` is excluded by an enforced guard** at both the query and the rendered-output level - it is the Day 19 eval's ground truth, and leaking it would make evals pass silently. Langfuse tracing lands Day 9.
+- `src/aioc/{memory,hitl}/` - Redis/Postgres/pgvector memory tiers and the human-in-the-loop gate (later phases).
 - `tests/test_contract.py` - validates the models against the CONTRACTS.md §8 worked example plus one negative test per invariant.
 - `tests/test_llm_harness.py` - drives the harness `tool_use` loop with a scripted fake client; no network and no API key. `examples/llm_round_trip.py` is the live counterpart (needs a real key).
 - `tests/test_incident_agent.py` - drives both Incident agent paths with a scripted fake client (prose accounting, context passing, and the Day 4 structured `diagnose` including a contract-violating payload that must be rejected). `examples/incident_structured_demo.py` is the live counterpart.
 - `tests/test_chaos_inject.py` - checks the chaos injector's failure-mode -> knob mapping offline (complete, consistent, unambiguous 1:1 with `FailureMode`).
 - `tests/test_seed_corpus.py` - guards the Day 5 incident corpus offline. Parses `docker/postgres/init/02-incidents.sql` and `03-seed-incidents.sql` and asserts the SQL `CHECK` lists match the contract enums, every `FailureMode` has at least two seed rows (a mode with none cannot be scored by the Day 19 eval), ids carry their contract prefixes, and the seed stays idempotent and deterministic. Postgres enforces the constraints; this catches drift.
-- `scripts/` - dev tooling, not shipped code. `runlog.py` records any run as structured JSON under `test-results/`; `check_structured_output.py` is the live per-model check that `diagnose` returns a contract-valid response.
+- `tests/test_prometheus_context.py` - Day 5 metric reads and context rendering, driven by a fake httpx transport. Includes the tests that prove `chaos_knob_value` cannot reach an agent's context.
+- `tests/test_coordinator.py` - Day 6 selection planning against a scripted fake client. Mostly negative tests: each enforced orchestration rule has one proving the violation is rejected.
+- `tests/test_timeline_tool.py` - Day 6 MCP tool. Wire envelope, four-class error taxonomy, input validation, and the four-part description template offline; four `integration`-marked tests query the seeded corpus.
+- `scripts/` - dev tooling, not shipped code. `runlog.py` records any run as structured JSON under `test-results/`. Three live checks, each costing real tokens and each opt-in: `check_structured_output.py` (per-model contract validity), `check_day5_checkpoint.py` (chaos injected -> agent JSON, scored against ground truth), `check_agent_selection.py` (coordinator routing; defaults to 2 of 5 cases).
 - `test-results/` - structured records of every test run: `index.jsonl` plus one directory per run holding `run.json` and `events.jsonl`. Gitignored except its README, which is normative for the record schema. Pytest records itself via hooks in `tests/conftest.py`; `AIOC_RUNLOG=0` opts out.
 - `demo-app/`, `docker/`, `docker-compose.yml`, `Makefile` - the local stack (Postgres + pgvector, Redis), the demo app (three services + Prometheus), and `demo-app/chaos/inject.py` (Day 4), owned by the Platform Layer.
 - `docker/postgres/init/` - runs once, on first initialisation of an empty Postgres volume, in alphabetical order: `01-extensions.sql` (vector, pg_trgm, pgcrypto), `02-incidents.sql` (the incident corpus schema), `03-seed-incidents.sql` (18 synthetic incidents, 65 timeline events). Changing a file here needs `make db-reset` (destructive) to take. Note `init/` never runs against hosted Postgres, so Day 24 applies these files with `psql` - each is written to be runnable standalone and the seed is idempotent.

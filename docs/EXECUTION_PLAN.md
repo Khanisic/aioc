@@ -91,10 +91,16 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   slow downstream dependency, 500-spike tied to a specific commit.
 - **Done when:** `make chaos-<mode>` reliably breaks the demo app.
 
-### Day 5 — Joint: integration + seed data
+### Day 5 — Joint: integration + seed data ✅
 - **Both:** Wire agent to real Prometheus data. Seed 15–20 synthetic historical incidents
   into Postgres (these become the RAG corpus *and* the eval set later).
 - **Checkpoint:** Break the app → Incident agent produces valid JSON about it.
+- **Done:** `aioc.observability.prometheus` renders live metrics as the agent's context block;
+  18 incidents + 65 timeline events seeded. Checkpoint verified live by
+  `scripts/check_day5_checkpoint.py` — injected `downstream_latency`, diagnosed
+  `downstream_latency` @ 0.55 naming both affected services, contract-valid.
+  `chaos_knob_value` is excluded from agent context by an enforced guard, so the comparison
+  is a diagnosis rather than a transcription of the answer key.
 
 ---
 
@@ -102,12 +108,21 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 *Goal: coordinator delegating to Incident and Docs in parallel.*
 
-### Day 6 — Coordinator, first custom tool
+### Day 6 — Coordinator, first custom tool ✅ (partly measured)
 - **A:** Coordinator skeleton — intent classification, **dynamic agent selection**
   (invoke only what the query needs), `allowedTools` includes `Task`.
 - **B:** First custom MCP tool `get_incident_timeline` — description carries inputs,
   example queries, edge cases, when-to-use-vs-alternative.
 - **Done when:** Coordinator picks agents correctly on 5 sample queries.
+- **Done:** `aioc.coordinator.Coordinator.plan` returns a validated `SelectionPlan`; the graded
+  behaviours are enforced by validators rather than prompted (all four agents accounted for,
+  `context_passed` non-empty *and* not a restatement of the query, `depends_on` resolving inside
+  the plan). `get_incident_timeline` is a real stdio MCP server reading the seeded corpus, with
+  the four-part description template and the four-class error taxonomy asserted by tests.
+- **⚠ Outstanding:** the done-when names **5** sample queries; **2 are verified live**
+  (`narrow_incident`, `sequential_dependency` — both pass). Run the rest with
+  `uv run python scripts/check_agent_selection.py --all` (3 further API calls).
+  `allowedTools`/`Task` wiring lands with delegation on Day 7 — the plan is built but not executed.
 
 ### Day 7 — Delegation and error taxonomy
 - **A:** Task delegation with **explicit context passing** in each subagent prompt.
