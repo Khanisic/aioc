@@ -70,6 +70,12 @@ verify: ## Stack usable: pgvector present, redis answering, demo app exposing me
 		&& echo "OK   inventory-api exposing metrics" || (echo "FAIL inventory-api metrics missing" && exit 1)
 	@$(COMPOSE) exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/query?query=up{job=\"demo-app\"}' \
 		| grep -q '"value"' && echo "OK   prometheus scraping demo-app" || (echo "FAIL prometheus not scraping demo-app" && exit 1)
+	@$(PSQL) -tAc "SELECT count(*) FROM incidents" 2>/dev/null | grep -qE '^1[5-9]|^20$$' \
+		&& echo "OK   incident corpus seeded" \
+		|| (echo "FAIL incident corpus missing or short - docker/postgres/init/ only runs on an empty volume; make db-reset" && exit 1)
+	@$(PSQL) -tAc "SELECT count(DISTINCT true_failure_mode) FROM incidents" 2>/dev/null | grep -q '^5$$' \
+		&& echo "OK   corpus covers every failure mode" \
+		|| (echo "FAIL corpus does not cover all 5 FailureMode members - the Day 19 eval cannot score the missing one" && exit 1)
 
 .PHONY: lint
 lint: ## Lint and type-check

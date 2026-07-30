@@ -211,6 +211,21 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 ### Day 24 — Measure + deploy
 - **A:** Re-run evals. Record token reduction vs. the Day 20 baseline.
 - **B:** Deploy to Railway/Render. Keep K8s manifests in `infrastructure/` as documented artifacts.
+- **B — schema and corpus on hosted Postgres.** `docker/postgres/init/` runs *only* on
+  first initialisation of an empty local volume, so the hosted database starts with no
+  extensions, no tables, and no incident corpus. Apply them explicitly, in order, before
+  the app points at it:
+  ```bash
+  for f in docker/postgres/init/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+  ```
+  The seed is idempotent (`ON CONFLICT DO NOTHING`), so re-running is safe; the schema
+  files are not, and will fail loudly if the tables already exist. Neon and Supabase both
+  need `vector` enabled on the instance — `01-extensions.sql` raises a clear exception if
+  it is missing rather than failing later inside retrieval.
+  **This is also the point to decide on a migration tool.** `init/` cannot express a change
+  to an already-populated database, so any post-deploy schema edit needs either a
+  destructive reseed or a real migration path. See `docs/guides/incidents-table.md` for the
+  tradeoff.
 
 ### Day 25 — Joint: production smoke test
 - **Checkpoint:** Live URL, chaos injected against the deployed stack, traces landing in Langfuse.
