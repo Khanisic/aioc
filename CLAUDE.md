@@ -10,6 +10,12 @@ A coordinator dynamically routes operational queries to four deep subagents (Inc
 Every major decision maps to a CCA-F domain, so changes should be legible as evidence for a specific domain, not just functional.
 The domain-to-decision mapping and phased build order live in `docs/BUILD_PLAN.md`; the day-by-day execution schedule and definition of done live in `docs/EXECUTION_PLAN.md`.
 
+## Start a new session by reading HANDOFF.md
+
+`HANDOFF.md` carries what this file cannot: live branch and stack state, environment traps
+(notably a port collision that presents as an authentication failure), the standing cost
+constraint, and the next day's work. Read it first on a fresh session.
+
 ## Current status: Day 6 - live metrics in, coordinator plans, first MCP tool serves
 
 The repository is at the end of Day 6.
