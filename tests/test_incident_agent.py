@@ -24,6 +24,10 @@ from aioc.agents import (
     IncidentAgentError,
     IncidentReport,
 )
+
+# The annotation layer is internal to the agent, but its drift guard is exactly the kind of
+# thing that must have a test, so it is imported directly rather than through the package API.
+from aioc.agents.incident import _EMIT_SCHEMA, _apply_guidance
 from aioc.contracts import AgentName, FailureMode, IncidentAgentResponse, ResponseStatus, Severity
 from aioc.llm import LLMClient, LLMSettings
 
@@ -135,10 +139,13 @@ def test_multiple_text_blocks_are_concatenated():
 
 
 def _tool_use_message(
-    payload: dict[str, Any], *, tool_name: str = EMIT_TOOL_NAME
+    payload: dict[str, Any],
+    *,
+    tool_name: str = EMIT_TOOL_NAME,
+    stop_reason: str = "tool_use",
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        stop_reason="tool_use",
+        stop_reason=stop_reason,
         model="claude-opus-5",
         content=[ToolUseBlock(type="tool_use", id="toolu_1", name=tool_name, input=payload)],
         usage=SimpleNamespace(input_tokens=120, output_tokens=240),
@@ -332,3 +339,50 @@ def test_diagnose_rejects_empty_context():
     agent, _ = _agent([])
     with pytest.raises(ValueError, match="context must be non-empty"):
         agent.diagnose("What broke?", context="   ")
+
+
+def test_diagnose_names_truncation_instead_of_blaming_the_model():
+    # A report cut off at the token ceiling still carries a tool_use block holding whatever
+    # parsed, so validation would report a missing required field and send the reader hunting
+    # for a prompt bug. Measured against the live API: Opus fills 4096 output tokens on this
+    # schema without finishing, so this path is real, not hypothetical.
+    truncated = {k: v for k, v in _STRUCTURED_PAYLOAD.items() if k != "overall_confidence"}
+    agent, _ = _agent([_tool_use_message(truncated, stop_reason="max_tokens")])
+    with pytest.raises(IncidentAgentError, match="truncated"):
+        agent.diagnose("q", context=_CONTEXT)
+
+
+# ------------------------------------------------------- schema guidance (annotation layer)
+
+
+def test_emit_schema_states_the_other_detail_rule_on_every_detail_field():
+    # The rule lives in the schema, not only the prompt: measured against the live API, both
+    # Haiku 4.5 and Sonnet 5 filled every `*_detail` field regardless of its enum when the
+    # schema was silent about the pairing. Each of these must say so on the field itself.
+    defs = _EMIT_SCHEMA["$defs"]
+    paired = [
+        ("Gap", "kind_detail"),
+        ("RecommendedAction", "risk_detail"),
+        ("TimelineEvent", "kind_detail"),
+        ("Evidence", "source_type_detail"),
+        ("Assessment_Severity_", "detail"),
+        ("Assessment_FailureMode_", "detail"),
+    ]
+    for def_name, field in paired:
+        description = defs[def_name]["properties"][field].get("description", "")
+        assert "other" in description, f"{def_name}.{field} does not state the `other` rule"
+    # status_detail is on the root object rather than a $def.
+    assert "other" in _EMIT_SCHEMA["properties"]["status_detail"]["description"]
+
+
+def test_emit_schema_tells_the_model_not_to_nest_the_payload():
+    # Sonnet wrapped the whole report in a `report` key when the top-level description was the
+    # developer-facing docstring; the replacement says explicitly that these are the arguments.
+    assert "do not nest" in _EMIT_SCHEMA["description"].lower()
+
+
+def test_schema_guidance_fails_loudly_when_a_contract_field_is_renamed():
+    # The guidance is keyed by field name, so a rename in aioc.contracts would silently drop the
+    # rule a model depends on. It must break at import instead.
+    with pytest.raises(RuntimeError, match="out of sync"):
+        _apply_guidance({"properties": {}, "$defs": {}})

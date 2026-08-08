@@ -4,11 +4,12 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** — each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 4.** The stack comes up, the contracts are frozen, and the Claude API
-> harness and Claude Code config layer are in place. The Incident agent now returns
-> schema-validated output (`tool_use` + `tool_choice`), and the demo app's four failure
-> modes are injectable with `make chaos-<mode>`. Coordinator and the other three agents
-> are next. See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
+> **Status: Day 6.** The Incident agent reads **live Prometheus data** and returns
+> schema-validated output; an 18-incident corpus is seeded in Postgres; the coordinator
+> plans which agents a query needs (with dynamic selection and explicit context passing
+> enforced by validators, not prompts); and `get_incident_timeline` runs as a real MCP
+> server. Task delegation and the other three agents are next.
+> See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ---
 
@@ -19,6 +20,8 @@ confidence-scored output through custom MCP tools.
 | [`BUILD_PLAN.md`](docs/BUILD_PLAN.md) | What we're building, and why each piece exists |
 | [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) | Who builds it, on which day, and how we know it's done |
 | [`docs/CONTRACTS.md`](docs/CONTRACTS.md) | **Frozen.** Every data shape crossing between the two layers |
+| [`docs/guides/`](docs/guides/) | How-to guides: [running the tests](docs/guides/running-tests.md), [the incidents table](docs/guides/incidents-table.md) |
+| [`docs/interview-prep/`](docs/interview-prep/README.md) | War stories, decisions, and the measured numbers behind them |
 
 `docs/CONTRACTS.md` is frozen at `1.0.0`. Changing anything in it requires both
 engineers to agree in writing, a version bump, and a changelog row.
@@ -41,10 +44,12 @@ Verify the stack is actually usable, not merely running:
 make verify
 ```
 
-That checks three things: both containers healthy, the `vector` extension
-installed in Postgres, and Redis answering. The middle one matters — a plain
-`postgres` image starts perfectly happily and then fails much later, inside the
-retrieval code.
+That checks the stack is *usable*: containers healthy, the `vector` extension
+installed, Redis answering, all three demo services exposing metrics, Prometheus
+actually scraping them, and the incident corpus seeded and covering every failure
+mode. The extension check matters because a plain `postgres` image starts perfectly
+happily and then fails much later, inside the retrieval code — and the coverage check
+matters because a failure mode with no seed rows cannot be scored by the eval at all.
 
 No `make` on Windows? Every recipe in the [`Makefile`](Makefile) is a single
 command you can paste directly, or install it with
@@ -62,7 +67,28 @@ make test          # unit tests only (skips those needing the stack)
 
 make chaos-downstream-latency   # inject a failure mode (four exist; see the Makefile)
 make chaos-reset                # return the demo app to a healthy baseline
+
+# live checks (need ANTHROPIC_API_KEY; these cost real tokens, one call each)
+uv run python scripts/check_structured_output.py    # does diagnose() hold the contract, per model?
+uv run python scripts/check_day5_checkpoint.py      # chaos injected -> valid JSON, scored vs truth
+uv run python scripts/check_agent_selection.py      # coordinator routing (2 of 5 cases by default)
+
+# the first custom MCP tool, over stdio
+uv run python -m aioc.tools.incident.timeline_server
 ```
+
+### Test results
+
+Every `pytest` run records itself under [`test-results/`](test-results/README.md) as JSON: what
+ran, what failed, how long it took, and against which commit. Any other command can be wrapped:
+
+```bash
+uv run python scripts/runlog.py --kind lint --name ruff -- uv run ruff check .
+grep '"outcome": "failed"' test-results/index.jsonl   # every failing run, newest last
+```
+
+The records are gitignored - they are machine-local evidence, not source. `AIOC_RUNLOG=0` opts
+out. See that directory's README for the record schema.
 
 ---
 
@@ -75,13 +101,15 @@ src/aioc/
   llm/             Claude API harness - messages, streaming, the tool_use loop
   coordinator/     intent classification, dynamic agent selection, refinement loop
   agents/          incident · docs · github · deployment
-  tools/           custom MCP servers
+  tools/           custom MCP servers — envelope.py + incident/timeline_server.py
   memory/          redis (working) · postgres (episodic) · pgvector (semantic)
-  observability/   Langfuse tracing
+  observability/   prometheus reads (live) · Langfuse tracing (Day 9)
   hitl/            human-in-the-loop approval gate and audit log
 demo-app/          containerized services to break, plus chaos/ injection scripts
 infrastructure/    Kubernetes manifests — documentation, not a deployment path
 evaluations/       eval sets and committed results
+scripts/           dev tooling — run logging, live API checks
+test-results/      structured records of every run (gitignored; schema in its README)
 ```
 
 `src/aioc/contracts/` is the one package both engineers import. Note that the

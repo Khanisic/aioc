@@ -13,7 +13,11 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
 - `agents/` - the four subagents (Incident, Docs, GitHub, Deployment). Phase 1. Each returns a
   schema-validated `aioc.contracts.AgentResponse`. Incident is live (Days 3-4): `investigate`
   returns prose, `diagnose` returns a validated `IncidentAgentResponse` by forcing a single
-  structured-output tool (`tool_use` + `tool_choice`). Docs/GitHub/Deployment land on Days 8/11/12.
+  structured-output tool (`tool_use` + `tool_choice`). The tool's schema is generated from the
+  frozen models and then annotated (`_apply_guidance`) with the contract's cross-field rules -
+  a generated schema states shape but not invariants, and stating them only in the system prompt
+  demonstrably does not hold. Add descriptions there, never shape, and never edit `contracts/`
+  to do it. Docs/GitHub/Deployment land on Days 8/11/12.
 - `coordinator/` - intent classification, dynamic agent selection, and the refinement loop. Phase 1.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/` (Phase 2, Engineer B).
 - `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and
