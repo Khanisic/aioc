@@ -1,9 +1,12 @@
 # AIOC — Frozen Contracts
 
-**Schema version: `1.0.0` · Frozen Day 1 · Owners: Engineer A + Engineer B**
+**Schema version: `1.0.0` · Frozen Day 1 · Owner: sole maintainer (both layers)**
 
-This document is the integration surface between the Reasoning Layer (Engineer A) and the
-Platform Layer (Engineer B). `EXECUTION_PLAN.md` states the project's one hard rule:
+This document is the integration surface between the Reasoning Layer and the Platform
+Layer. It was written when those layers had separate owners; since Day 6 one maintainer
+owns both, and the contract is deliberately kept as a hard boundary anyway - the whole
+point is that the two halves can be reasoned about independently.
+`EXECUTION_PLAN.md` states the project's one hard rule:
 
 > The tool contract and output schemas are frozen on Day 1. Everything else can churn.
 > If those churn, you lose a week to integration pain.
@@ -33,10 +36,25 @@ churn and are cheaper to get wrong.
 
 ### Changing a frozen thing
 
-1. Both engineers agree, in writing, before any code changes.
-2. Bump `schema_version` — patch for additive-optional, minor for additive-required or a
+The original rule was "both engineers agree, in writing, before any code changes." That
+rule's actual job was never consensus - it was to force a pause and a written record
+before a shared boundary moved. With a sole maintainer the counterparty is gone but the
+job remains, so the ceremony is kept and the counterparty is replaced by the record:
+
+1. **Write the rationale down before the code changes**, as a dated entry in
+   `docs/design-notes/contract-changes.md`: what moves, why, what breaks, what was
+   considered instead. Written *first*, not reconstructed afterwards - a change that
+   cannot be justified in prose before it is made is the change this process exists to
+   catch.
+2. **Preserve the superseded text** in this file, struck through rather than deleted,
+   exactly as the `analyze_logs` / `analyze_events` exception already requires. A frozen
+   contract whose history is editable is not frozen.
+3. Bump `schema_version` — patch for additive-optional, minor for additive-required or a
    new enum member, major for a removal or a type change.
-3. Add a row to the changelog in §9.
+4. Add a row to the changelog in §9 linking the design note.
+
+Steps 1 and 2 are the ones that get skipped when nobody is watching, which is why they
+are listed first.
 
 Consumers **must** read `schema_version` off every payload and fail loudly on a major
 mismatch rather than best-effort parsing.
@@ -484,8 +502,10 @@ working.
 ## 6. Tool interface (normative)
 
 **The MCP wire format is normative.** The Python signatures in §6.4 are illustrative and
-non-binding — Engineer B implements the server, Engineer A calls it over the wire, and the
-wire is what they must agree on.
+non-binding — the Platform Layer implements the server, the Reasoning Layer calls it over
+the wire, and the wire is what they must agree on. One maintainer now writes both sides,
+which makes it *easier*, not safer, to let a Python detail leak across; the wire stays the
+only binding artifact for exactly that reason.
 
 ### 6.1 Request
 

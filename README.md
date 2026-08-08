@@ -23,8 +23,9 @@ confidence-scored output through custom MCP tools.
 | [`docs/guides/`](docs/guides/) | How-to guides: [running the tests](docs/guides/running-tests.md), [the incidents table](docs/guides/incidents-table.md) |
 | [`docs/interview-prep/`](docs/interview-prep/README.md) | War stories, decisions, and the measured numbers behind them |
 
-`docs/CONTRACTS.md` is frozen at `1.0.0`. Changing anything in it requires both
-engineers to agree in writing, a version bump, and a changelog row.
+`docs/CONTRACTS.md` is frozen at `1.0.0`. Changing anything in it requires a written
+rationale recorded before the code changes, the superseded text struck through rather
+than deleted, a version bump, and a changelog row.
 
 ---
 
@@ -112,7 +113,7 @@ scripts/           dev tooling — run logging, live API checks
 test-results/      structured records of every run (gitignored; schema in its README)
 ```
 
-`src/aioc/contracts/` is the one package both engineers import. Note that the
+`src/aioc/contracts/` is the one package both layers import. Note that the
 MCP boundary is JSON Schema, not Pydantic — a tool server must not depend on the
 reasoning layer's models. See §6 of the contract.
 
