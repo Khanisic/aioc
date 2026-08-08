@@ -1,39 +1,60 @@
-# AIOC — 30-Day Execution Plan (2 Engineers)
+# AIOC — 30-Day Execution Plan
 
 Companion to `BUILD_PLAN.md`. That document says **what** to build and why.
-This one says **who builds it, on which day, and how you know it's done.**
+This one says **what gets built on which day, and how you know it's done.**
+
+> **Staffing changed after Day 6.** This plan was written for two engineers. The second
+> engineer left; one maintainer now owns both layers. The **A** and **B** labels below are
+> kept on every day, but they no longer name people - they name **layers**, and that is
+> now their whole job: they mark which side of the frozen contract a day's work sits on.
+> Read them as a reminder to finish one side before starting the other, not as a handoff.
 
 ---
 
 ## Ground rules
 
-**Cadence.** The plan is 30 *working days*, not calendar days. Map it to your reality:
+**Cadence.** The plan is 30 *working days*, not calendar days. With one engineer doing
+both tracks, a numbered day is now closer to two sittings than one:
 
 | Availability | Calendar duration |
 |---|---|
-| Both full-time | ~6 weeks |
-| ~20 hrs/week each | ~10–12 weeks |
-| ~12 hrs/week each | ~16–18 weeks |
+| Full-time, one engineer | ~10–12 weeks |
+| ~20 hrs/week | ~20 weeks |
+| ~12 hrs/week | ~30 weeks |
 
 Days are numbered, not dated. Don't re-plan when you slip — just move the pointer.
+The original two-engineer estimates (~6 weeks full-time) are gone, not merely optimistic.
 
-**Roles.**
-- **Engineer A — Reasoning Layer.** Orchestrator, four subagents, context passing,
-  output schemas, evals. Owns Domains 1, 4, and half of 5.
-- **Engineer B — Platform Layer.** MCP tools, Claude Code config, CI, demo
-  environment, deployment, observability. Owns Domains 2, 3, and half of 5.
+**Tracks.** Each numbered day still splits into two, and the split is load-bearing:
 
-**Rituals.**
-- 15-min sync at the start of each working day. Blockers only.
-- Day 5 of every sprint is a **joint integration day**. No new features.
+- **A — Reasoning Layer.** Orchestrator, four subagents, context passing, output
+  schemas, evals. Domains 1, 4, and half of 5.
+- **B — Platform Layer.** MCP tools, Claude Code config, CI, demo environment,
+  deployment, observability. Domains 2, 3, and half of 5.
+
+Do A and B of a given day in separate sittings, and make each cross the contract only at
+the wire. The two-engineer structure was what kept the layers honestly decoupled; with
+one person it is easy to reach across the boundary because both sides are in your head.
+The contract is frozen precisely so that convenience is not available.
+
+**Rituals.** These were built around a daily sync that no longer has a second party. What
+survives is the part that was never about coordination:
+
+- Start each working day by reading `HANDOFF.md`, then re-reading the previous day's
+  done-when before writing code. This replaces the sync - the check is against the plan
+  rather than against a colleague.
+- Day 5 of every sprint is an **integration day**. No new features. This one matters
+  *more* alone, not less: nobody else will hit your interface and find it wrong.
 - Every sprint ends with a working demo, even if thin.
+- Anything you would have said out loud in a sync and then forgotten goes into
+  `HANDOFF.md` §6 as a carried-over item.
 
 **The one hard rule.** The tool contract and output schemas are frozen on **Day 1**.
 Everything else can churn. If those churn, you lose a week to integration pain.
 
 ---
 
-## Accounts checklist (Day 0, 1 hour, do it together)
+## Accounts checklist (Day 0, 1 hour)
 
 Already covered: Claude Max, Claude Code.
 
@@ -64,11 +85,11 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 *Goal: repo, config layer, demo environment, and one agent that returns valid JSON.*
 
-### Day 1 — Joint: contracts and scaffold
-- **Both (morning):** Kickoff. Write `docs/CONTRACTS.md` — the four agent output schemas
+### Day 1 — Integration: contracts and scaffold
+- **Both tracks (first sitting):** Kickoff. Write `docs/CONTRACTS.md` — the four agent output schemas
   (field names, types, nullable fields, enums) and the tool interface signature. **Freeze it.**
-- **A (afternoon):** Draft Pydantic models for all four agent outputs.
-- **B (afternoon):** Repo scaffold per `BUILD_PLAN.md` structure, `docker-compose.yml`
+- **A (second sitting):** Draft Pydantic models for all four agent outputs.
+- **B (second sitting):** Repo scaffold per `BUILD_PLAN.md` structure, `docker-compose.yml`
   with Postgres + Redis, `.env.example`.
 - **Done when:** `docker compose up` runs clean and `CONTRACTS.md` is merged.
 
@@ -91,8 +112,8 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   slow downstream dependency, 500-spike tied to a specific commit.
 - **Done when:** `make chaos-<mode>` reliably breaks the demo app.
 
-### Day 5 — Joint: integration + seed data ✅
-- **Both:** Wire agent to real Prometheus data. Seed 15–20 synthetic historical incidents
+### Day 5 — Integration day: wiring + seed data ✅
+- **Both tracks:** Wire agent to real Prometheus data. Seed 15–20 synthetic historical incidents
   into Postgres (these become the RAG corpus *and* the eval set later).
 - **Checkpoint:** Break the app → Incident agent produces valid JSON about it.
 - **Done:** `aioc.observability.prometheus` renders live metrics as the agent's context block;
@@ -108,7 +129,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 *Goal: coordinator delegating to Incident and Docs in parallel.*
 
-### Day 6 — Coordinator, first custom tool ✅ (partly measured)
+### Day 6 — Coordinator, first custom tool ✅
 - **A:** Coordinator skeleton — intent classification, **dynamic agent selection**
   (invoke only what the query needs), `allowedTools` includes `Task`.
 - **B:** First custom MCP tool `get_incident_timeline` — description carries inputs,
@@ -119,10 +140,13 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   `context_passed` non-empty *and* not a restatement of the query, `depends_on` resolving inside
   the plan). `get_incident_timeline` is a real stdio MCP server reading the seeded corpus, with
   the four-part description template and the four-class error taxonomy asserted by tests.
-- **⚠ Outstanding:** the done-when names **5** sample queries; **2 are verified live**
-  (`narrow_incident`, `sequential_dependency` — both pass). Run the rest with
-  `uv run python scripts/check_agent_selection.py --all` (3 further API calls).
-  `allowedTools`/`Task` wiring lands with delegation on Day 7 — the plan is built but not executed.
+- **Selection measured 5/5.** All five sample queries in the done-when are verified live:
+  `narrow_incident` and `sequential_dependency` on Day 6, then `pure_docs`,
+  `incident_plus_docs_parallel` and `deployment_only`. Every case selected exactly the
+  expected agents, accounted for all four, and gave a reason per skipped agent.
+  Re-run with `uv run python scripts/check_agent_selection.py --all` (5 API calls).
+- **Carried to Day 7:** `allowedTools`/`Task` wiring lands with delegation - the plan is
+  built but not executed.
 
 ### Day 7 — Delegation and error taxonomy
 - **A:** Task delegation with **explicit context passing** in each subagent prompt.
@@ -141,8 +165,8 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **B:** Langfuse instrumentation — traces for every agent call, tool call, token count, cost.
 - **Done when:** One trace shows two agents running concurrently.
 
-### Day 10 — Joint: first real demo
-- **Both:** End-to-end query: *"Why did latency spike after the last deploy?"*
+### Day 10 — Integration: first real demo
+- **Both tracks:** End-to-end query: *"Why did latency spike after the last deploy?"*
 - **Checkpoint:** Record a GIF. This is your first LinkedIn asset — capture it now.
 
 ---
@@ -170,9 +194,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **B:** Split/rename the overlapping tools, re-run the same 20 queries, record the new rate.
   Draft `docs/case-study-tool-routing.md` with before/after numbers.
 
-### Day 15 — Joint: four agents live
+### Day 15 — Integration: four agents live
 - **Checkpoint:** A multi-agent query exercising parallel *and* sequential paths.
-- **Both:** Cost review — check Console spend against the $100 alert.
+- **Both tracks:** Cost review — check Console spend against the $100 alert.
 
 ---
 
@@ -200,7 +224,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   (accuracy, hallucination rate, tool success rate).
 - **B:** Prompt caching on shared system prompts; run the eval suite through the Batch API.
 
-### Day 20 — Joint: baseline
+### Day 20 — Integration: baseline
 - **Checkpoint:** Full eval run, results committed to `evaluations/baseline.md`.
   Record cached vs. uncached and batch vs. realtime cost deltas — these are portfolio numbers.
 
@@ -242,7 +266,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   destructive reseed or a real migration path. See `docs/guides/incidents-table.md` for the
   tradeoff.
 
-### Day 25 — Joint: production smoke test
+### Day 25 — Integration: production smoke test
 - **Checkpoint:** Live URL, chaos injected against the deployed stack, traces landing in Langfuse.
 
 ---
@@ -260,17 +284,20 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   sequential there, what the retry-loop error taxonomy revealed.
 - **B:** Polish the tool-routing case study. Secrets audit — scan history for leaked keys.
 
-### Day 28 — Joint: demo video
-- **Both:** Script and record 2–3 minutes. Structure: break production (0:00–0:30) →
+### Day 28 — Integration: demo video
+- **Both tracks:** Script and record 2–3 minutes. Structure: break production (0:00–0:30) →
   agents diagnose (0:30–1:30) → trace and cost view (1:30–2:15) → architecture (2:15–end).
   Lead with the break, never the diagram.
 
-### Day 29 — Joint: polish
-- **Both:** Edit video, final README pass, fresh-clone test (`git clone` → running in
-  under 10 minutes on a machine that isn't yours).
+### Day 29 — Integration: polish
+- **Both tracks:** Edit video, final README pass, fresh-clone test (`git clone` → running in
+  under 10 minutes on a machine that isn't yours). With one maintainer this test is the
+  only thing standing between `HANDOFF.md` and a repo nobody else can start.
 
 ### Day 30 — Launch
-- **Both:** LinkedIn posts — separate posts, own words, cross-linked. Repo public.
+- LinkedIn post in your own words. Repo public.
+  (Originally two cross-linked posts, one per engineer. One post now - do not manufacture
+  a second voice for a project with one author.)
 - Hold the tool-routing case study back as a **second post 3–5 days later**; it's your
   strongest standalone content and shouldn't be buried in a launch announcement.
 
@@ -285,7 +312,10 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 | Demo env under-built | Agents have nothing real to read | Sprint 1 protects it; do not defer Days 3–5 |
 | Infra rabbit hole | Days lost to K8s/ArgoCD | Railway for the live demo; manifests stay documentation |
 | Cost surprise | Console spend climbing | $100 alert Day 0; Day 15 and Day 20 reviews |
-| Uneven contribution | One engineer's name on 90% of commits | Enforced PR ownership; both must be able to explain any module |
+| ~~Uneven contribution~~ | ~~One engineer's name on 90% of commits~~ | Retired after Day 6 - one maintainer owns everything, so contribution balance is no longer a risk. The three rows below replace it. |
+| Layer boundary erodes | A tool server imports `aioc.contracts`; an agent reaches into a tool's internals instead of the wire | The boundary used to be enforced by two people not sharing a head. Now it is enforced by tests: `tests/test_timeline_tool.py` asserts the longhand enum copies still match, and no `tools/` module may import `aioc.contracts` |
+| Contract changes unrecorded | `schema_version` still `1.0.0` after a frozen shape moved; a §9 row with no design note | The CONTRACTS.md §0 process, with the written rationale required *before* the code. `/contract` restates it on demand |
+| Single point of failure | Nobody else can run the stack, and the traps live only in one head | `HANDOFF.md` is the mitigation and must stay current. The Day 29 fresh-clone test is what proves it |
 
 ---
 

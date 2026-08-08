@@ -2,10 +2,10 @@
 
 This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wire boundary.
 
-- `contracts/` - jointly owned. The executable form of `docs/CONTRACTS.md`: the frozen contract as
-  Pydantic v2 models. Both engineers import it. Do not let it drift from the contract, and do not
-  change a frozen shape without the CONTRACTS.md sec 0 process. Note the MCP boundary itself is JSON
-  Schema, not Pydantic - a tool server must not depend on these models (contract sec 6).
+- `contracts/` - the executable form of `docs/CONTRACTS.md`: the frozen contract as Pydantic v2
+  models. Both layers import it. Do not let it drift from the contract, and do not change a frozen
+  shape without the CONTRACTS.md sec 0 process. Note the MCP boundary itself is JSON Schema, not
+  Pydantic - a tool server must not depend on these models (contract sec 6).
 - `llm/` - the Claude API harness (Day 2): `LLMClient.complete` / `stream_text` / `run_tool_loop`,
   `ToolSpec`/`ToolResult`, and per-call `ToolCallRecord` audit records. The agents and the
   coordinator build on it. Deliberately decoupled from `contracts/` - it mirrors `ToolCallRef`
@@ -19,7 +19,7 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   demonstrably does not hold. Add descriptions there, never shape, and never edit `contracts/`
   to do it. Docs/GitHub/Deployment land on Days 8/11/12.
 - `coordinator/` - intent classification, dynamic agent selection, and the refinement loop. Phase 1.
-- `tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/` (Phase 2, Engineer B).
+- `tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/` (Phase 2).
 - `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and
   the human-in-the-loop approval gate (later phases).
 

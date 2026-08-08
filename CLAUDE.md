@@ -10,6 +10,11 @@ A coordinator dynamically routes operational queries to four deep subagents (Inc
 Every major decision maps to a CCA-F domain, so changes should be legible as evidence for a specific domain, not just functional.
 The domain-to-decision mapping and phased build order live in `docs/BUILD_PLAN.md`; the day-by-day execution schedule and definition of done live in `docs/EXECUTION_PLAN.md`.
 
+**Staffing.** The project was planned for two engineers, A (Reasoning Layer) and B (Platform Layer), split across a frozen contract.
+The second engineer left after Day 6; one maintainer now owns both layers.
+The A/B labels survive throughout the docs as *layer* names, not people, and the contract stays frozen and hard - the boundary is now enforced by tests and by the §0 change process rather than by two people not sharing a head.
+Historical attributions in `docs/interview-prep/` are left as written, because they record what actually happened.
+
 ## Start a new session by reading HANDOFF.md
 
 `HANDOFF.md` carries what this file cannot: live branch and stack state, environment traps
@@ -19,8 +24,8 @@ constraint, and the next day's work. Read it first on a fresh session.
 ## Current status: Day 6 - live metrics in, coordinator plans, first MCP tool serves
 
 The repository is at the end of Day 6.
-Day 1 delivered Engineer B's scaffold (Docker stack, `Makefile`, package skeleton) plus the frozen contract implemented as Pydantic v2 models under `src/aioc/contracts/`, with a contract-conformance test suite.
-Day 2 added Engineer A's Claude API harness under `src/aioc/llm/` and completed Engineer B's Domain 3 configuration layer under `.claude/`.
+Day 1 delivered the Platform Layer scaffold (Docker stack, `Makefile`, package skeleton) plus the frozen contract implemented as Pydantic v2 models under `src/aioc/contracts/`, with a contract-conformance test suite.
+Day 2 added the Reasoning Layer's Claude API harness under `src/aioc/llm/` and completed the Domain 3 configuration layer under `.claude/`.
 Day 3 added the Incident agent skeleton (expert-SRE prompt, single-turn prose) and the demo app (three containerized services scraped by Prometheus).
 Day 4 turned that skeleton's free-text tail into schema-validated output - `IncidentAgent.diagnose` returns a contract `IncidentAgentResponse` via `tool_use` + `tool_choice` - and added the chaos injector (`demo-app/chaos/inject.py`) driving the four `FailureMode` scenarios.
 Day 5 replaced the agent's hand-written context with live Prometheus data (`src/aioc/observability/prometheus.py`) and seeded the incident corpus (18 incidents, 65 timeline events, `docker/postgres/init/`). Checkpoint verified live: chaos injected, agent produced contract-valid JSON naming the right failure mode.
@@ -43,7 +48,8 @@ Task-level how-to guides live in `docs/guides/`: `running-tests.md` (the offline
 The frozen sections are: shared primitives, the `AgentResponse` envelope, the four agent findings payloads, the `CoordinatorResponse`, the tool request/response envelope with its four-class error taxonomy, and the six named tool schemas.
 
 Do not change anything frozen as a side effect of implementation work.
-Changing a frozen thing requires the formal process in CONTRACTS.md §0: agreement in writing, a `schema_version` bump (patch = additive-optional, minor = additive-required or new enum member, major = removal or type change), and a changelog row in §9.
+Changing a frozen thing requires the formal process in CONTRACTS.md §0, in order: a dated rationale in `docs/design-notes/contract-changes.md` written *before* the code changes, the superseded text struck through rather than deleted, a `schema_version` bump (patch = additive-optional, minor = additive-required or new enum member, major = removal or type change), and a changelog row in §9.
+The process originally required a second engineer's written agreement; that engineer left after Day 6, so the written record is now the only check on a frozen change and the first two steps are not optional.
 Consumers must read `schema_version` off every payload and fail loudly on a major mismatch rather than best-effort parsing.
 
 What is deliberately **not** frozen and may churn freely: handoff digest formats, eval record formats, prompt text, retrieval parameters, model selection, and every internal module boundary.
@@ -102,7 +108,7 @@ Heavy infrastructure (Kubernetes, Terraform, Kafka, multi-region) is deliberatel
 
 Source layout (`src/` layout, package `aioc`):
 
-- `src/aioc/contracts/` - jointly owned; the executable form of `docs/CONTRACTS.md` as Pydantic v2 models (`primitives`, `envelope`, `coordinator`, the four findings modules, `tools`, `enums`). All models subclass `StrictModel` (`extra="forbid"`). This is the one package both engineers import. Note the MCP boundary itself is JSON Schema, not Pydantic (contract §6) - a tool server must not depend on these models.
+- `src/aioc/contracts/` - the executable form of `docs/CONTRACTS.md` as Pydantic v2 models (`primitives`, `envelope`, `coordinator`, the four findings modules, `tools`, `enums`). All models subclass `StrictModel` (`extra="forbid"`). This is the one package both layers import. Note the MCP boundary itself is JSON Schema, not Pydantic (contract §6) - a tool server must not depend on these models.
 - `src/aioc/llm/` - the Claude API harness (Day 2, Reasoning Layer): `LLMClient` with `complete` (messages), `stream_text` (streaming), and `run_tool_loop` (a manual `tool_use` loop with per-call `ToolCallRecord` audit records); `ToolSpec`/`ToolResult`; `LLMSettings` via pydantic-settings.
   Defaults are `claude-sonnet-5` and 8192 output tokens, both set from measurement rather than taste: Sonnet is the cheapest model that returns a contract-valid response on every attempt, and a full incident report does not fit in 4096 tokens.
   Model selection is explicitly not frozen - `scripts/check_structured_output.py` is how you re-measure it. Deliberately decoupled from `aioc.contracts` - the contract's `ToolCallRef` and error taxonomy describe the MCP boundary, which lands in Phase 2. The agents and the coordinator build on this package.
