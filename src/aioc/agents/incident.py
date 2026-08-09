@@ -43,7 +43,7 @@ from aioc.contracts import (
     ResponseStatus,
     StrictModel,
 )
-from aioc.llm import LLMClient, ToolResult, ToolSpec
+from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
 
 AGENT_NAME = "incident"
 
@@ -371,6 +371,7 @@ class IncidentAgent:
         context: str,
         request_id: str | None = None,
         invocation_id: str | None = None,
+        usage: Usage | None = None,
     ) -> IncidentAgentResponse:
         """Answer one operational query as a schema-validated `IncidentAgentResponse` (Day 4).
 
@@ -379,6 +380,11 @@ class IncidentAgent:
         `IncidentAgentResponse`, which runs the response-scoped invariants. ``request_id`` /
         ``invocation_id`` come from the coordinator once it exists (Day 6); a standalone caller
         may omit them and a local id is generated.
+
+        ``usage`` is the Day 7 cost seam: the executor passes one `Usage` accumulator through
+        every model call in a request, and `CoordinatorResponse.cost` is read off it rather
+        than estimated. Token counts are added even when the call fails validation later -
+        a rejected report still cost real tokens.
 
         Raises `IncidentAgentError` if the model does not emit the forced tool, and pydantic's
         ``ValidationError`` if the payload is present but violates the contract.
@@ -390,6 +396,9 @@ class IncidentAgent:
             tools=[_EMIT_TOOL],
             tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
         )
+        if usage is not None:
+            usage.input_tokens += resp.usage.input_tokens
+            usage.output_tokens += resp.usage.output_tokens
         # Check truncation before validating. A report cut off mid-JSON still yields a tool_use
         # block holding whatever parsed, so pydantic reports it as a missing required field -
         # which reads as "the model forgot `overall_confidence`" when the real cause is the token

@@ -335,6 +335,17 @@ def test_diagnose_rejects_a_payload_that_violates_the_contract():
         agent.diagnose("q", context=_CONTEXT)
 
 
+def test_diagnose_adds_tokens_to_a_supplied_usage_accumulator():
+    # The Day 7 cost seam: the executor threads one Usage through every model call and reads
+    # CoordinatorResponse.cost off it. The fixture message reports 120/240.
+    from aioc.llm import Usage
+
+    agent, _ = _agent([_tool_use_message(_STRUCTURED_PAYLOAD)])
+    usage = Usage(input_tokens=10, output_tokens=5)
+    agent.diagnose("q", context=_CONTEXT, usage=usage)
+    assert (usage.input_tokens, usage.output_tokens) == (10 + 120, 5 + 240)
+
+
 def test_diagnose_rejects_empty_context():
     agent, _ = _agent([])
     with pytest.raises(ValueError, match="context must be non-empty"):

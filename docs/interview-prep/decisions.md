@@ -125,10 +125,46 @@ So there is an **annotation layer** over the generated schema - a model-facing t
 
 ## 10. Cost as a design constraint, not an afterthought
 
-**Decision.** The 141-test suite makes **zero** API calls. Everything model-facing is driven by scripted fake clients. Live verification lives in four separate opt-in scripts, and the model-matrix script defaults to one call per model.
+**Decision.** The test suite (186 tests as of Day 7) makes **zero** API calls. Everything model-facing is driven by scripted fake clients. Live verification lives in four separate opt-in scripts, and the model-matrix script defaults to one call per model.
 
 **Why.** A test suite that costs money per run stops being run, and a suite that is not run is not a suite. Splitting free-and-fast from costed-and-deliberate is what keeps the fast one honest.
 
 **What it does not buy.** Fakes prove plumbing, never model behaviour. Every fake-driven test in this repo could pass while the live agent fails - which is exactly what happened on the first live run, when three models failed a path with 14 green offline tests. The fakes were not wrong; they were answering a different question. That is why the live scripts exist and why their results are recorded rather than glanced at.
 
 **The honest framing for an interview.** Offline tests prove I did not break the wiring. Live scripts prove the model can do the task. Conflating the two is how you get a green build and a broken product.
+
+---
+
+## 11. An agent that does not exist returns a Gap, never a placeholder
+
+**Decision.** The Day 7 executor runs a plan in which the coordinator may legitimately select agents that are not built yet (Docs, GitHub, Deployment land on Days 8, 11, 12).
+For such an invocation the executor records a `Gap` with `kind_detail: agent_not_implemented` and `resolvable: false`, weakens `status` to `partial` or below, and returns *no* `AgentResponse` for it.
+It never stubs one.
+
+**Why.** A plausible placeholder response is precisely the failure mode the contract's null-vs-`[]` rule exists to prevent: downstream consumers cannot distinguish "the docs agent found nothing" from "there is no docs agent".
+The `resolvable: false` flag is load-bearing - the Day 14 refinement loop consumes gaps mechanically, and a resolvable-looking gap for an absent agent would burn a refinement round per request forever.
+A *failed* invocation, by contrast, gets `resolvable: true` with `suggested_agent` and `suggested_query` filled in, because a retry genuinely can clear model nondeterminism or a transient upstream.
+The two situations look similar and must not be encoded the same way.
+
+**The related call: synthesis is deterministic on Day 7.** The coordinator's `answer` is adopted from the highest-confidence agent report and cites that report's own evidence ids, so the invariant "the coordinator cites its subagents and never mints evidence ids" holds by construction instead of by model compliance.
+The first consumer that needs a model-written synthesis is the refinement loop (Day 14, gap detection); buying it earlier would add a token cost and a new failure mode to every request for prose nothing yet reads.
+
+**What I would watch.** When Day 8 registers the Docs agent in `default_runners()`, the `agent_not_implemented` path stops firing for it silently - nothing forces the registration.
+The Day 10 integration demo is the check that the wiring actually happened.
+
+---
+
+## 12. The chaos namespace is a permission boundary, at every layer it could leak
+
+**Decision.** Any tool request naming a `chaos*` service returns a structured `permission` error (`CHAOS_SCOPE_REQUIRED`, `required_scope: eval:ground_truth`) from every MCP server, via one shared policy module (`aioc.tools.policy`).
+This extends the Day 5 guard that already keeps `chaos_knob_value` out of the Incident agent's Prometheus context.
+
+**Why permission and not business.** The signals exist - the injector publishes every fault it injects, and that is the Day 19 eval's ground truth.
+Answering `UNKNOWN_SERVICE` (business) would be a lie the caller could disprove, and an empty success would read as "looked, nothing there", which is worse.
+The four-class taxonomy exists so that "not for you" reaches the agent as exactly that, letting it record an `insufficient_permission` gap instead of retrying or concluding falsely.
+
+**Why one shared module.** The Day 6 timeline server predates the gate, so Day 7 added it there too - a boundary only one tool enforces is a boundary an agent can route around by asking the other tool.
+The test for this lives with the policy: both servers are asserted to return the same class and code for the same restricted name.
+
+**Why it matters beyond hygiene.** An agent that can read the injected ground truth turns every eval score into transcription, and the failure is silent - the evals simply start passing.
+Guards against silent-pass failures have to be structural, because no one investigates a green result.

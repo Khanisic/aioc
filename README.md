@@ -4,11 +4,14 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** — each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 6.** The Incident agent reads **live Prometheus data** and returns
-> schema-validated output; an 18-incident corpus is seeded in Postgres; the coordinator
-> plans which agents a query needs (with dynamic selection and explicit context passing
-> enforced by validators, not prompts); and `get_incident_timeline` runs as a real MCP
-> server. Task delegation and the other three agents are next.
+> **Status: Day 7.** The coordinator now **plans and delegates**: it selects agents
+> (dynamic selection and explicit context passing enforced by validators, not prompts),
+> hands each one exactly the context it wrote into the plan, and assembles a contract
+> `CoordinatorResponse` - with honest `Gap`s, never fabricated responses, for the three
+> agents that do not exist yet. Two MCP tools run as real stdio servers
+> (`get_incident_timeline`, `correlate_events`), all four error classes return
+> distinctly, and chaos ground-truth signals are permission-gated at every tool.
+> The Docs agent and retrieval are next.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ---
@@ -74,8 +77,9 @@ uv run python scripts/check_structured_output.py    # does diagnose() hold the c
 uv run python scripts/check_day5_checkpoint.py      # chaos injected -> valid JSON, scored vs truth
 uv run python scripts/check_agent_selection.py      # coordinator routing (2 of 5 cases by default)
 
-# the first custom MCP tool, over stdio
+# the custom MCP tools, over stdio
 uv run python -m aioc.tools.incident.timeline_server
+uv run python -m aioc.tools.incident.correlate_server
 ```
 
 ### Test results
@@ -100,9 +104,9 @@ out. See that directory's README for the record schema.
 src/aioc/
   contracts/       jointly owned — the executable form of docs/CONTRACTS.md
   llm/             Claude API harness - messages, streaming, the tool_use loop
-  coordinator/     intent classification, dynamic agent selection, refinement loop
+  coordinator/     planner (selection) + executor (delegation), refinement loop later
   agents/          incident · docs · github · deployment
-  tools/           custom MCP servers — envelope.py + incident/timeline_server.py
+  tools/           custom MCP servers — envelope, chaos policy gate, incident/ servers
   memory/          redis (working) · postgres (episodic) · pgvector (semantic)
   observability/   prometheus reads (live) · Langfuse tracing (Day 9)
   hitl/            human-in-the-loop approval gate and audit log
