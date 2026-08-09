@@ -15,8 +15,8 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 186-test suite makes **zero API calls** and must stay that way.
-  Live checks live in `scripts/check_*.py`, are opt-in, and cost one call each. Before
+- **Keep costs low.** The 190-test suite makes **zero API calls** and must stay that way.
+  Live checks live in `scripts/check_*.py`, are opt-in, and cost 1-2 calls each. Before
   running anything live, say how many calls it will cost. Do not run a model matrix unasked.
 - **No em dashes** in any output or file. Plain dashes only.
 - **Never add an agent name as commit co-author.**
@@ -59,7 +59,7 @@ merge on `origin` only.
 | `contracts/` | Frozen at `1.0.0`, executable as Pydantic v2. Do not change a frozen shape. |
 | `llm/` | Harness: `complete`, `stream_text`, `run_tool_loop`. Defaults `claude-sonnet-5`, 8192 tokens - both from measurement. |
 | `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated). **Still the only agent.** `diagnose` now also takes a `usage` accumulator (the Day 7 cost seam). |
-| `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on` and takes a `usage` accumulator. Selection measured **5/5**. |
+| `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. |
 | `coordinator/executor.py` | **Day 7.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. `respond()` = plan + execute in one call. |
 | `tools/envelope.py` + `tools/policy.py` | The contract wire envelope (sec 6) + the chaos ground-truth permission gate shared by all servers. |
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
@@ -83,8 +83,10 @@ POSTGRES_PORT=55432
 DATABASE_URL=postgresql://aioc:aioc_dev_only@localhost:55432/aioc
 ```
 
-Verified: `uv run pytest -q` runs all 186 including the 7 `integration`-marked tests with no
-inline override. If those seven start skipping again, this is why.
+Verified: `uv run pytest -q` runs all 190 including the 7 `integration`-marked tests with no
+inline override. If those seven start skipping again, this is why. (They also skip when Docker
+Desktop itself is not running - the skip message says "connection timeout expired" either way,
+so check `docker compose ps` before re-reading this section.)
 
 `.env` cannot be read by an agent (denied by `.claude/settings.json`, correctly). To compare
 a secret, hash it - that is how the port collision was diagnosed without ever reading the
@@ -104,11 +106,17 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 186 passed
+uv run pytest -q                                                   # expect 190 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **186 passed**, lint and mypy clean, at the end of Day 7.
+Costs nothing. Last run: **190 passed**, lint and mypy clean, at the end of Day 7.
+
+The one live check for this day's work, when you want it re-proven (**2 API calls**):
+
+```bash
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day7_delegation.py
+```
 
 ## 6. Next work: Day 8 - Docs agent and retrieval
 
@@ -165,10 +173,10 @@ fake registered in a test's runner map exercises the full delegation path with z
    structured output where Sonnet scored 3/3, and blind retry made it no cheaper than Sonnet.
    A retry loop that re-sends *with the validation error attached* should change that. The
    user wants Haiku; the answer is "once Day 17 exists".
-5. **`respond()` has no live check yet.** The offline delegation tests are thorough, but the
-   full plan-then-execute path has never run against the real API. A
-   `scripts/check_day7_delegation.py` would cost 2 calls (one plan, one diagnose); worth
-   writing before or during the Day 10 demo.
+5. **Delegation is verified live on one query, not a set.** `scripts/check_day7_delegation.py`
+   passes (2 calls: one plan, one diagnose) and is worth re-running after any coordinator
+   prompt change, but the routing check has five cases and this has one. Adding cases costs
+   2 calls each.
 
 ## 8. Where things are written down
 

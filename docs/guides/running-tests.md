@@ -63,8 +63,16 @@ Several tests are deliberately adversarial rather than confirmatory, and those a
 
 ## The live checks (these cost money)
 
-Both need `ANTHROPIC_API_KEY` in `.env` or the shell.
-Neither runs under `pytest`, on purpose - the suite must stay free and offline.
+All of these need `ANTHROPIC_API_KEY` in `.env` or the shell.
+None runs under `pytest`, on purpose - the suite must stay free and offline.
+Each records itself under `test-results/`, so a result is diagnosable after the fact rather than only in scrollback.
+
+| Script | Calls | What it proves |
+|---|---|---|
+| `check_structured_output.py` | 1 per model per repeat (default 3) | `diagnose()` output validates against the frozen contract, per model |
+| `check_day5_checkpoint.py` | 1 | Chaos injected -> agent JSON naming the right failure mode, scored against ground truth |
+| `check_agent_selection.py` | 2 by default, 5 with `--all` | The coordinator routes each sample query to the right agents |
+| `check_day7_delegation.py` | 2 (one plan, one diagnose) | Plan -> execute end to end: the agent's prompt is exactly `context_passed` + query, and nothing leaks by inheritance |
 
 ```bash
 # One call per model. Validates diagnose() against the frozen contract.
@@ -76,16 +84,26 @@ uv run python scripts/check_structured_output.py --models claude-sonnet-5
 # Stability check. --repeat 3 across 2 models is SIX billed calls.
 uv run python scripts/check_structured_output.py --models claude-haiku-4-5-20251001 --repeat 3
 
+# Coordinator routing: 2 discriminating cases, or all 5.
+uv run python scripts/check_agent_selection.py
+uv run python scripts/check_agent_selection.py --all
+
+# Delegation end to end. 2 calls. Needs no Docker stack.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day7_delegation.py
+
 # Prints a full validated response. One call.
 uv run python examples/incident_structured_demo.py
 ```
 
-Default with no arguments is three models, one call each.
+Default with no arguments for the model matrix is three models, one call each.
 `--repeat N` multiplies by N per model, so `--models a b c --repeat 3` is nine calls.
 
 A single pass proves nothing about stability.
 The Haiku result went from 1/1 valid to 1/3 valid once `--repeat 3` ran, which is why the default model is Sonnet.
 Spend the repeats when choosing a model; skip them when you only want to know the code still works.
+
+**Run `check_day7_delegation.py` after changing the coordinator's prompt or the select schema.**
+It is the only check that exercises a model-written plan against a real agent, and it is what caught `round` being asked of the model when the coordinator already knew it (war story #7) - a failure the whole offline suite was structurally blind to, because every fixture had the field filled in by hand.
 
 Stack checks need Docker rather than a key, and are free:
 

@@ -114,6 +114,46 @@ Prefer fewer agents. An unnecessary invocation costs a full agent run and dilute
 synthesis with material nobody asked for."""
 
 
+class PlannedInvocation(StrictModel):
+    """`AgentInvocation` minus `round` - the invocation fields the *model* owns.
+
+    `round` is bookkeeping about the orchestration, not a routing decision: it is 0 on the
+    initial plan and incremented by the Day 14 refinement loop, so the coordinator always
+    knows it and the model can only get it wrong. Same principle as the Incident agent's
+    `IncidentReport`, which excludes `request_id` / `generated_at` for exactly this reason.
+
+    This is not a relaxation of the frozen contract. `AgentInvocation` still requires `round`;
+    this type only shapes what the model is *asked* for, and `Coordinator.plan` stamps the
+    value before the contract model is constructed.
+
+    Measured, not theorised: with `round` in the model-facing schema (required, and with
+    field guidance explaining it), Sonnet omitted it on the first live delegation run and the
+    whole plan failed validation. Asking a model for a field whose value you already know is
+    a failure mode with no upside.
+    """
+
+    invocation_id: str
+    agent: AgentName
+    reason: str
+    mode: InvocationMode
+    depends_on: list[str] = Field(default_factory=list)
+    context_passed: str
+
+
+class ModelSelectionPlan(StrictModel):
+    """The exact shape the model is asked for. Generates the `select_agents` tool schema.
+
+    Distinct from `SelectionPlan`, which is the validated result *after* the coordinator adds
+    what it owns. Keeping the two apart is what stops "what the model decides" from drifting
+    into "what the response happens to contain".
+    """
+
+    intent: Assessment[Intent]
+    selected_agents: list[PlannedInvocation] = Field(default_factory=list)
+    skipped_agents: list[SkippedAgent] = Field(default_factory=list)
+    gaps: list[Gap] = Field(default_factory=list)
+
+
 class SelectionPlan(StrictModel):
     """The plan the coordinator model produces - the routing subset of `CoordinatorResponse`.
 
@@ -224,7 +264,7 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
         ),
         "gaps": "Required if `intent.value` is null. Explain what would disambiguate it.",
     },
-    "AgentInvocation": {
+    "PlannedInvocation": {
         "invocation_id": (
             "Opaque id starting `inv_`. Other invocations reference this in `depends_on`."
         ),
@@ -242,7 +282,8 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "query. Restating the user's question is not context: name the services, the time "
             "window, what is already ruled out, and what you want back."
         ),
-        "round": "0 for the initial plan. The refinement loop increments it.",
+        # No `round` entry: the coordinator owns it and stamps it after the model answers.
+        # See PlannedInvocation for the measurement behind that.
     },
     "SkippedAgent": {
         "reason": (
@@ -296,7 +337,9 @@ def _apply_guidance(schema: dict[str, Any]) -> dict[str, Any]:
     return annotated
 
 
-_SELECT_SCHEMA: dict[str, Any] = _apply_guidance(SelectionPlan.model_json_schema())
+# Generated from the model-facing twin, never from `SelectionPlan`: the model must not be
+# shown fields the coordinator owns.
+_SELECT_SCHEMA: dict[str, Any] = _apply_guidance(ModelSelectionPlan.model_json_schema())
 
 _SELECT_TOOL = ToolSpec(
     name=SELECT_TOOL_NAME,
@@ -331,7 +374,12 @@ class Coordinator:
         self._client = client or LLMClient(_coordinator_settings())
 
     def plan(
-        self, query: str, *, situation: str | None = None, usage: Usage | None = None
+        self,
+        query: str,
+        *,
+        situation: str | None = None,
+        usage: Usage | None = None,
+        round_number: int = 0,
     ) -> SelectionPlan:
         """Classify the query and choose agents.
 
@@ -345,6 +393,9 @@ class Coordinator:
         planning call's tokens are added to it, so `CoordinatorResponse.cost` covers planning
         as well as the agent runs. Tokens are added even when the plan fails validation -
         a rejected plan still cost real tokens.
+
+        `round_number` is stamped onto every invocation rather than asked of the model; the
+        Day 14 refinement loop passes 1, 2, ... when it re-delegates.
         """
         if not query.strip():
             raise ValueError("query must be non-empty")
@@ -369,13 +420,28 @@ class Coordinator:
                 "Raise AIOC_MAX_TOKENS."
             )
         payload = _extract_tool_input(resp, SELECT_TOOL_NAME)
-        plan = SelectionPlan.model_validate(payload)
+        plan = SelectionPlan.model_validate(_stamp_round(payload, round_number))
         _reject_echoed_context(plan, query)
         return plan
 
     @staticmethod
     def new_request_id() -> str:
         return _new_id("req")
+
+
+def _stamp_round(payload: dict[str, Any], round_number: int) -> dict[str, Any]:
+    """Add the coordinator-owned `round` to every invocation the model returned.
+
+    Overwrites rather than defaults: `round` is a fact about this delegation round, so a model
+    that volunteered one anyway does not get to be authoritative about it.
+    """
+    stamped = dict(payload)
+    invocations = stamped.get("selected_agents")
+    if isinstance(invocations, list):
+        stamped["selected_agents"] = [
+            {**inv, "round": round_number} if isinstance(inv, dict) else inv for inv in invocations
+        ]
+    return stamped
 
 
 def _reject_echoed_context(plan: SelectionPlan, query: str) -> None:

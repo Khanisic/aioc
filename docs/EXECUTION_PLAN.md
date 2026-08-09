@@ -170,6 +170,16 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   (`CHAOS_SCOPE_REQUIRED`) from **both** servers - the injector's signals are the Day 19
   eval's ground truth, and the class is permission (signals exist, scope missing), not a
   disprovable "no such service".
+- **Verified live** by `scripts/check_day7_delegation.py` (2 API calls): the coordinator selected
+  `[incident]` and skipped three with reasons, 103 words of context reached the agent
+  byte-for-byte, a coordinator-only sentinel planted in the situation block **did not leak**
+  into the agent's prompt, cost accumulated to 12,209 in / 4,149 out across both calls, and
+  status came back `partial` with 4 resolvable gaps rather than a falsely clean `complete`.
+- **The first live run failed, usefully.** `round` was in the model-facing schema and Sonnet
+  omitted it, failing the whole plan - something 186 green offline tests could not catch,
+  because every fixture was hand-written with the field present. Fixed by asking the model for
+  `PlannedInvocation` (no `round`) and stamping the value in the coordinator, matching the
+  Day 4 precedent where `IncidentReport` excludes the caller's plumbing. War story #7.
 - **Carried to Day 14:** model-written synthesis, alongside the refinement loop that needs it.
 
 ### Day 8 — Docs agent and retrieval

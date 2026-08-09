@@ -14,6 +14,8 @@ from .planner import (
     SELECTION_SYSTEM_PROMPT,
     Coordinator,
     CoordinatorError,
+    ModelSelectionPlan,
+    PlannedInvocation,
     SelectionPlan,
     utcnow,
 )
@@ -27,6 +29,8 @@ __all__ = [
     "CoordinatorError",
     "Executor",
     "IncidentRunner",
+    "ModelSelectionPlan",
+    "PlannedInvocation",
     "SelectionPlan",
     "default_runners",
     "respond",

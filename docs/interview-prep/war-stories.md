@@ -1,11 +1,11 @@
 # War stories
 
-Six things that went wrong, what the symptom looked like, and what it actually was.
+Seven things that went wrong, what the symptom looked like, and what it actually was.
 These are the answers to "tell me about a time when..." questions.
 Every one is traceable to a recorded run under `test-results/` or to a commit.
 
-The through-line worth naming out loud: **five of the six looked like the model being unreliable and were not.**
-Four were engineering defects on my side and one was my own test being wrong.
+The through-line worth naming out loud: **six of the seven looked like the model being unreliable and were not.**
+Five were engineering defects on my side and one was my own test being wrong.
 That is the most useful thing I learned building this, and it is a better interview answer than any architecture description.
 
 ---
@@ -148,6 +148,35 @@ I checked the contract: it validates ascending order only. Containment was never
 
 **Transferable lesson.** When a new assertion fails on data you believe is correct, the assertion is a hypothesis too.
 Check the spec before you change the data. And record the decision where the next person will trip over it, not in a commit message they will never read.
+
+---
+
+## 7. Asking the model for a field I already knew the answer to
+
+**Symptom.** The very first live run of the Day 7 delegation check died before the agent was ever invoked:
+
+> `1 validation error for SelectionPlan / selected_agents.0.round / Field required`
+
+Sonnet had produced a well-formed routing plan - right agent, three real skip reasons, 103 words of genuine context - and omitted `round`, an integer the schema marked required and whose field guidance said, in plain English, "0 for the initial plan."
+
+**What made it interesting.** Nothing was wrong with the contract or the code.
+`round` is required in CONTRACTS.md §5, the Pydantic model enforced it correctly, and 186 offline tests were green.
+They were green because every fixture I had written by hand included `round` - the field is trivially easy to remember when you are a human filling in a dict.
+
+**What it actually was.** A design error one layer up: `round` was in the model-facing schema at all.
+It is not a routing decision. It is bookkeeping the coordinator owns - 0 on the initial plan, incremented by the refinement loop - so the coordinator always knows it and the model can only ever agree or be wrong.
+I had already solved this exact problem on Day 4, where `IncidentReport` deliberately excludes `request_id`, `invocation_id`, and `generated_at` because they are the caller's plumbing.
+I just did not notice the coordinator had the same shape.
+
+**Fix.** A `PlannedInvocation` type: `AgentInvocation` minus `round`, used only to generate the tool schema.
+The planner stamps the value after the model answers, overwriting rather than defaulting, so a model that volunteers a round number does not get to be authoritative about it.
+`Coordinator.plan` grew a `round_number` argument, which is what the Day 14 refinement loop will pass.
+The frozen contract did not change: `AgentInvocation` still requires `round`, and there is now a test asserting exactly that, so the narrower ask cannot be mistaken for a relaxation.
+
+**Transferable lesson.** Every field in a structured-output schema is a chance for the model to be wrong, so a field whose value you already know is pure downside - remove it from the ask and stamp it yourself.
+And the sharper one: **fake-driven tests inherit the assumptions of whoever wrote the fixtures.**
+Mine encoded "of course `round` is present" and could not have caught this. Two API calls could, and did, on the first attempt.
+That is the clearest argument for the opt-in live scripts that I have found so far - the offline suite was not wrong, it was answering a question that did not include this one.
 
 ---
 

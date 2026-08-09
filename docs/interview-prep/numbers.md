@@ -70,19 +70,36 @@ The agent saw **only** live Prometheus metrics. `chaos_knob_value` is excluded f
 
 ## Day 6 checkpoint: coordinator agent selection
 
-`scripts/check_agent_selection.py`, one live call per case, recorded. **2 of 5 cases run live** (budget); 3 defined but unverified.
+`scripts/check_agent_selection.py`, one live call per case, recorded. **5 of 5 cases pass**, across two runs (the two discriminating cases first, the remaining three later).
 
 | Case | Result |
 |---|---|
 | `narrow_incident` | **PASS** - selected `[incident]`, skipped 3 with specific reasons, intent `incident_diagnosis` @ 0.92 |
 | `sequential_dependency` | **PASS** - `github: parallel`, `deployment: sequential` with `depends_on: ['inv_1']`, intent `mixed` @ 0.85 |
-| `pure_docs` | not run |
-| `incident_plus_docs_parallel` | not run |
-| `deployment_only` | not run |
+| `pure_docs` | **PASS** - selected `[docs]`, intent `documentation_lookup` @ 0.92 |
+| `incident_plus_docs_parallel` | **PASS** - selected `[docs, incident]`, both parallel, intent `mixed` @ 0.85 |
+| `deployment_only` | **PASS** - selected `[deployment]`, intent `deployment_check` @ 0.90 |
 
-Context passed per agent: **75 words** (narrow_incident), **37 and 62 words** (sequential_dependency). Non-trivial, so explicit context passing is doing real work rather than satisfying a non-empty check.
+Context passed per agent, in words: **75** (narrow_incident), **37 / 62** (sequential_dependency), **49** (pure_docs), **37 / 31** (incident_plus_docs_parallel), **60** (deployment_only). Non-trivial in every case, so explicit context passing is doing real work rather than satisfying a non-empty check.
 
-Be precise about the 2-of-5 in an interview. The plan's done-when is five queries; two are proven.
+---
+
+## Day 7 checkpoint: delegation end to end
+
+`scripts/check_day7_delegation.py`, 2 live calls (one plan, one diagnose), recorded. Query: *"Checkout is returning 502s to customers. What is actually broken, and how bad is it?"*
+
+| | |
+|---|---|
+| Selection | `[incident]`, three agents skipped with specific reasons, intent `incident_diagnosis` |
+| Context passed | **103 words**, handed to the agent byte-for-byte |
+| Sentinel leak | **None.** A coordinator-only marker planted in the situation block did not reach the agent's prompt |
+| Cost (both calls) | **12,209 input / 4,149 output tokens**, accumulated from `Usage`, not estimated |
+| Status | `partial`, with 4 resolvable gaps - honest rather than complete |
+| Answer confidence | **0.55**, correctly implicating payments-api tail latency |
+
+The sentinel is the measurement that matters: the coordinator *saw* a fact it was told was bookkeeping-only, and did not forward it. Explicit context passing is proven at the wire, not just at the runner - the check compares the agent's actual outgoing prompt against `context_passed`.
+
+**The first run of this check failed**, and that is the point of it existing. See war story #7: `round` was in the model-facing schema, Sonnet omitted it, and 186 green offline tests could not have caught it because every fixture was hand-written with the field present.
 
 ---
 
@@ -122,13 +139,15 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **186** (179 offline + 7 `integration`-marked) |
-| Runtime | ~1.5s offline, ~2.0s with the Docker-backed integration tests |
+| Total tests | **190** (183 offline + 7 `integration`-marked) |
+| Runtime | ~1.5s offline, ~3.8s with the Docker-backed integration tests |
 | Live API calls needed | **0** |
 
-Split: 25 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 25 coordinator, 14 executor, 28 timeline tool, 30 correlate tool.
+Split: 25 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 14 executor, 28 timeline tool, 30 correlate tool.
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
+
+**And the honest counterweight, measured:** those 186 green tests did not catch the `round` bug that two live calls found on the first attempt (war story #7). Fake-driven tests inherit the assumptions of whoever wrote the fixtures. The offline suite proves the wiring; only a live call proves the model will fill it.
 
 ---
 
@@ -139,5 +158,5 @@ Say this plainly rather than letting it be discovered:
 - **No eval harness.** Accuracy, hallucination rate, and tool-success rate are Day 19. The Day 5 checkpoint is a single-case preview of it.
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No cost or latency telemetry.** Langfuse is Day 9. Per-call durations are in `test-results/`, but there is no aggregate.
-- **3 of 5 coordinator cases unverified live.**
+- **Delegation is verified on one query, not a set.** The Day 7 check is a single case; the coordinator's routing has five, and delegation has one.
 - **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.
