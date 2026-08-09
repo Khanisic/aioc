@@ -161,7 +161,7 @@ That deny rule earned its place during the password hunt above - it is why I com
 
 **Q: How do you keep the test suite from becoming expensive?**
 
-It makes **zero** API calls. 141 tests, ~1.6 seconds, everything model-facing driven by scripted fake clients. Live verification is four separate opt-in scripts, and the model-matrix one defaults to a single call per model.
+It makes **zero** API calls. 186 tests, ~1.5 seconds offline, everything model-facing driven by scripted fake clients. Live verification is four separate opt-in scripts, and the model-matrix one defaults to a single call per model.
 
 A suite that costs money per run stops being run, and a suite that is not run is not a suite.
 

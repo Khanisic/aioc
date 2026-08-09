@@ -148,12 +148,29 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **Carried to Day 7:** `allowedTools`/`Task` wiring lands with delegation - the plan is
   built but not executed.
 
-### Day 7 — Delegation and error taxonomy
+### Day 7 — Delegation and error taxonomy ✅
 - **A:** Task delegation with **explicit context passing** in each subagent prompt.
   No implicit inheritance — this is the most-tested orchestration fact.
 - **B:** `correlate_events` tool + structured `isError` responses across all four classes
   (transient / validation / business / permission).
 - **Done when:** Subagent receives context it never inherited; all four error classes return distinctly.
+- **Done:** `aioc.coordinator.Executor.execute` consumes a `SelectionPlan` into a contract
+  `CoordinatorResponse`; `respond()` glues plan + execution into one call.
+  The done-when is a named test: the runner receives *exactly* `AgentInvocation.context_passed`,
+  character for character, and nothing the coordinator knew but did not write into the plan.
+  An invocation the executor cannot run (only Incident exists until Days 8/11/12) produces a
+  `Gap` with `resolvable: false` and a weakened `status` - never a fabricated `AgentResponse`.
+  Synthesis is deterministic until the Day 14 loop needs a model-written one; `cost` is
+  accumulated from `Usage` across the planning call and every agent call, never estimated.
+- **Done (B):** `correlate_events` is live as a second stdio MCP server over the seeded corpus
+  (`impulse Pearson over 60s event bins`; correlation-not-causation stated on the wire).
+  `test_all_four_error_classes_return_distinctly` produces all four classes from real code
+  paths and asserts they are structurally distinguishable, not just differently worded.
+  New shared `tools/policy.py`: any `chaos*` service returns a `permission` error
+  (`CHAOS_SCOPE_REQUIRED`) from **both** servers - the injector's signals are the Day 19
+  eval's ground truth, and the class is permission (signals exist, scope missing), not a
+  disprovable "no such service".
+- **Carried to Day 14:** model-written synthesis, alongside the refinement loop that needs it.
 
 ### Day 8 — Docs agent and retrieval
 - **A:** Docs agent — prompt constrained to retrieved documents only, cites every claim.

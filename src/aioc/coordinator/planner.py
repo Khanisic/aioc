@@ -48,7 +48,7 @@ from aioc.contracts import (
     SkippedAgent,
     StrictModel,
 )
-from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec
+from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage
 
 SELECT_TOOL_NAME = "select_agents"
 
@@ -165,6 +165,22 @@ class SelectionPlan(StrictModel):
                 )
             if inv.invocation_id in inv.depends_on:
                 raise ValueError(f"{inv.agent.value} depends on itself")
+
+        # No cycles. Parallel invocations have empty depends_on by contract, so a cycle can
+        # only form among sequential ones - and a cyclic plan is one the Day 7 executor could
+        # never start, since every member waits on another. Kahn's algorithm: repeatedly
+        # release invocations whose dependencies are all released; a leftover is a cycle.
+        released: set[str] = set()
+        pending = list(self.selected_agents)
+        while pending:
+            runnable = [inv for inv in pending if set(inv.depends_on) <= released]
+            if not runnable:
+                stuck = sorted(inv.invocation_id for inv in pending)
+                raise ValueError(
+                    f"circular depends_on among {stuck}; no execution order can satisfy it"
+                )
+            released.update(inv.invocation_id for inv in runnable)
+            pending = [inv for inv in pending if inv.invocation_id not in released]
 
         # A null intent must be explained, mirroring the envelope's null-needs-a-Gap rule.
         if self.intent.value is None and not self.gaps:
@@ -314,7 +330,9 @@ class Coordinator:
     def __init__(self, client: LLMClient | None = None) -> None:
         self._client = client or LLMClient(_coordinator_settings())
 
-    def plan(self, query: str, *, situation: str | None = None) -> SelectionPlan:
+    def plan(
+        self, query: str, *, situation: str | None = None, usage: Usage | None = None
+    ) -> SelectionPlan:
         """Classify the query and choose agents.
 
         `situation` is anything the coordinator already knows that should inform routing - a
@@ -322,6 +340,11 @@ class Coordinator:
         automatically forwarded to the agents: the model must decide what each agent needs and
         write it into that agent's `context_passed`. That asymmetry is the whole point of
         explicit context passing, so it is deliberate rather than an oversight.
+
+        `usage` is the Day 7 cost seam: pass the request's `Usage` accumulator and the
+        planning call's tokens are added to it, so `CoordinatorResponse.cost` covers planning
+        as well as the agent runs. Tokens are added even when the plan fails validation -
+        a rejected plan still cost real tokens.
         """
         if not query.strip():
             raise ValueError("query must be non-empty")
@@ -336,6 +359,9 @@ class Coordinator:
             tools=[_SELECT_TOOL],
             tool_choice={"type": "tool", "name": SELECT_TOOL_NAME},
         )
+        if usage is not None:
+            usage.input_tokens += resp.usage.input_tokens
+            usage.output_tokens += resp.usage.output_tokens
         if resp.stop_reason == "max_tokens":
             raise CoordinatorError(
                 f"{SELECT_TOOL_NAME} output was truncated at the max_tokens limit "

@@ -33,18 +33,16 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
-from urllib.parse import quote_plus
 
 import psycopg
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from aioc.tools.envelope import Timer, err, ok
+from aioc.tools.incident.store import dsn as _dsn
+from aioc.tools.policy import ground_truth_denied, restricted_names
 
 TOOL_NAME = "get_incident_timeline"
 
@@ -95,7 +93,9 @@ Returns at most 200 events; when more exist, `meta.truncated` is true and \
 truncated list. An empty `events` array is a successful answer meaning no events were \
 recorded for that service in that window - it is NOT an error and NOT evidence that nothing \
 happened, because only recorded events are visible here. This tool covers one service at a \
-time; it has no view of unrecorded activity, of metrics themselves, or of other services.
+time; it has no view of unrecorded activity, of metrics themselves, or of other services. \
+Chaos-injector signals (any `chaos*` service) are the eval harness's injected ground truth \
+and return a `permission` error rather than data.
 
 When to use this vs. the alternative: use `get_incident_timeline` when you need to know WHAT \
 HAPPENED AND IN WHAT ORDER for a single service - reconstructing a sequence, or checking \
@@ -258,53 +258,9 @@ def _validate(args: dict[str, Any]) -> dict[str, Any]:
 # ------------------------------------------------------------------------------ data access
 
 
-class _StoreSettings(BaseSettings):
-    """Where the incident corpus lives.
-
-    Reads `DATABASE_URL` from the process environment first and the repo's `.env` second,
-    which is the same precedence `aioc.llm.LLMSettings` uses - so a developer who changed
-    `POSTGRES_PASSWORD` in `.env` gets a working tool without also exporting it. The `.env`
-    path is resolved from this file rather than the working directory, because an MCP client
-    launches this server from wherever it happens to be.
-
-    Using pydantic-settings here is not a contract coupling: the rule is that a tool server
-    must not import `aioc.contracts`, not that it must avoid shared libraries.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=Path(__file__).resolve().parents[3].parent / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-    # Explicit URL wins when set - that is what a deployed environment provides.
-    database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
-
-    # Otherwise the DSN is composed from the same POSTGRES_* variables docker-compose reads.
-    # Without this, a developer who set only POSTGRES_PASSWORD in `.env` gets a container
-    # built with their password and a tool connecting with the documented default, which
-    # fails as an authentication error that looks like the stack being down.
-    postgres_user: str = Field(default="aioc", validation_alias="POSTGRES_USER")
-    postgres_password: SecretStr = Field(
-        default=SecretStr("aioc_dev_only"), validation_alias="POSTGRES_PASSWORD"
-    )
-    postgres_db: str = Field(default="aioc", validation_alias="POSTGRES_DB")
-    postgres_port: int = Field(default=5432, validation_alias="POSTGRES_PORT")
-    postgres_host: str = Field(default="localhost", validation_alias="POSTGRES_HOST")
-
-    def dsn(self) -> str:
-        if self.database_url:
-            return self.database_url
-        password = quote_plus(self.postgres_password.get_secret_value())
-        return (
-            f"postgresql://{quote_plus(self.postgres_user)}:{password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
-
-
-def _dsn() -> str:
-    return _StoreSettings().dsn()
-
+# Connection settings live in `aioc.tools.incident.store`, shared with `correlate_server` -
+# both servers read the same corpus, and the DSN logic (notably the port override that the
+# handoff's environment-trap section exists for) must not fork between them.
 
 _SELECT = """
 SELECT e.id, e.at, e.service, e.description, e.kind, e.kind_detail, e.severity
@@ -466,6 +422,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResul
             remediation=f"Correct `{exc.field}` to {exc.expected} and call again.",
             details={"field": exc.field, "expected": exc.expected},
         )
+    # The chaos namespace is the eval's injected ground truth (Day 7, shared policy). This
+    # is a `permission` error, not `UNKNOWN_SERVICE`: the signals exist, the caller lacks
+    # the scope, and telling an agent "no such service" would be a disprovable lie.
+    restricted = restricted_names([params["service"]])
+    if restricted:
+        return ground_truth_denied("service", restricted)
     # psycopg is synchronous; run it off the event loop so a slow query cannot stall the
     # server's other traffic.
     return await asyncio.to_thread(fetch_timeline, params)
