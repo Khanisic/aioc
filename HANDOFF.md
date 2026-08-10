@@ -44,13 +44,26 @@ Everything is merged. **Nothing is in flight** - `main` is the only branch that 
 
 | Remote | Repo | `main` | Role |
 |---|---|---|---|
-| `origin` | `m-misbahuddin/aioc` | the Day 7 merge | private, the user's own |
-| `khanisic` | `Khanisic/aioc` | `963b2ef` (end of Day 6 content) | the shared repo; the user wants both kept in sync |
+| `origin` | `m-misbahuddin/aioc` | `eb2af1d` | private, the user's own. **Merge here.** |
+| `khanisic` | `Khanisic/aioc` | `eb2af1d` | the shared repo; kept in sync by mirroring |
 
-**The two `main` histories forked before Day 7** (one merge commit per repo for the same
-content) and khanisic now also trails by the Day 7 merge. Reconciling needs a force push
-over published history, which is why it was left alone. Ask before doing it; until then,
-merge on `origin` only.
+**The fork is resolved.** The two histories had diverged by one merge commit per repo for the
+same content; on 2026-08-09 khanisic was force-pushed to match origin exactly. Both remotes
+and local `main` are now the same commit, with identical trees and identical history.
+
+Nothing was lost: khanisic's three extra commits were pure merge commits, and
+`git diff <merge-base> khanisic/main` was empty - it had added no content of its own. Verify
+that before any future force push rather than trusting this paragraph.
+
+**To keep them in sync, merge in one place and mirror the result:**
+
+```bash
+# merge the PR on origin, pull it locally, then fast-forward the shared repo
+git push khanisic main:main
+```
+
+That is a normal push now, not a force push, and it stays that way as long as nothing is ever
+merged directly on khanisic. If a PR is merged there, the fork returns.
 
 ### What is live
 
@@ -159,8 +172,8 @@ fake registered in a test's runner map exercises the full delegation path with z
 
 ## 7. Carried-over items, none blocking
 
-1. **The two remotes' `main` histories have forked** (§3), and khanisic now trails by Day 7.
-   Reconciling needs a force push, so it needs asking.
+1. ~~The two remotes' `main` histories have forked.~~ **Resolved 2026-08-09** by force-pushing
+   khanisic to match origin (§3). Keep it resolved by never merging directly on khanisic.
 2. **Three additive error codes await the §0 paperwork**: `TIMELINE_STORE_TIMEOUT` and
    `EVENT_STORE_TIMEOUT` (both replacing the contract's `PROMETHEUS_TIMEOUT` where the store
    is actually Postgres) and `CHAOS_SCOPE_REQUIRED` (the Day 7 permission gate). All additive,
