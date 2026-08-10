@@ -403,6 +403,56 @@ def test_select_schema_states_the_accounting_rule():
     assert "do not nest" in _SELECT_SCHEMA["description"].lower()
 
 
+# ------------------------------------------------------- round is plumbing, not a decision
+
+
+def test_the_model_is_never_asked_for_round():
+    # Measured on the first live delegation run: with `round` in the model-facing schema,
+    # Sonnet omitted it and the whole plan failed validation. The coordinator knows the round
+    # number, so asking for it is a failure mode with no upside.
+    from aioc.coordinator.planner import _SELECT_SCHEMA
+
+    invocation_schema = _SELECT_SCHEMA["$defs"]["PlannedInvocation"]
+    assert "round" not in invocation_schema["properties"]
+    assert "round" not in invocation_schema.get("required", [])
+    # Everything the model *does* own is still asked for.
+    assert {"invocation_id", "agent", "reason", "mode", "depends_on", "context_passed"} <= set(
+        invocation_schema["properties"]
+    )
+
+
+def test_plan_stamps_round_zero_on_a_payload_that_omits_it():
+    # The exact live failure, as a regression test: a payload with no `round` anywhere.
+    payload = {
+        **_NARROW_PLAN,
+        "selected_agents": [
+            {k: v for k, v in _invocation("incident").items() if k != "round"},
+        ],
+    }
+    coordinator, _ = _coordinator([_tool_use(payload)])
+    plan = coordinator.plan("Why is checkout returning 502s?")
+    assert [i.round for i in plan.selected_agents] == [0]
+
+
+def test_the_refinement_round_number_is_stamped_over_anything_the_model_says():
+    # Day 14 passes round_number=1+. `round` is a fact about this delegation round, so a model
+    # that volunteers one does not get to be authoritative about it.
+    payload = {**_NARROW_PLAN, "selected_agents": [_invocation("incident", round=7)]}
+    coordinator, _ = _coordinator([_tool_use(payload)])
+    plan = coordinator.plan("Why is checkout returning 502s?", round_number=2)
+    assert [i.round for i in plan.selected_agents] == [2]
+
+
+def test_the_contract_still_requires_round():
+    # The model-facing twin is a narrower ask, not a relaxation of the frozen contract.
+    from aioc.contracts import AgentInvocation
+
+    with pytest.raises(ValidationError, match="round"):
+        AgentInvocation.model_validate(
+            {k: v for k, v in _invocation("incident").items() if k != "round"}
+        )
+
+
 def test_select_schema_guidance_fails_loudly_on_a_renamed_contract_field():
     from aioc.coordinator.planner import _apply_guidance
 
