@@ -64,6 +64,8 @@ Already covered: Claude Max, Claude Code.
 - [ ] **Neon** or **Supabase** — Postgres **+ pgvector** (this *is* your vector database;
       it covers both the episodic and semantic memory tiers in one service)
 - [ ] **Upstash** — Redis (working memory)
+- [ ] **Voyage AI** — embeddings key (Day 8; Anthropic has no embeddings endpoint).
+      Optional in the sense that retrieval degrades to lexical-only without it.
 - [ ] **Langfuse Cloud** — public/secret keys
 - [ ] **Railway** or **Render** — linked to the GitHub repo
 

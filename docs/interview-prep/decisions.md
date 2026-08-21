@@ -168,3 +168,39 @@ The test for this lives with the policy: both servers are asserted to return the
 
 **Why it matters beyond hygiene.** An agent that can read the injected ground truth turns every eval score into transcription, and the failure is silent - the evals simply start passing.
 Guards against silent-pass failures have to be structural, because no one investigates a green result.
+
+---
+
+## 13. Docs-agent grounding is enforced in code, not requested in the prompt
+
+**Decision.** The Day 8 Docs agent retrieves before the model call, renders the retrieved documents into the prompt, and then *checks* the model's report against that set: a cited `document_id` retrieval never returned raises, and a quote or excerpt that does not appear verbatim (whitespace-normalised) in the retrieved text raises.
+The prompt states the rules too, but the prompt is not what makes them true.
+
+**Why.** "Answers from retrieved documents only" is the Docs agent's entire identity, and a hallucinated citation is its one unforgivable failure - worse than no answer, because it looks like provenance.
+Day 4 already measured what happens when an invariant lives only in prompt text: every model tested violated it.
+The same lesson applied here means the invariant lives where the model cannot vote on it.
+
+**The related call: stamped accounting.** `Coverage.documents_searched/retrieved/cited` and `corpus_snapshot` are facts the runtime measured, so the emit schema does not even contain them - the model reports only the sub-question decomposition, and the runtime assembles the frozen `Coverage` itself.
+Same reasoning as war story #7 (`round`): plumbing the process already knows is a field the model can only get wrong.
+The retrieval call itself is recorded as a real `ToolCallRef` (`search_corpus` on `aioc-docs`, measured duration), and its id is stamped into every document evidence entry.
+
+**What I would watch.** The verbatim check is whitespace-normalised only; a model that "fixes" a typo inside a quote will be rejected, which is correct but will look like flakiness until the Day 17 validation-retry loop re-requests with the error attached.
+
+---
+
+## 14. Embeddings live in a separate table, and retrieval degrades honestly
+
+**Decision.** Vectors go in `incident_embeddings` keyed `(incident_id, model)` with the sha256 of the embedded text, never in a column on `incidents`.
+The model is `voyage-3.5` at 1024 dims - the dimension is baked into the DDL, so the model choice is a schema decision and is recorded as one.
+Hybrid search fuses pg_trgm and pgvector halves with Reciprocal Rank Fusion, and when the vector half is unavailable - no key, no vectors, provider down - the result says so in a `degraded` field and carries on lexical-only.
+
+**Why a separate table.** The corpus doubles as the Day 19 eval set; re-embedding must never touch it.
+The `model` column exists because vectors from different models are not comparable, and the hash makes re-ingestion idempotent - unchanged rows cost nothing, which is what makes the ingest script safe to run casually.
+
+**Why RRF and not score mixing.** Trigram similarity and cosine similarity live on incomparable scales; ranks are the only thing they share.
+The reported relevance is the better raw similarity, because an RRF sum is meaningless outside the fusion.
+
+**Why degradation is a field and not a fallback.** A silent fallback hides a misconfigured provider forever - retrieval keeps "working" and recall quietly halves.
+The degraded reason is rendered into the Docs agent's document block, so reduced coverage is visible to the model, in the response, and in the run records.
+
+**Why Voyage at all.** Anthropic has no embeddings endpoint, so an external provider was unavoidable; the `Embedder` protocol keeps it swappable and the offline suite runs on a deterministic fake.

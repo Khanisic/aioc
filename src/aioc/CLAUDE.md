@@ -17,7 +17,12 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   frozen models and then annotated (`_apply_guidance`) with the contract's cross-field rules -
   a generated schema states shape but not invariants, and stating them only in the system prompt
   demonstrably does not hold. Add descriptions there, never shape, and never edit `contracts/`
-  to do it. Docs/GitHub/Deployment land on Days 8/11/12.
+  to do it (the shared helper is `agents/_annotate.py`). Docs is live (Day 8): retrieval-grounded
+  `answer` with in-code grounding checks - an uncited-in-retrieval document id or a paraphrased
+  quote raises. GitHub/Deployment land on Days 11/12.
+- `retrieval/` - Day 8 ingestion and hybrid search over the incident corpus (pg_trgm + pgvector,
+  RRF fusion, Voyage embeddings behind the `Embedder` protocol, lexical-only without a key).
+  Consumed by the Docs agent through the `CorpusRetriever` seam.
 - `coordinator/` - intent classification, dynamic agent selection, and the refinement loop. Phase 1.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `docs/`, `deployment/` (Phase 2).
 - `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and

@@ -12,9 +12,9 @@ literally, argument by argument.
 Three deliberate decisions, written down because the handoff asked for them:
 
 **An invocation the executor cannot run produces a `Gap`, never a fabricated response.**
-Only the Incident agent exists today (Docs/GitHub/Deployment land on Days 8/11/12), and a
-plan can legitimately select any of the four. The contract-honest answer for an agent that
-does not exist is a `Gap` with ``resolvable: false`` plus a `status` of ``partial`` or
+Incident (Day 4) and Docs (Day 8) are live; GitHub and Deployment land on Days 11 and 12,
+and a plan can legitimately select any of the four. The contract-honest answer for an agent
+that does not exist is a `Gap` with ``resolvable: false`` plus a `status` of ``partial`` or
 weaker - a plausible placeholder `AgentResponse` is precisely the failure mode the
 null-vs-`[]` rule exists to prevent. ``resolvable: false`` is load-bearing: the Day 14
 refinement loop must not spend rounds re-delegating to an agent that is not there.
@@ -44,7 +44,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import uuid4
 
-from aioc.agents import IncidentAgent
+from aioc.agents import DocsAgent, IncidentAgent
 from aioc.contracts import (
     AgentInvocation,
     AgentName,
@@ -110,9 +110,36 @@ class IncidentRunner:
         )
 
 
+class DocsRunner:
+    """Adapts `DocsAgent.answer` to the `AgentRunner` protocol - the same straight
+    pass-through as `IncidentRunner`, for the same reason: any glue that "enriched" the
+    context here would be inheritance sneaking back in. Retrieval is the agent's own tool
+    call, not context - it happens inside the agent, after the handoff."""
+
+    def __init__(self, agent: DocsAgent | None = None) -> None:
+        self._agent = agent or DocsAgent()
+
+    def run(
+        self,
+        query: str,
+        *,
+        context: str,
+        request_id: str,
+        invocation_id: str,
+        usage: Usage,
+    ) -> AgentResponse:
+        return self._agent.answer(
+            query,
+            context=context,
+            request_id=request_id,
+            invocation_id=invocation_id,
+            usage=usage,
+        )
+
+
 def default_runners() -> dict[AgentName, AgentRunner]:
-    """Every agent that exists today. Days 8/11/12 add docs, github, deployment."""
-    return {AgentName.INCIDENT: IncidentRunner()}
+    """Every agent that exists today. Days 11/12 add github and deployment."""
+    return {AgentName.INCIDENT: IncidentRunner(), AgentName.DOCS: DocsRunner()}
 
 
 def _new_id(prefix: str) -> str:
@@ -259,7 +286,7 @@ def _agent_missing_gap(inv: AgentInvocation) -> Gap:
         description=(
             f"The plan selected the {inv.agent.value} agent "
             f"(invocation {inv.invocation_id}), but that agent is not implemented yet - "
-            "docs, github, and deployment land on Days 8, 11, and 12. The invocation was "
+            "github and deployment land on Days 11 and 12. The invocation was "
             "not executed and no response was fabricated for it."
         ),
         kind=GapKind.OTHER,

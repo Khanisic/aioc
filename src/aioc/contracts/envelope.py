@@ -109,6 +109,21 @@ class DocsAgentResponse(AgentResponse):
     agent: Literal[AgentName.DOCS] = AgentName.DOCS
     findings: DocsFindings
 
+    @model_validator(mode="after")
+    def _check_docs(self) -> "DocsAgentResponse":
+        # Sec 4.2: every entry in coverage.unanswered must have a matching Gap in the
+        # envelope. "Matching" is validated the way the sec 8 worked example expresses it -
+        # a Gap whose blocks_field names findings.coverage.unanswered (the gap's prose
+        # describes the sub-question; prose cannot be matched mechanically).
+        if self.findings.coverage.unanswered and not any(
+            g.blocks_field == "findings.coverage.unanswered" for g in self.gaps
+        ):
+            raise ValueError(
+                "unanswered sub-questions require a matching Gap whose blocks_field is "
+                "'findings.coverage.unanswered' (CONTRACTS.md sec 4.2)"
+            )
+        return self
+
 
 class GitHubAgentResponse(AgentResponse):
     agent: Literal[AgentName.GITHUB] = AgentName.GITHUB
