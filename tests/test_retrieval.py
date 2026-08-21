@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -248,6 +249,16 @@ def test_voyage_http_failure_becomes_embedding_error():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(EmbeddingError, match="request failed"):
         VoyageEmbedder(_settings(), client=client).embed(["x"], input_type="query")
+
+
+def test_settings_env_file_is_the_repo_root_dotenv():
+    # Regression: this path was copied from tools/incident/store.py, which sits one
+    # directory deeper, so it silently pointed one level above the repo - and a key the
+    # user had actually set read back as "not set". Pin it to where pyproject.toml lives.
+    env_file = EmbeddingSettings.model_config["env_file"]
+    assert isinstance(env_file, Path)
+    assert env_file.name == ".env"
+    assert (env_file.parent / "pyproject.toml").is_file()
 
 
 def test_default_embedder_is_none_without_a_key():
