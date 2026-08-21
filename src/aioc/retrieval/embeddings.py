@@ -33,8 +33,12 @@ class EmbeddingSettings(BaseSettings):
     """Read from the process environment first and the repo `.env` second, the same
     precedence `aioc.llm.LLMSettings` and the tool stores use."""
 
+    # parents[3] from src/aioc/retrieval/embeddings.py is the repo root. This module is one
+    # directory shallower than tools/incident/store.py, so its expression differs by one
+    # level - the regression test pins the resolved path to the directory pyproject.toml
+    # lives in, because a silently wrong path here just reads as "key not set".
     model_config = SettingsConfigDict(
-        env_file=Path(__file__).resolve().parents[3].parent / ".env",
+        env_file=Path(__file__).resolve().parents[3] / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
         # Tests construct these settings explicitly by field name; the aliases above are
