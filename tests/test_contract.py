@@ -21,6 +21,7 @@ from aioc.contracts import (
     Claim,
     CoordinatorResponse,
     Coverage,
+    DocsAgentResponse,
     Evidence,
     Gap,
     IncidentAgentResponse,
@@ -226,6 +227,19 @@ def test_coverage_must_partition_sub_questions():
             documents_retrieved=1,
             documents_cited=1,
         )
+
+
+def test_unanswered_sub_question_requires_a_matching_gap():
+    # Sec 4.2: every entry in coverage.unanswered needs a Gap in the envelope, expressed
+    # (as the sec 8 worked example does) by blocks_field naming findings.coverage.unanswered.
+    # The worked example's docs response has exactly one such gap; removing it must fail.
+    docs = next(r for r in _worked_example()["agent_responses"] if r["agent"] == "docs")
+    assert docs["findings"]["coverage"]["unanswered"], "fixture must carry an unanswered entry"
+    stripped = {**docs, "gaps": []}
+    with pytest.raises(ValidationError, match="findings.coverage.unanswered"):
+        DocsAgentResponse.model_validate(stripped)
+    # And with the gap present it still validates - the invariant matches the example.
+    DocsAgentResponse.model_validate(docs)
 
 
 # ------------------------------------------------------------- orchestration invariants

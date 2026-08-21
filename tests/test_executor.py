@@ -7,8 +7,9 @@ network, no cost. The two done-when facts of the day each have a direct test her
   argument the executor hands it, and the test asserts the context is *exactly*
   `AgentInvocation.context_passed` - not the situation block, not an enriched blend, not the
   plan. What the coordinator knew but did not write into the plan never reaches the agent.
-- **No fabricated responses.** A plan may select agents that do not exist yet (docs, github,
-  deployment land on Days 8/11/12). The executor must answer with a `Gap` carrying
+- **No fabricated responses.** A plan may select agents that do not exist yet (github and
+  deployment land on Days 11/12; the fakes here keep exercising the path). The executor
+  must answer with a `Gap` carrying
   ``resolvable: false`` and a weakened status, never a plausible placeholder
   `AgentResponse` - a placeholder is exactly the failure the null-vs-[] rule exists to
   prevent.
@@ -516,3 +517,17 @@ def test_a_cyclic_plan_is_rejected_at_validation():
                 ),
             ]
         )
+
+
+# ------------------------------------------------------------------------- registration
+
+
+def test_default_runners_register_incident_and_docs():
+    """Day 8's easy-to-forget step: the Docs agent is wired into the default executor.
+
+    Nothing else forces this registration (HANDOFF called it out) - until Days 11/12,
+    github and deployment are the only honest agent_not_implemented gaps left.
+    """
+    from aioc.coordinator.executor import default_runners
+
+    assert set(default_runners()) == {AgentName.INCIDENT, AgentName.DOCS}

@@ -7,7 +7,14 @@ Day 7 shipped the execution half - `Executor.execute` consumes a plan into a con
 and `respond` glues the two together for one-call use. The refinement loop is Day 14.
 """
 
-from .executor import AgentRunner, Executor, IncidentRunner, default_runners, respond
+from .executor import (
+    AgentRunner,
+    DocsRunner,
+    Executor,
+    IncidentRunner,
+    default_runners,
+    respond,
+)
 from .planner import (
     ALL_AGENTS,
     SELECT_TOOL_NAME,
@@ -27,6 +34,7 @@ __all__ = [
     "AgentRunner",
     "Coordinator",
     "CoordinatorError",
+    "DocsRunner",
     "Executor",
     "IncidentRunner",
     "ModelSelectionPlan",

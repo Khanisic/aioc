@@ -26,7 +26,6 @@ built yet, so a bad payload surfaces loudly rather than being silently patched.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -44,6 +43,8 @@ from aioc.contracts import (
     StrictModel,
 )
 from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
+
+from ._annotate import ROOT, apply_guidance
 
 AGENT_NAME = "incident"
 
@@ -121,20 +122,10 @@ class IncidentReport(StrictModel):
 
 # ------------------------------------------------------------------- schema annotation
 #
-# `model_json_schema()` gives the right *shape* but says nothing about the contract's
-# cross-field invariants: pydantic emits a `title` per field and nothing else, so the wire sees
-# `kind_detail: string | null` with no hint that it must be null unless `kind` is `other`.
-# Stating those rules only in the system prompt is not enough - measured against the live API,
-# both Haiku 4.5 and Sonnet 5 filled every `*_detail` field regardless of its enum, and the
-# response failed validation. The schema is where a model looks hardest, so the rules belong on
-# the fields they constrain.
-#
-# This is annotation only: descriptions are added, no shape is touched, and `aioc.contracts`
-# stays untouched (the contract is frozen, and these are prompt affordances rather than data).
-# `_apply_guidance` fails at import if a target no longer exists, so renaming a contract field
-# breaks loudly here instead of silently dropping the guidance a model depends on.
+# Why annotate at all is documented once, in `aioc.agents._annotate` - this agent was where
+# the pattern was measured into existence (Day 4), and the Docs agent (Day 8) shares it.
 
-_ROOT = "$root"
+_ROOT = ROOT
 
 _TOP_LEVEL_DESCRIPTION = """\
 The complete incident diagnosis. Every property below is a top-level argument of this tool -
@@ -242,27 +233,12 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
 
 def _apply_guidance(schema: dict[str, Any]) -> dict[str, Any]:
     """Attach the invariant guidance to the generated schema, failing loudly on drift."""
-    annotated: dict[str, Any] = deepcopy(schema)
-    annotated["description"] = _TOP_LEVEL_DESCRIPTION
-
-    missing: list[str] = []
-    for def_name, fields in _FIELD_GUIDANCE.items():
-        target = annotated if def_name is _ROOT else annotated.get("$defs", {}).get(def_name)
-        properties = (target or {}).get("properties", {})
-        for field, text in fields.items():
-            if field not in properties:
-                missing.append(f"{def_name}.{field}")
-                continue
-            # A `$ref` sibling is legal in JSON Schema 2020-12, so this works for plain fields,
-            # `anyOf` unions, and `$ref`s alike.
-            properties[field]["description"] = text
-
-    if missing:
-        raise RuntimeError(
-            "incident emit schema guidance is out of sync with aioc.contracts; no such field: "
-            + ", ".join(sorted(missing))
-        )
-    return annotated
+    return apply_guidance(
+        schema,
+        name="incident emit",
+        description=_TOP_LEVEL_DESCRIPTION,
+        guidance=_FIELD_GUIDANCE,
+    )
 
 
 # Generated once at import from the frozen models - never hand-written, so it cannot drift.

@@ -71,27 +71,15 @@ Files in `init/` run in alphabetical order, so the numeric prefixes guarantee ea
 
 ## Deliberately not included: the embedding column
 
-There is no `vector` column here, and that is on purpose.
+There is no `vector` column on `incidents`, and that is on purpose.
 
 A `vector` column needs a fixed dimension at `CREATE TABLE` time, and the dimension is a property of the embedding model.
-No embedding model has been chosen yet - that decision belongs to Day 8's ingestion pipeline, and Anthropic does not provide an embeddings endpoint, so it is an additional external dependency to pick.
-Guessing a dimension now means either a `db-reset` later or an `ALTER TABLE` against seeded data.
+On Day 5 no model had been chosen; guessing a dimension then would have meant either a `db-reset` later or an `ALTER TABLE` against seeded data.
 
-Day 5 does not need embeddings.
-Seeding is `INSERT`, and the Day 5 checkpoint ("break the app, agent produces valid JSON") reads Prometheus, not the corpus.
+Day 8 made the choice (`voyage-3.5`, 1024 dims - Anthropic has no embeddings endpoint) and added `04-embeddings.sql` with the separate `incident_embeddings` table, keyed `(incident_id, model)` and carrying the sha256 of the embedded text.
+A separate table means re-embedding with a different model does not touch the corpus rows, the `model` column keeps you honest about which vectors are comparable, and the hash makes `scripts/ingest_embeddings.py` idempotent - unchanged rows are skipped.
 
-When Day 8 picks a model, add `03-embeddings.sql` with a separate table:
-
-```sql
-CREATE TABLE incident_embeddings (
-    incident_id text PRIMARY KEY REFERENCES incidents (id) ON DELETE CASCADE,
-    model       text        NOT NULL,        -- which model produced this
-    embedding   vector(1536) NOT NULL,       -- dimension follows the model
-    created_at  timestamptz NOT NULL DEFAULT now()
-);
-```
-
-A separate table means re-embedding with a different model does not touch the corpus rows, and the `model` column keeps you honest about which vectors are comparable.
+Unlike the first three files, `04-embeddings.sql` is `IF NOT EXISTS` and additive-only, because most databases that need it were initialised before Day 8: the ingest script applies it to a live database without a reset, and it is safe to apply by hand with `psql` (the file header carries the one-liner).
 
 ## Re-applying it
 

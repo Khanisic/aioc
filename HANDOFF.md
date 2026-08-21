@@ -1,11 +1,11 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 7** of 30, after delegation landed and the error taxonomy went
-four-for-four. `CLAUDE.md` is loaded automatically and covers what the project *is*; this
+Written at the end of **Day 8** of 30, after the Docs agent and hybrid retrieval landed.
+`CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 8.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 9.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -15,9 +15,11 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 190-test suite makes **zero API calls** and must stay that way.
+- **Keep costs low.** The 236-test suite makes **zero API calls** and must stay that way.
   Live checks live in `scripts/check_*.py`, are opt-in, and cost 1-2 calls each. Before
   running anything live, say how many calls it will cost. Do not run a model matrix unasked.
+  (Voyage embedding calls count too - `scripts/ingest_embeddings.py` is opt-in and its
+  `--dry-run` is free.)
 - **No em dashes** in any output or file. Plain dashes only.
 - **Never add an agent name as commit co-author.**
 - Reproduce bugs end-to-end before fixing them. Fix lint and test failures you notice even
@@ -42,10 +44,13 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 Everything is merged. **Nothing is in flight** - `main` is the only branch that matters.
 
-| Remote | Repo | `main` | Role |
-|---|---|---|---|
-| `origin` | `m-misbahuddin/aioc` | `eb2af1d` | private, the user's own. **Merge here.** |
-| `khanisic` | `Khanisic/aioc` | `eb2af1d` | the shared repo; kept in sync by mirroring |
+| Remote | Repo | Role |
+|---|---|---|
+| `origin` | `m-misbahuddin/aioc` | private, the user's own. **Merge here.** |
+| `khanisic` | `Khanisic/aioc` | the shared repo; kept in sync by mirroring after each merge |
+
+(Exact SHAs move daily - trust `git rev-parse main origin/main khanisic/main`, not this
+file. If khanisic trails origin, the mirror push below is the fix.)
 
 **The fork is resolved.** The two histories had diverged by one merge commit per repo for the
 same content; on 2026-08-09 khanisic was force-pushed to match origin exactly. Both remotes
@@ -71,15 +76,17 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 |---|---|
 | `contracts/` | Frozen at `1.0.0`, executable as Pydantic v2. Do not change a frozen shape. |
 | `llm/` | Harness: `complete`, `stream_text`, `run_tool_loop`. Defaults `claude-sonnet-5`, 8192 tokens - both from measurement. |
-| `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated). **Still the only agent.** `diagnose` now also takes a `usage` accumulator (the Day 7 cost seam). |
+| `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated), with a `usage` accumulator (the Day 7 cost seam). The schema-annotation helper it pioneered now lives in `agents/_annotate.py`, shared with the Docs agent. |
+| `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
+| `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
 | `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. |
 | `coordinator/executor.py` | **Day 7.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. `respond()` = plan + execute in one call. |
 | `tools/envelope.py` + `tools/policy.py` | The contract wire envelope (sec 6) + the chaos ground-truth permission gate shared by all servers. |
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
 | `tools/incident/correlate_server.py` | **Day 7.** `correlate_events` stdio MCP server over the corpus (impulse Pearson over 60s event bins). All four error classes return distinctly - there is a named test producing each from real code paths. |
 | `tools/incident/store.py` | Shared Postgres settings for both servers (the `.env` port override lives through this). |
-| `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. |
-| Docs/GitHub/Deployment agents | **Empty.** Days 8/11/12. The executor's `default_runners()` is where each one registers when it lands - nothing forces the registration, so wiring it is part of each agent's day. |
+| `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are not yet ingested** (needs `VOYAGE_API_KEY`; see §7). |
+| GitHub/Deployment agents | **Empty.** Days 11/12. The executor's `default_runners()` is where each one registers when it lands - nothing forces the registration (there is now a test pinning the current registration set), so wiring it is part of each agent's day. |
 
 ## 4. Environment traps - read before debugging anything
 
@@ -96,8 +103,8 @@ POSTGRES_PORT=55432
 DATABASE_URL=postgresql://aioc:aioc_dev_only@localhost:55432/aioc
 ```
 
-Verified: `uv run pytest -q` runs all 190 including the 7 `integration`-marked tests with no
-inline override. If those seven start skipping again, this is why. (They also skip when Docker
+Verified: `uv run pytest -q` runs all 236 including the 10 `integration`-marked tests with no
+inline override. If those ten start skipping again, this is why. (They also skip when Docker
 Desktop itself is not running - the skip message says "connection timeout expired" either way,
 so check `docker compose ps` before re-reading this section.)
 
@@ -119,77 +126,85 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 190 passed
+uv run pytest -q                                                   # expect 236 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **190 passed**, lint and mypy clean, at the end of Day 7.
+Costs nothing. Last run: **236 passed**, lint and mypy clean, at the end of Day 8.
 
-The one live check for this day's work, when you want it re-proven (**2 API calls**):
+The live check for this day's work, when you want it re-proven (**1 API call**, plus a
+fraction-of-a-cent Voyage query embed if the key is set):
 
 ```bash
-PYTHONIOENCODING=utf-8 uv run python scripts/check_day7_delegation.py
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py
 ```
 
-## 6. Next work: Day 8 - Docs agent and retrieval
+Day 7's delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
+after any coordinator prompt change.
 
-**Done when:** the Docs agent answers from the seeded corpus with citations.
+## 6. Next work: Day 9 - parallelism and tracing
 
-### A track: the Docs agent
+**Done when:** one trace shows two agents running concurrently.
 
-Follow `agents/incident.py`'s structured pattern exactly - forced `tool_use`, schema
-generated from the frozen models, `_apply_guidance`-style annotation for the cross-field
-rules. Read CONTRACTS.md §4.2 (`DocsFindings`) before writing anything: claims cite `doc_*`
-sources, every claim needs a citation, and the agent must be constrained to retrieved
-documents only - "the model's own knowledge" is exactly what a Docs agent must not answer
-from.
+### A track: parallel execution
 
-**Registration is part of the day.** Add the new agent to
-`coordinator/executor.py::default_runners()` (the `AgentRunner` protocol:
-`run(query, *, context, request_id, invocation_id, usage)`). Until that line lands, the
-executor honestly reports `docs` invocations as `agent_not_implemented` gaps - nothing will
-remind you except the Day 10 demo failing to use it.
+The executor's plain loop was written to be replaced today without touching the plan or
+the accounting - `mode` and `depends_on` are already recorded on every invocation, and
+`_execution_order` already separates the parallel group from the sequential chain.
+Independent invocations (Incident + Docs is now a real pair, both agents exist) run
+concurrently; the sequential chain stays ordered.
+Watch the `Usage` accumulator: it is a plain object mutated by every runner, so concurrent
+runners need it made thread-safe (or per-runner accumulators summed after the join) -
+losing token counts to a race would corrupt `cost` silently.
+The `ASYNC` ruff rules have been enabled since Day 1 in anticipation.
 
-### B track: pgvector ingestion
+### B track: Langfuse instrumentation
 
-- `04-embeddings.sql` with a separate `incident_embeddings` table keyed by `incident_id`
-  and a `model` column - re-embedding must never rewrite the corpus. The dimension is fixed
-  at CREATE TABLE time, so choosing the embedding model is *the* Day 8 decision.
-- Anthropic has no embeddings endpoint, so this means an external provider (Voyage was the
-  working assumption) - a new account/key, which belongs in `.env` and `.env.example`
-  (key name only) and in the EXECUTION_PLAN accounts checklist.
-- Hybrid search: vector + lexical. The lexical half is already indexed
-  (`incidents_summary_trgm_idx`, pg_trgm from `01-extensions.sql`).
-- Remember `docker/postgres/init/` only runs on a fresh volume: adding `04-embeddings.sql`
-  needs `make db-reset` (destructive, prompts) or applying the file by hand with `psql`.
+- Keys go in `.env` / `.env.example` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
+  `LANGFUSE_HOST`) - the .env.example section already exists; an account is needed
+  (accounts checklist).
+- Trace every agent call, tool call, token count, and cost. `CoordinatorResponse.trace_id`
+  is already in the contract, waiting to be filled (executor currently sets `None`).
+- The `ToolCallRef` records (`search_corpus` now carries measured duration and estimated
+  tokens) are the natural span inputs.
 
 ### Testing
 
-Same split as Days 6-7: offline tests with fakes for the agent plumbing and the ingestion
-logic, `integration`-marked tests against the seeded corpus, live checks opt-in under
-`scripts/`. `tests/test_executor.py` shows the runner-protocol fake pattern; a Docs agent
-fake registered in a test's runner map exercises the full delegation path with zero calls.
+Concurrency is testable offline: fake runners that record wall-clock overlap (or a
+barrier) prove two runners were in flight at once with zero API calls. Tracing needs a
+fake/stub Langfuse client for the offline suite; live verification is one traced request
+inspected in the Langfuse UI (that is the Day 9 checkpoint artifact).
 
 ## 7. Carried-over items, none blocking
 
 1. ~~The two remotes' `main` histories have forked.~~ **Resolved 2026-08-09** by force-pushing
    khanisic to match origin (§3). Keep it resolved by never merging directly on khanisic.
-2. **Three additive error codes await the §0 paperwork**: `TIMELINE_STORE_TIMEOUT` and
+2. **No VOYAGE_API_KEY yet, so the vectors are not ingested.** Everything works lexical-only
+   (the Day 8 done-when was proven that way), and the `incident_embeddings` table is already
+   applied to the running database. When the key exists (dash.voyageai.com, free tier is
+   plenty): put it in `.env`, run `uv run python scripts/ingest_embeddings.py` (one batch
+   call, fractions of a cent), and retrieval switches to hybrid on its own. `--dry-run`
+   previews for free.
+3. **Three additive error codes await the §0 paperwork**: `TIMELINE_STORE_TIMEOUT` and
    `EVENT_STORE_TIMEOUT` (both replacing the contract's `PROMETHEUS_TIMEOUT` where the store
    is actually Postgres) and `CHAOS_SCOPE_REQUIRED` (the Day 7 permission gate). All additive,
    so patch level under §0: one dated entry in `docs/design-notes/contract-changes.md`, a §9
    row, and a bump to `1.0.1` would clear all three at once. Each is flagged in its module
    docstring; none is done silently.
-3. **Prompt caching not enabled.** The system prompt plus tool schema is byte-identical on
+4. **Prompt caching not enabled.** The system prompt plus tool schema is byte-identical on
    every call and sits at the front of the prefix. Obvious win, not yet taken.
-4. **Haiku is a Day 17 question, not a closed one.** It scored 1/3 on contract-valid
+5. **Haiku is a Day 17 question, not a closed one.** It scored 1/3 on contract-valid
    structured output where Sonnet scored 3/3, and blind retry made it no cheaper than Sonnet.
    A retry loop that re-sends *with the validation error attached* should change that. The
    user wants Haiku; the answer is "once Day 17 exists".
-5. **Delegation is verified live on one query, not a set.** `scripts/check_day7_delegation.py`
+6. **Delegation is verified live on one query, not a set.** `scripts/check_day7_delegation.py`
    passes (2 calls: one plan, one diagnose) and is worth re-running after any coordinator
    prompt change, but the routing check has five cases and this has one. Adding cases costs
-   2 calls each.
+   2 calls each. `check_day8_docs.py` has the same single-query shape.
+7. **The Docs agent has not been proven live yet** (no API call was spent on Day 8; the
+   done-when was proven with the offline suite plus real-corpus integration tests). First
+   session with budget: `PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py`
+   (1 call).
 
 ## 8. Where things are written down
 
@@ -201,7 +216,7 @@ fake registered in a test's runner map exercises the full delegation path with z
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 7 added #11 and #12) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 8 added #13 and #14) |
 | Six debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |
