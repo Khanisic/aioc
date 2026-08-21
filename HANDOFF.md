@@ -85,7 +85,7 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
 | `tools/incident/correlate_server.py` | **Day 7.** `correlate_events` stdio MCP server over the corpus (impulse Pearson over 60s event bins). All four error classes return distinctly - there is a named test producing each from real code paths. |
 | `tools/incident/store.py` | Shared Postgres settings for both servers (the `.env` port override lives through this). |
-| `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are not yet ingested** (needs `VOYAGE_API_KEY`; see §7). |
+| `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are ingested** (18/18, `voyage-3.5`, 2026-08-21) and hybrid search is live. |
 | GitHub/Deployment agents | **Empty.** Days 11/12. The executor's `default_runners()` is where each one registers when it lands - nothing forces the registration (there is now a test pinning the current registration set), so wiring it is part of each agent's day. |
 
 ## 4. Environment traps - read before debugging anything
@@ -179,12 +179,12 @@ inspected in the Langfuse UI (that is the Day 9 checkpoint artifact).
 
 1. ~~The two remotes' `main` histories have forked.~~ **Resolved 2026-08-09** by force-pushing
    khanisic to match origin (§3). Keep it resolved by never merging directly on khanisic.
-2. **No VOYAGE_API_KEY yet, so the vectors are not ingested.** Everything works lexical-only
-   (the Day 8 done-when was proven that way), and the `incident_embeddings` table is already
-   applied to the running database. When the key exists (dash.voyageai.com, free tier is
-   plenty): put it in `.env`, run `uv run python scripts/ingest_embeddings.py` (one batch
-   call, fractions of a cent), and retrieval switches to hybrid on its own. `--dry-run`
-   previews for free.
+2. ~~No VOYAGE_API_KEY yet, so the vectors are not ingested.~~ **Resolved 2026-08-21**: the
+   key is in `.env`, all 18 rows are embedded (`voyage-3.5`, one batch call), a re-run
+   embeds 0 (idempotence verified live), and hybrid search returns fused vector+lexical
+   results. Ingesting exposed a real bug first - the settings' `.env` path pointed one
+   level above the repo (copied from the deeper `store.py`), so the key read as unset and
+   the lexical fallback hid it. Fixed in PR #8 with a regression test pinning the path.
 3. **Three additive error codes await the §0 paperwork**: `TIMELINE_STORE_TIMEOUT` and
    `EVENT_STORE_TIMEOUT` (both replacing the contract's `PROMETHEUS_TIMEOUT` where the store
    is actually Postgres) and `CHAOS_SCOPE_REQUIRED` (the Day 7 permission gate). All additive,
