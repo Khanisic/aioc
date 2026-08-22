@@ -296,12 +296,31 @@ class LangfuseTracer:
         if self._client is not None:
             self._client.flush()
 
+    def auth_check(self) -> bool:
+        """Verify the keys against the configured host, loudly (raises on 401).
+
+        Live scripts call this before doing any work: span export happens on a background
+        thread, so bad credentials otherwise surface as a logged-and-swallowed batch
+        failure while the run reports success - the trace is silently lost. The classic
+        cause is a US-region account against the default EU host; the 401 body even says
+        "confirm that you've configured the correct host".
+        """
+        return self._ensure_client().auth_check()
+
     def trace_url(self, trace_id: str) -> str | None:
-        """A direct link to the trace in the Langfuse UI, or ``None`` before any request
-        has run. Adapter-specific on purpose - the protocol has no notion of a UI."""
+        """A direct link to the trace in the Langfuse UI, or ``None`` when it cannot be
+        built. Adapter-specific on purpose - the protocol has no notion of a UI.
+
+        Never raises: building the link needs an API round-trip for the project id, and a
+        UI nicety failing (bad credentials, network) must not crash a run whose real work
+        already finished - which is exactly how the first live run with wrong-region keys
+        died."""
         if self._client is None:
             return None
-        return self._client.get_trace_url(trace_id=trace_id)
+        try:
+            return self._client.get_trace_url(trace_id=trace_id)
+        except Exception:  # noqa: BLE001 - see docstring
+            return None
 
 
 def default_tracer(settings: TracingSettings | None = None) -> Tracer:

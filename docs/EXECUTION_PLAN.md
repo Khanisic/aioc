@@ -218,9 +218,14 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   clock, visible overlap), `ToolCallRef` records as child events carrying their measured timing,
   and `CoordinatorResponse.trace_id` filled from the trace. Tracing is **opt-in at the entry
   point** (default `NullTracer`) so the offline suite stays network-free even with keys in `.env`.
-- **Carried:** the Langfuse-account checkpoint artifact (one trace in the UI showing the
-  overlap) needs keys from the accounts checklist; `scripts/check_day9_trace.py --fake-agents`
-  produces it for zero Claude calls once they exist.
+- **Checkpoint produced (2026-08-22):** with keys in `.env` (US-region host - the EU default
+  401s, now a HANDOFF §4 trap), `scripts/check_day9_trace.py --fake-agents` passed for zero
+  Claude calls: two agent spans overlapping 1500 ms in trace `a15143c60aa6fd3c8b97c18ad2eb97dc`.
+  The first attempt failed usefully - wrong-region 401 plus a `trace_url` crash after the real
+  work finished; both fixed with regression tests, and the script now auth-checks up front
+  instead of losing spans silently on the background export thread.
+- **Carried:** the ~3-call no-flag form (a real planned request, traced) is unspent; Day 10's
+  demo exercises the same path.
 
 ### Day 10 — Integration: first real demo
 - **Both tracks:** End-to-end query: *"Why did latency spike after the last deploy?"*

@@ -115,6 +115,14 @@ so check `docker compose ps` before re-reading this section.)
 a secret, hash it - that is how the port collision was diagnosed without ever reading the
 password.
 
+**Langfuse is the US region, and the host must say so.** The account's keys are valid only
+against `https://us.cloud.langfuse.com`; the SDK default is the EU host, and the mismatch
+presents as 401 "invalid credentials" with keys that are provably correct (same shape as
+the Postgres trap above: the error names the wrong cause). `.env` carries
+`LANGFUSE_HOST=https://us.cloud.langfuse.com`; the trap returns if `.env` is regenerated,
+and `scripts/check_day9_trace.py` now fails fast with the region hint instead of silently
+losing spans on a background thread.
+
 Other traps:
 
 - **GNU Make is not installed.** Every `Makefile` recipe is a single pasteable command.
@@ -129,16 +137,16 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 253 passed
+uv run pytest -q                                                   # expect 255 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **253 passed** (stack up, all 10 integration tests included),
-lint and mypy clean, at the end of Day 9.
+Costs nothing. Last run: **255 passed** (stack up, all 10 integration tests included),
+lint and mypy clean, after the Langfuse keys landed.
 
-The live check for this day's work needs Langfuse keys (accounts checklist) and comes in
-two costs - `--fake-agents` proves executor concurrency in a real trace for **zero** Claude
-calls; the default runs one real request end to end (**~3 calls**):
+The Day 9 live check has **passed** in its zero-cost mode (see §7 item 8 for the trace).
+Re-proving it costs nothing with `--fake-agents`; the default form runs one real request
+end to end (**~3 Claude calls**):
 
 ```bash
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents
@@ -205,13 +213,14 @@ they are the same 3-4 calls the demo costs and they de-risk it.
    done-when was proven with the offline suite plus real-corpus integration tests). First
    session with budget: `PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py`
    (1 call).
-8. **The Day 9 trace artifact does not exist yet - no Langfuse account.** The done-when
-   (one trace showing two agents concurrent) is proven offline by the barrier test, and
-   the Langfuse adapter is pinned by stub tests, but nothing has hit the Langfuse API.
-   Once keys from the accounts checklist land in `.env`:
-   `PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents`
-   produces the trace for zero Claude calls; the no-flag form re-proves it on a real
-   request (~3 calls).
+8. ~~The Day 9 trace artifact does not exist yet - no Langfuse account.~~ **Resolved
+   2026-08-22**: keys are in `.env` (US region - see the §4 trap; the first attempt
+   401'd against the EU default and crashed on a `trace_url` nicety, both now fixed and
+   regression-tested), and `check_day9_trace.py --fake-agents` **passed** for zero Claude
+   calls: two agent spans overlapping 1500 ms, trace
+   `a15143c60aa6fd3c8b97c18ad2eb97dc` in the Langfuse UI. Still open on this thread: the
+   ~3-call no-flag form (a real planned request) has not been spent - Day 10's demo
+   exercises the same path and can double as that proof.
 9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
    adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
    actually starts a request, so offline cost is import weight only.
