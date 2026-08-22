@@ -72,10 +72,20 @@ class ToolCallRecord:
 
 @dataclass(slots=True)
 class Usage:
-    """Token usage accumulated across every model call in a loop."""
+    """Token usage accumulated across every model call in a loop.
+
+    A plain value object on purpose - no lock. Concurrent runners (the Day 9 parallel
+    group) each get their own accumulator, folded into the request total with `add` after
+    the join; ``+=`` on a shared instance from two threads would lose counts silently.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
+
+    def add(self, other: Usage) -> None:
+        """Fold another accumulator into this one."""
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
 
 
 @dataclass(slots=True)

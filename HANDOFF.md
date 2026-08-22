@@ -1,11 +1,11 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 8** of 30, after the Docs agent and hybrid retrieval landed.
+Written at the end of **Day 9** of 30, after parallel execution and Langfuse tracing landed.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 9.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 10.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -15,11 +15,13 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 236-test suite makes **zero API calls** and must stay that way.
-  Live checks live in `scripts/check_*.py`, are opt-in, and cost 1-2 calls each. Before
-  running anything live, say how many calls it will cost. Do not run a model matrix unasked.
-  (Voyage embedding calls count too - `scripts/ingest_embeddings.py` is opt-in and its
-  `--dry-run` is free.)
+- **Keep costs low.** The 253-test suite makes **zero API calls and zero network calls**
+  and must stay that way - which is why tracing is opt-in at the entry point rather than
+  activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
+  cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
+  not run a model matrix unasked. (Voyage embedding calls count too -
+  `scripts/ingest_embeddings.py` is opt-in and its `--dry-run` is free. Langfuse spans are
+  not Claude calls, but they are network - same opt-in rule.)
 - **No em dashes** in any output or file. Plain dashes only.
 - **Never add an agent name as commit co-author.**
 - Reproduce bugs end-to-end before fixing them. Fix lint and test failures you notice even
@@ -80,7 +82,8 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
 | `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. |
-| `coordinator/executor.py` | **Day 7.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. `respond()` = plan + execute in one call. |
+| `coordinator/executor.py` | Day 7, **parallel + traced Day 9.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. The parallel group runs on a thread pool: every runner gets its own `Usage` accumulator, folded into the total after the join (the shared-`+=` race from the Day 8 handoff is closed by construction); results merge in plan order; a barrier test proves overlap offline. `respond()` = plan + execute in one call, and owns the request trace (`plan` span + agent spans). |
+| `observability/tracing.py` | **Day 9.** The `Tracer`/`RequestTrace`/`AgentSpan` seam. `NullTracer` is the default everywhere; `default_tracer()` returns the `LangfuseTracer` adapter only when both keys are set (SDK client built lazily, injectable stub in tests). One trace per request; `agent:<name>` spans open/close in the worker thread that runs them, so a parallel plan shows overlapping spans; `ToolCallRef`s ride as child events carrying their measured timing; `CoordinatorResponse.trace_id` comes from the trace. Tracing activates **only** when an entry point passes a tracer - keys in `.env` alone cannot make tests emit spans. |
 | `tools/envelope.py` + `tools/policy.py` | The contract wire envelope (sec 6) + the chaos ground-truth permission gate shared by all servers. |
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
 | `tools/incident/correlate_server.py` | **Day 7.** `correlate_events` stdio MCP server over the corpus (impulse Pearson over 60s event bins). All four error classes return distinctly - there is a named test producing each from real code paths. |
@@ -103,7 +106,7 @@ POSTGRES_PORT=55432
 DATABASE_URL=postgresql://aioc:aioc_dev_only@localhost:55432/aioc
 ```
 
-Verified: `uv run pytest -q` runs all 236 including the 10 `integration`-marked tests with no
+Verified: `uv run pytest -q` runs all 253 including the 10 `integration`-marked tests with no
 inline override. If those ten start skipping again, this is why. (They also skip when Docker
 Desktop itself is not running - the skip message says "connection timeout expired" either way,
 so check `docker compose ps` before re-reading this section.)
@@ -126,54 +129,51 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 236 passed
+uv run pytest -q                                                   # expect 253 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **236 passed**, lint and mypy clean, at the end of Day 8.
+Costs nothing. Last run: **253 passed** (stack up, all 10 integration tests included),
+lint and mypy clean, at the end of Day 9.
 
-The live check for this day's work, when you want it re-proven (**1 API call**, plus a
-fraction-of-a-cent Voyage query embed if the key is set):
+The live check for this day's work needs Langfuse keys (accounts checklist) and comes in
+two costs - `--fake-agents` proves executor concurrency in a real trace for **zero** Claude
+calls; the default runs one real request end to end (**~3 calls**):
 
 ```bash
-PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py
 ```
 
-Day 7's delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
-after any coordinator prompt change.
+Day 8's docs check (`check_day8_docs.py`, 1 call) is still unspent, and Day 7's delegation
+check (`check_day7_delegation.py`, 2 calls) is still worth re-running after any coordinator
+prompt change.
 
-## 6. Next work: Day 9 - parallelism and tracing
+## 6. Next work: Day 10 - integration, the first real demo
 
-**Done when:** one trace shows two agents running concurrently.
+**Checkpoint:** the end-to-end query *"Why did latency spike after the last deploy?"*,
+recorded as a GIF - the execution plan calls it the first LinkedIn asset.
 
-### A track: parallel execution
+What already exists for it:
 
-The executor's plain loop was written to be replaced today without touching the plan or
-the accounting - `mode` and `depends_on` are already recorded on every invocation, and
-`_execution_order` already separates the parallel group from the sequential chain.
-Independent invocations (Incident + Docs is now a real pair, both agents exist) run
-concurrently; the sequential chain stays ordered.
-Watch the `Usage` accumulator: it is a plain object mutated by every runner, so concurrent
-runners need it made thread-safe (or per-runner accumulators summed after the join) -
-losing token counts to a race would corrupt `cost` silently.
-The `ASYNC` ruff rules have been enabled since Day 1 in anticipation.
+- `respond(query, situation=..., tracer=default_tracer())` is the whole entry point:
+  plan -> parallel execution -> deterministic synthesis -> contract `CoordinatorResponse`,
+  traced end to end when the Langfuse keys are set.
+- The demo scenario is Day 4's `code_regression` chaos mode (a 500-spike tied to a
+  commit): `uv run python demo-app/chaos/inject.py --mode code_regression`, and
+  `build_incident_context` renders the live Prometheus metrics as the situation block
+  (see `scripts/check_day5_checkpoint.py` for the working pattern).
+- Expect the plan to select Incident + Docs in parallel and to skip github/deployment
+  with reasons - if it also *selects* them, they will come back as honest
+  `agent_not_implemented` gaps, which is correct behaviour worth showing rather than
+  hiding.
+- Cost per full demo run: ~3 Claude calls (plan + two agents), plus a Voyage query embed.
 
-### B track: Langfuse instrumentation
+There is no dedicated Day 10 script yet; decide on the day whether the demo is a small
+`scripts/demo_day10.py` or a documented command sequence. The GIF is the deliverable.
 
-- Keys go in `.env` / `.env.example` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
-  `LANGFUSE_HOST`) - the .env.example section already exists; an account is needed
-  (accounts checklist).
-- Trace every agent call, tool call, token count, and cost. `CoordinatorResponse.trace_id`
-  is already in the contract, waiting to be filled (executor currently sets `None`).
-- The `ToolCallRef` records (`search_corpus` now carries measured duration and estimated
-  tokens) are the natural span inputs.
-
-### Testing
-
-Concurrency is testable offline: fake runners that record wall-clock overlap (or a
-barrier) prove two runners were in flight at once with zero API calls. Tracing needs a
-fake/stub Langfuse client for the offline suite; live verification is one traced request
-inspected in the Langfuse UI (that is the Day 9 checkpoint artifact).
+Before the demo, spend the two pending live proofs if budget allows (see §7 items 7-8):
+they are the same 3-4 calls the demo costs and they de-risk it.
 
 ## 7. Carried-over items, none blocking
 
@@ -205,6 +205,16 @@ inspected in the Langfuse UI (that is the Day 9 checkpoint artifact).
    done-when was proven with the offline suite plus real-corpus integration tests). First
    session with budget: `PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py`
    (1 call).
+8. **The Day 9 trace artifact does not exist yet - no Langfuse account.** The done-when
+   (one trace showing two agents concurrent) is proven offline by the barrier test, and
+   the Langfuse adapter is pinned by stub tests, but nothing has hit the Langfuse API.
+   Once keys from the accounts checklist land in `.env`:
+   `PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents`
+   produces the trace for zero Claude calls; the no-flag form re-proves it on a real
+   request (~3 calls).
+9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
+   adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
+   actually starts a request, so offline cost is import weight only.
 
 ## 8. Where things are written down
 
@@ -216,7 +226,7 @@ inspected in the Langfuse UI (that is the Day 9 checkpoint artifact).
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 8 added #13 and #14) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 9 added #15 and #16) |
 | Six debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |
