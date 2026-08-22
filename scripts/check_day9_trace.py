@@ -302,6 +302,26 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     tracer = LangfuseTracer(tracing)
+    # Fail fast on bad credentials: span export runs on a background thread, so without
+    # this check a 401 surfaces as a logged-and-swallowed batch failure while the run
+    # reports success - and the trace this script exists to produce is silently lost.
+    try:
+        authed = tracer.auth_check()
+    except Exception as exc:
+        authed = False
+        auth_error: str | None = f"{type(exc).__name__}: {exc}"
+    else:
+        auth_error = None if authed else "auth_check returned false"
+    if not authed:
+        print(
+            f"Langfuse rejected the credentials against {tracing.host} ({auth_error}).\n"
+            "If the account is US-region, set LANGFUSE_HOST=https://us.cloud.langfuse.com "
+            "in .env (the default is the EU host, and a wrong region reads as 401 invalid "
+            "credentials); otherwise re-check the keys.",
+            file=sys.stderr,
+        )
+        return 2
+
     mode = "fake-agents (0 Claude calls)" if args.fake_agents else "live (~3 Claude calls)"
     print(f"Day 9 trace check - {mode}; traces -> {tracing.host}\n")
 

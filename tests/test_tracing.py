@@ -117,9 +117,11 @@ class _StubObservation:
 
 
 class _StubClient:
-    def __init__(self) -> None:
+    def __init__(self, *, auth_ok: bool = True, trace_url_raises: bool = False) -> None:
         self.roots: list[_StubObservation] = []
         self.flushes = 0
+        self._auth_ok = auth_ok
+        self._trace_url_raises = trace_url_raises
 
     def start_observation(self, *, name: str, **kwargs: Any) -> _StubObservation:
         root = _StubObservation(name, kwargs)
@@ -128,6 +130,18 @@ class _StubClient:
 
     def flush(self) -> None:
         self.flushes += 1
+
+    def auth_check(self) -> bool:
+        if not self._auth_ok:
+            raise RuntimeError("401 Unauthorized (stub)")
+        return True
+
+    def get_trace_url(self, *, trace_id: str) -> str:
+        if self._trace_url_raises:
+            # The real SDK fetches the project id here, so bad credentials raise
+            # UnauthorizedError from this call - the shape of the first live failure.
+            raise RuntimeError("401 Unauthorized (stub)")
+        return f"https://stub.langfuse/trace/{trace_id}"
 
 
 def test_langfuse_adapter_builds_the_observation_tree():
@@ -205,6 +219,25 @@ def test_plain_spans_are_not_typed_as_agents():
     trace.start_span("plan", input_text="why?")
     (root,) = client.roots
     assert root.children[0].kwargs["as_type"] == "span"
+
+
+def test_auth_check_delegates_and_raises_loudly():
+    # The check script calls this before any work; a 401 must surface here, not as a
+    # swallowed background-export failure after the run already reported success.
+    assert LangfuseTracer(_settings(), client=_StubClient()).auth_check() is True  # type: ignore[arg-type]
+    bad = LangfuseTracer(_settings(), client=_StubClient(auth_ok=False))  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="401"):
+        bad.auth_check()
+
+
+def test_trace_url_never_raises():
+    # Regression from the first live run: wrong-region keys made get_trace_url raise
+    # UnauthorizedError after the check's real work had finished, crashing the script.
+    ok = LangfuseTracer(_settings(), client=_StubClient())  # type: ignore[arg-type]
+    assert ok.trace_url("t_1") == "https://stub.langfuse/trace/t_1"
+    broken = LangfuseTracer(_settings(), client=_StubClient(trace_url_raises=True))  # type: ignore[arg-type]
+    assert broken.trace_url("t_1") is None
+    assert LangfuseTracer(_settings()).trace_url("t_1") is None  # no client built yet
 
 
 def test_langfuse_tracer_refuses_to_run_without_keys():
