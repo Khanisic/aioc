@@ -204,3 +204,40 @@ The reported relevance is the better raw similarity, because an RRF sum is meani
 The degraded reason is rendered into the Docs agent's document block, so reduced coverage is visible to the model, in the response, and in the run records.
 
 **Why Voyage at all.** Anthropic has no embeddings endpoint, so an external provider was unavoidable; the `Embedder` protocol keeps it swappable and the offline suite runs on a deterministic fake.
+
+---
+
+## 15. Parallelism is a thread pool with per-runner accumulators, not async and not a lock
+
+**Decision.** The executor runs the plan's parallel group on a `ThreadPoolExecutor` and keeps the sequential chain as a plain ordered loop.
+Every runner - concurrent or not - receives a fresh `Usage` accumulator, and the executor folds each one into the request total only after that runner has returned, on the coordinating thread.
+Results are merged in plan order, not completion order.
+
+**Why threads.** The agents block on the synchronous Anthropic SDK, so threads buy real wall-clock overlap for exactly the cost of a pool; an async rewrite would have touched every agent and the harness for the same observable behaviour.
+The Day 7 loop was written to be replaced this way - `mode` and `depends_on` were already recorded on every invocation, so the execution strategy changed without touching the plan or the accounting.
+
+**Why per-runner accumulators and not a lock.** `Usage` is a plain mutable dataclass and `+=` from two threads loses counts silently - corrupted `cost` with no failing test.
+A lock inside `Usage` would fix that by making every single-threaded consumer (the harness loop, the agents, the planner) pay for one call site's concurrency.
+Fresh accumulators summed after the join keep `Usage` a value object, make the merge point explicit and testable, and are correct by construction rather than by discipline.
+The offline proof does not sleep-and-hope: a barrier test blocks each fake runner until the other arrives, so the suite fails if the group ever goes serial again.
+
+**What I would watch.** The pool is sized to the group (at most four agents), so there is no queueing today; if agent counts ever grow, sizing becomes a real decision.
+
+---
+
+## 16. Tracing is a seam with a null object, and it is opt-in at the entry point
+
+**Decision.** The executor talks to three small protocols (`Tracer`, `RequestTrace`, `AgentSpan`) in `aioc.observability.tracing`.
+The default everywhere is `NullTracer`, a complete no-op whose `trace_id` is null; live entry points pass `default_tracer()`, which returns the Langfuse adapter only when both keys are set.
+Spans open and close in the worker thread that runs the agent, so their timing is the agent's real wall clock and a parallel plan shows visibly overlapping spans - which is the Day 9 checkpoint artifact.
+
+**Why opt-in rather than environment-activated.** The offline suite must make zero network calls, and it must keep that property on a machine whose `.env` carries real Langfuse keys.
+A tracer that self-activates from the environment would break that silently the day the keys land - the same shape of failure as the retrieval layer silently falling back to lexical, and caught the same way: make the choice explicit and visible.
+
+**Why a null object rather than `Optional`.** `if tracer is not None` branches would thread through exactly the code Day 9 made concurrent; the null object keeps the executor straight-line.
+
+**Why the agents stay uninstrumented.** The executor and `respond()` already see everything worth a span - context in, summary and tokens out, and the contract `ToolCallRef` records each agent stamps.
+Instrumenting inside the agents would buy timing granularity the trace does not need yet, at the cost of a tracing dependency in every agent.
+The one honesty compromise: `ToolCallRef` timings are recorded after the fact, so they ride as child events whose metadata carries the measured `started_at` and `duration_ms` rather than as retro-timed spans.
+
+**What I would watch.** The Langfuse adapter is pinned to the v4 SDK observation API by offline stub tests; an SDK major bump is a deliberate adapter change, not a transitive surprise.

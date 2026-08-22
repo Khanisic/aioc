@@ -28,6 +28,10 @@ dependencies = [
 
     # Shared HTTP client (Prometheus, GitHub, anything else over the wire)
     "httpx>=0.27",
+
+    # Day 9 - tracing. The v4 SDK's observation API is what the LangfuseTracer
+    # adapter is written against (pinned by offline stub tests).
+    "langfuse>=4.14.4",
 ]
 
 [dependency-groups]

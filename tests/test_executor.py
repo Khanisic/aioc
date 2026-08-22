@@ -97,6 +97,7 @@ def _incident_response(
     status: str = "complete",
     overall_confidence: float = 0.72,
     with_evidence: bool = True,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> IncidentAgentResponse:
     """A minimal contract-valid incident report, built the way a real agent would."""
     if with_evidence:
@@ -189,6 +190,7 @@ def _incident_response(
             "evidence": evidence,
             "gaps": gaps,
             "overall_confidence": overall_confidence,
+            "tool_calls": tool_calls or [],
             "generated_at": "2026-08-08T14:20:00Z",
         }
     )
@@ -261,7 +263,7 @@ def test_response_assembles_the_contract_envelope():
     assert resp.skipped_agents == plan.skipped_agents
     assert [r.agent for r in resp.agent_responses] == [AgentName.INCIDENT]
     assert resp.refinement_rounds == 0  # the loop is Day 14
-    assert resp.trace_id is None  # Langfuse is Day 9
+    assert resp.trace_id is None  # no tracer was configured, so the field is honestly null
     assert resp.status is ResponseStatus.COMPLETE
     assert resp.completed_at >= resp.received_at
 
@@ -531,3 +533,312 @@ def test_default_runners_register_incident_and_docs():
     from aioc.coordinator.executor import default_runners
 
     assert set(default_runners()) == {AgentName.INCIDENT, AgentName.DOCS}
+
+
+# ---------------------------------------------------- Day 9: the parallel group is parallel
+
+
+def test_parallel_group_runs_concurrently():
+    """The done-when, offline: two agents provably in flight at the same time.
+
+    Each runner blocks on a shared barrier until the *other* runner arrives. Under the old
+    serial loop the first runner would wait alone until the 5s timeout broke the barrier
+    and failed its invocation - so two clean responses are proof of overlap, not luck.
+    """
+    import threading
+
+    barrier = threading.Barrier(2)
+
+    class _MeetingRunner:
+        def run(
+            self, query: str, *, context: str, request_id: str, invocation_id: str, usage: Usage
+        ) -> IncidentAgentResponse:
+            barrier.wait(timeout=5.0)
+            return _incident_response(request_id, invocation_id)
+
+    plan = _plan([_invocation("incident"), _invocation("docs", invocation_id="inv_docs")])
+    resp = Executor(
+        {AgentName.INCIDENT: _MeetingRunner(), AgentName.DOCS: _MeetingRunner()}
+    ).execute(plan, "Why is checkout failing, and what does the runbook say?")
+
+    assert [r.invocation_id for r in resp.agent_responses] == ["inv_incident", "inv_docs"]
+    assert resp.status is ResponseStatus.COMPLETE
+
+
+def test_parallel_results_keep_plan_order_not_completion_order():
+    import time
+
+    class _SlowRunner:
+        def run(
+            self, query: str, *, context: str, request_id: str, invocation_id: str, usage: Usage
+        ) -> IncidentAgentResponse:
+            time.sleep(0.25)
+            return _incident_response(request_id, invocation_id)
+
+    plan = _plan([_invocation("incident"), _invocation("docs", invocation_id="inv_docs")])
+    resp = Executor(
+        {AgentName.INCIDENT: _SlowRunner(), AgentName.DOCS: _RecordingRunner()}
+    ).execute(plan, "q?")
+    # docs finished first, but the response is assembled in plan order - determinism must
+    # not depend on scheduling.
+    assert [r.invocation_id for r in resp.agent_responses] == ["inv_incident", "inv_docs"]
+
+
+def test_parallel_runners_get_isolated_usage_accumulators_summed_into_cost():
+    """The HANDOFF's named race: `Usage` is a plain object, so handing the shared
+    accumulator to concurrent runners would lose token counts silently. The executor must
+    hand every runner its own accumulator and merge after the join - exact totals, and
+    never the shared instance."""
+    seeded = Usage(input_tokens=300, output_tokens=180)
+    seen: list[Usage] = []
+
+    class _TokenRunner:
+        def __init__(self, tokens: tuple[int, int]) -> None:
+            self._tokens = tokens
+
+        def run(
+            self, query: str, *, context: str, request_id: str, invocation_id: str, usage: Usage
+        ) -> IncidentAgentResponse:
+            seen.append(usage)
+            usage.input_tokens += self._tokens[0]
+            usage.output_tokens += self._tokens[1]
+            return _incident_response(request_id, invocation_id)
+
+    plan = _plan(
+        [
+            _invocation("incident"),
+            _invocation("docs", invocation_id="inv_docs"),
+            _invocation("github", invocation_id="inv_gh"),
+            _invocation("deployment", invocation_id="inv_dep"),
+        ]
+    )
+    resp = Executor(
+        {
+            AgentName.INCIDENT: _TokenRunner((100, 10)),
+            AgentName.DOCS: _TokenRunner((200, 20)),
+            AgentName.GITHUB: _TokenRunner((400, 40)),
+            AgentName.DEPLOYMENT: _TokenRunner((800, 80)),
+        }
+    ).execute(plan, "q?", usage=seeded)
+
+    assert resp.cost.input_tokens == 300 + 100 + 200 + 400 + 800
+    assert resp.cost.output_tokens == 180 + 10 + 20 + 40 + 80
+    assert all(u is not seeded for u in seen)
+    assert len({id(u) for u in seen}) == len(seen) == 4
+
+
+def test_a_failure_in_the_parallel_group_does_not_kill_its_peers():
+    # The Day 7 isolation guarantee, re-proven on the concurrent path: the future's
+    # exception is data, not a crash that hides the other runner's clean response.
+    plan = _plan([_invocation("incident"), _invocation("docs", invocation_id="inv_docs")])
+    resp = Executor(
+        {AgentName.INCIDENT: _FailingRunner(), AgentName.DOCS: _RecordingRunner()}
+    ).execute(plan, "q?")
+    assert [r.invocation_id for r in resp.agent_responses] == ["inv_docs"]
+    gap = next(g for g in resp.unresolved_gaps if g.kind_detail == "agent_invocation_failed")
+    assert gap.suggested_agent is AgentName.INCIDENT
+    assert resp.status is ResponseStatus.PARTIAL
+
+
+# ------------------------------------------------------------------- Day 9: request tracing
+
+
+class _FakeSpan:
+    def __init__(self, name: str, input_text: str, metadata: dict[str, Any] | None) -> None:
+        self.name = name
+        self.input_text = input_text
+        self.metadata = metadata or {}
+        self.tool_calls: list[Any] = []
+        self.ended: dict[str, Any] | None = None
+
+    def record_tool_call(self, ref: Any) -> None:
+        self.tool_calls.append(ref)
+
+    def end(
+        self,
+        *,
+        output: str | None,
+        status: str,
+        input_tokens: int,
+        output_tokens: int,
+        error: str | None = None,
+    ) -> None:
+        self.ended = {
+            "output": output,
+            "status": status,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "error": error,
+        }
+
+
+class _FakeTrace:
+    def __init__(self) -> None:
+        self.spans: list[_FakeSpan] = []
+        self.end_calls: list[dict[str, Any]] = []
+
+    @property
+    def trace_id(self) -> str | None:
+        return "trace_fake"
+
+    def start_span(
+        self, name: str, *, input_text: str, metadata: dict[str, Any] | None = None
+    ) -> _FakeSpan:
+        span = _FakeSpan(name, input_text, metadata)
+        self.spans.append(span)  # list.append is atomic; worker threads share this safely
+        return span
+
+    def end(
+        self,
+        *,
+        output: str | None,
+        status: str,
+        input_tokens: int,
+        output_tokens: int,
+        error: str | None = None,
+    ) -> None:
+        self.end_calls.append(
+            {
+                "output": output,
+                "status": status,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "error": error,
+            }
+        )
+
+
+class _FakeTracer:
+    def __init__(self) -> None:
+        self.traces: list[_FakeTrace] = []
+
+    def start_request(self, name: str, *, request_id: str, query: str) -> _FakeTrace:
+        trace = _FakeTrace()
+        self.traces.append(trace)
+        return trace
+
+    def flush(self) -> None:
+        return None
+
+
+def test_executor_traces_one_span_per_agent_and_sets_trace_id():
+    tracer = _FakeTracer()
+    plan = _plan([_invocation("incident"), _invocation("docs", invocation_id="inv_docs")])
+    resp = Executor(
+        {
+            AgentName.INCIDENT: _RecordingRunner(tokens=(120, 240)),
+            AgentName.DOCS: _RecordingRunner(tokens=(75, 30)),
+        },
+        tracer=tracer,
+    ).execute(plan, "Why is checkout failing, and what does the runbook say?")
+
+    assert resp.trace_id == "trace_fake"
+    (trace,) = tracer.traces
+    by_name = {span.name: span for span in trace.spans}
+    assert set(by_name) == {"agent:incident", "agent:docs"}
+    # Each span carries the context the agent actually saw and the tokens it actually spent.
+    incident = by_name["agent:incident"]
+    assert incident.input_text == _CONTEXT
+    assert incident.metadata["invocation_id"] == "inv_incident"
+    assert incident.ended is not None
+    assert incident.ended["status"] == "complete"
+    assert (incident.ended["input_tokens"], incident.ended["output_tokens"]) == (120, 240)
+    assert by_name["agent:docs"].ended is not None
+    # A standalone execute owns the trace, so it closes it - once, with the full totals.
+    (end,) = trace.end_calls
+    assert end["status"] == "complete"
+    assert (end["input_tokens"], end["output_tokens"]) == (120 + 75, 240 + 30)
+
+
+def test_a_failed_agent_span_ends_with_the_error():
+    tracer = _FakeTracer()
+    plan = _plan([_invocation("incident")])
+    Executor({AgentName.INCIDENT: _FailingRunner()}, tracer=tracer).execute(plan, "q?")
+
+    (trace,) = tracer.traces
+    (span,) = trace.spans
+    assert span.ended is not None
+    assert span.ended["status"] == "error"
+    assert "scripted agent failure" in span.ended["error"]
+
+
+def test_tool_call_refs_are_recorded_on_the_agent_span():
+    ref = {
+        "id": "tc_1",
+        "tool_name": "search_corpus",
+        "server": "aioc-docs",
+        "started_at": "2026-08-08T14:20:00Z",
+        "duration_ms": 42,
+        "ok": True,
+        "error_class": None,
+        "tokens_returned": 850,
+        "truncated": False,
+    }
+
+    class _ToolCallingRunner:
+        def run(
+            self, query: str, *, context: str, request_id: str, invocation_id: str, usage: Usage
+        ) -> IncidentAgentResponse:
+            return _incident_response(request_id, invocation_id, tool_calls=[ref])
+
+    tracer = _FakeTracer()
+    plan = _plan([_invocation("incident")])
+    Executor({AgentName.INCIDENT: _ToolCallingRunner()}, tracer=tracer).execute(plan, "q?")
+
+    (span,) = tracer.traces[0].spans
+    (recorded,) = span.tool_calls
+    assert recorded.tool_name == "search_corpus"
+    assert recorded.duration_ms == 42
+
+
+def test_respond_traces_the_planning_call_and_owns_the_trace():
+    """One trace covers the whole request: a `plan` span with the planning call's own
+    tokens, the agent spans, and exactly one trace close carrying the full totals."""
+    from types import SimpleNamespace
+
+    from anthropic.types import ToolUseBlock
+
+    from aioc.coordinator import SELECT_TOOL_NAME, Coordinator
+    from aioc.llm import LLMClient, LLMSettings
+
+    plan_payload = {
+        "intent": _assessment("incident_diagnosis", 0.92),
+        "selected_agents": [_invocation("incident")],
+        "skipped_agents": [_skip("docs"), _skip("github"), _skip("deployment")],
+        "gaps": [],
+    }
+    scripted = SimpleNamespace(
+        stop_reason="tool_use",
+        model="claude-sonnet-5",
+        content=[
+            ToolUseBlock(type="tool_use", id="toolu_1", name=SELECT_TOOL_NAME, input=plan_payload)
+        ],
+        usage=SimpleNamespace(input_tokens=300, output_tokens=180),
+    )
+
+    class _FakeMessages:
+        def create(self, **kwargs: Any) -> Any:
+            return scripted
+
+    fake = SimpleNamespace(messages=_FakeMessages())
+    coordinator = Coordinator(LLMClient(LLMSettings(model="claude-sonnet-5"), client=fake))  # type: ignore[arg-type]
+    tracer = _FakeTracer()
+
+    resp = respond(
+        "Why is checkout failing?",
+        coordinator=coordinator,
+        executor=Executor({AgentName.INCIDENT: _RecordingRunner(tokens=(120, 240))}),
+        tracer=tracer,
+    )
+
+    assert resp.trace_id == "trace_fake"
+    (trace,) = tracer.traces
+    assert [span.name for span in trace.spans] == ["plan", "agent:incident"]
+    plan_span = trace.spans[0]
+    assert plan_span.ended is not None
+    assert (plan_span.ended["input_tokens"], plan_span.ended["output_tokens"]) == (300, 180)
+    assert "selected: incident" in plan_span.ended["output"]
+    # respond owns the trace: closed exactly once, with planning + agent totals.
+    (end,) = trace.end_calls
+    assert (end["input_tokens"], end["output_tokens"]) == (300 + 120, 180 + 240)
+    assert end["status"] == "complete"

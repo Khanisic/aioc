@@ -1,4 +1,4 @@
-"""Coordinator: plan execution and response assembly (Day 7).
+"""Coordinator: plan execution and response assembly (Day 7; parallel + traced on Day 9).
 
 `Coordinator.plan` decides; this module acts. `Executor.execute` consumes a validated
 `SelectionPlan`, runs every invocation it can, and assembles the contract's
@@ -9,7 +9,7 @@ query and the plan; it forwards the context block verbatim and forwards nothing 
 coordinator knew but did not write into the plan. `tests/test_executor.py` asserts that
 literally, argument by argument.
 
-Three deliberate decisions, written down because the handoff asked for them:
+The deliberate decisions, written down because the handoff asked for them:
 
 **An invocation the executor cannot run produces a `Gap`, never a fabricated response.**
 Incident (Day 4) and Docs (Day 8) are live; GitHub and Deployment land on Days 11 and 12,
@@ -27,19 +27,36 @@ synthesis belongs with the refinement loop (Day 14), which is the first consumer
 one; buying it early would add a failure mode and a token cost to every request for prose
 nobody reads yet.
 
-**Execution is a plain loop, on purpose.** ``mode`` and ``depends_on`` are recorded in the
-plan, so Day 9 changes the execution strategy (parallel Task calls) without touching either
-the plan or this module's accounting. Building concurrency today would be building Day 9
-early. The loop runs the parallel group first, then the sequential chain in dependency
-order; a dependency that produced no response fails its dependents honestly rather than
-running them against an input that never arrived.
+**The parallel group actually runs in parallel (Day 9).** Independent invocations
+(``mode: parallel``, empty ``depends_on``) run concurrently on a thread pool - the agents
+block on the Anthropic SDK, so threads buy real wall-clock overlap without rewriting them
+as async. The sequential chain then runs in dependency order, one at a time; a dependency
+that produced no response fails its dependents honestly rather than running them against
+an input that never arrived. Results are merged in *plan* order, not completion order, so
+the response is deterministic either way.
 
-Cost is measured, never estimated: one `Usage` accumulator threads through the planning
-call and every agent call, and `CoordinatorResponse.cost` is read off it.
+**Every runner gets its own `Usage` accumulator, merged after the join.** The accumulator
+is a plain mutable object, and ``+=`` on a shared one from two threads loses counts
+silently - which would corrupt ``cost`` in a way nothing downstream can detect. Rather
+than hide a lock inside `Usage` (making every single-threaded consumer pay for this one
+call site), the executor hands each runner a fresh accumulator and folds them into the
+request total once the runner returns. The merge is single-threaded by construction.
+
+Cost is measured, never estimated: the planning call and every agent call land in one
+total, and `CoordinatorResponse.cost` is read off it.
+
+**Tracing is opt-in at the entry point (Day 9).** The default is `NullTracer`, and the
+live entry points pass `default_tracer()` explicitly - the offline suite must stay
+network-free even on a machine whose `.env` carries real Langfuse keys. One trace per
+request; one span per agent invocation, opened and closed in the worker thread that runs
+it, so span timing is the real wall clock and a Langfuse trace of a parallel plan visibly
+overlaps - which is the Day 9 checkpoint artifact.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 from uuid import uuid4
@@ -58,6 +75,7 @@ from aioc.contracts import (
     walk_assessments,
 )
 from aioc.llm import Usage
+from aioc.observability.tracing import NullTracer, RequestTrace, Tracer
 
 from .planner import Coordinator, SelectionPlan, utcnow
 
@@ -146,11 +164,30 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:8]}"
 
 
+@dataclass(slots=True)
+class _Outcome:
+    """What one attempted invocation came back with - exactly one of response/error is
+    set, and ``usage`` counts the tokens it spent either way (a failed call still cost)."""
+
+    invocation: AgentInvocation
+    response: AgentResponse | None
+    error: Exception | None
+    usage: Usage
+
+
 class Executor:
     """Runs a `SelectionPlan` and assembles the `CoordinatorResponse`."""
 
-    def __init__(self, runners: dict[AgentName, AgentRunner] | None = None) -> None:
+    def __init__(
+        self,
+        runners: dict[AgentName, AgentRunner] | None = None,
+        *,
+        tracer: Tracer | None = None,
+    ) -> None:
         self._runners = dict(runners) if runners is not None else dict(default_runners())
+        # NullTracer by default, never default_tracer(): tracing activates only when an
+        # entry point passes a tracer, so the offline suite cannot emit spans by accident.
+        self._tracer: Tracer = tracer if tracer is not None else NullTracer()
 
     def execute(
         self,
@@ -160,27 +197,74 @@ class Executor:
         request_id: str | None = None,
         received_at: datetime | None = None,
         usage: Usage | None = None,
+        trace: RequestTrace | None = None,
     ) -> CoordinatorResponse:
-        """Run every invocation the plan selected, in dependency order.
+        """Run every invocation the plan selected: the parallel group concurrently, then
+        the sequential chain in dependency order.
 
         ``usage`` may arrive pre-seeded with the planning call's tokens (see `respond`);
         the agent calls add theirs, and ``cost`` is the total. ``received_at`` is the
         moment the request arrived, which is before planning ran - the caller who planned
-        supplies it, a standalone call defaults to now.
+        supplies it, a standalone call defaults to now. ``trace`` is an already-open
+        request trace when the caller owns the whole request (again `respond`, which also
+        traced the planning call); a standalone call opens and closes its own.
         """
         usage = usage if usage is not None else Usage()
         request_id = request_id or Coordinator.new_request_id()
         received = received_at if received_at is not None else utcnow()
+
+        owns_trace = trace is None
+        if trace is None:
+            trace = self._tracer.start_request(
+                "coordinator_request", request_id=request_id, query=query
+            )
 
         responses: list[AgentResponse] = []
         execution_gaps: list[Gap] = []
         succeeded: set[str] = set()
         any_failure = False
 
-        # Parallel group first, then the sequential chain in dependency order. The plan
-        # validator guarantees depends_on resolves in-plan and is acyclic, so ordering the
-        # chain by "all dependencies already attempted" always terminates.
-        for inv in _execution_order(plan):
+        def settle(outcome: _Outcome) -> None:
+            # Single-threaded merge point: called only after the worker has returned, in
+            # plan order, so the shared accumulator and the result lists never race.
+            nonlocal any_failure
+            usage.add(outcome.usage)
+            if outcome.response is not None:
+                responses.append(outcome.response)
+                succeeded.add(outcome.invocation.invocation_id)
+            elif outcome.error is not None:
+                any_failure = True
+                execution_gaps.append(
+                    _invocation_failed_gap(outcome.invocation, query, outcome.error)
+                )
+
+        # -- the parallel group, concurrently. The plan validator guarantees every member
+        # has depends_on == [], so there is nothing to wait on and no unmet-dependency case.
+        group: list[tuple[AgentInvocation, AgentRunner]] = []
+        for inv in plan.parallel_group:
+            runner = self._runners.get(inv.agent)
+            if runner is None:
+                execution_gaps.append(_agent_missing_gap(inv))
+            else:
+                group.append((inv, runner))
+        if len(group) == 1:
+            inv, runner = group[0]
+            settle(self._run_invocation(inv, runner, query, request_id, trace))
+        elif group:
+            with ThreadPoolExecutor(
+                max_workers=len(group), thread_name_prefix="aioc-agent"
+            ) as pool:
+                futures = [
+                    pool.submit(self._run_invocation, inv, runner, query, request_id, trace)
+                    for inv, runner in group
+                ]
+                # future.result() never raises here: _run_invocation catches the runner's
+                # exception and returns it as data, so one failure cannot hide the others.
+                for future in futures:
+                    settle(future.result())
+
+        # -- the sequential chain, one at a time in dependency order.
+        for inv in _sequential_order(plan):
             runner = self._runners.get(inv.agent)
             if runner is None:
                 execution_gaps.append(_agent_missing_gap(inv))
@@ -189,25 +273,13 @@ class Executor:
             if unmet:
                 execution_gaps.append(_dependency_unmet_gap(inv, unmet))
                 continue
-            try:
-                response = runner.run(
-                    query,
-                    context=inv.context_passed,
-                    request_id=request_id,
-                    invocation_id=inv.invocation_id,
-                    usage=usage,
-                )
-            except Exception as exc:  # noqa: BLE001 - one agent failing must not kill the rest
-                any_failure = True
-                execution_gaps.append(_invocation_failed_gap(inv, query, exc))
-                continue
-            responses.append(response)
-            succeeded.add(inv.invocation_id)
+            settle(self._run_invocation(inv, runner, query, request_id, trace))
 
         answer, synthesis = _synthesise(plan, responses, execution_gaps)
         unresolved = [*plan.gaps, *execution_gaps, *(g for r in responses for g in r.gaps)]
+        status = _status(plan, responses, unresolved, any_failure)
 
-        return CoordinatorResponse(
+        response = CoordinatorResponse(
             request_id=request_id,
             query=query,
             received_at=received,
@@ -219,11 +291,70 @@ class Executor:
             answer=answer,
             refinement_rounds=0,  # the refinement loop is Day 14
             unresolved_gaps=unresolved,
-            status=_status(plan, responses, unresolved, any_failure),
+            status=status,
             cost=Cost(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens),
-            trace_id=None,  # Langfuse tracing is Day 9
+            trace_id=trace.trace_id,
             completed_at=utcnow(),
         )
+        if owns_trace:
+            trace.end(
+                output=answer.value if answer.value is not None else synthesis,
+                status=status.value,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+            )
+        return response
+
+    def _run_invocation(
+        self,
+        inv: AgentInvocation,
+        runner: AgentRunner,
+        query: str,
+        request_id: str,
+        trace: RequestTrace,
+    ) -> _Outcome:
+        """Run one invocation to an `_Outcome` - possibly on a worker thread, so it never
+        raises and never touches shared state; `settle` folds the result in afterwards.
+
+        The span opens and closes here, in the thread doing the work, so its timing is the
+        agent's real wall clock - concurrent agents show as overlapping spans.
+        """
+        local = Usage()
+        span = trace.start_span(
+            f"agent:{inv.agent.value}",
+            input_text=inv.context_passed,
+            metadata={
+                "invocation_id": inv.invocation_id,
+                "mode": inv.mode.value,
+                "round": inv.round,
+            },
+        )
+        try:
+            response = runner.run(
+                query,
+                context=inv.context_passed,
+                request_id=request_id,
+                invocation_id=inv.invocation_id,
+                usage=local,
+            )
+        except Exception as exc:  # noqa: BLE001 - one agent failing must not kill the rest
+            span.end(
+                output=None,
+                status="error",
+                input_tokens=local.input_tokens,
+                output_tokens=local.output_tokens,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return _Outcome(invocation=inv, response=None, error=exc, usage=local)
+        for ref in response.tool_calls:
+            span.record_tool_call(ref)
+        span.end(
+            output=response.summary,
+            status=response.status.value,
+            input_tokens=local.input_tokens,
+            output_tokens=local.output_tokens,
+        )
+        return _Outcome(invocation=inv, response=response, error=None, usage=local)
 
 
 def respond(
@@ -232,34 +363,88 @@ def respond(
     situation: str | None = None,
     coordinator: Coordinator | None = None,
     executor: Executor | None = None,
+    tracer: Tracer | None = None,
 ) -> CoordinatorResponse:
     """Plan and execute one request end to end - the Day 10 demo entry point.
 
-    One `Usage` accumulator covers the planning call and every agent call, so
-    ``cost`` on the response is the whole request's real token spend.
+    One `Usage` accumulator covers the planning call and every agent call, so ``cost`` on
+    the response is the whole request's real token spend. One trace covers them too:
+    `respond` owns the request trace, wraps the planning call in its own span, and hands
+    the open trace to the executor for the agent spans. ``tracer`` defaults to
+    `NullTracer`; live entry points pass `default_tracer()`.
     """
     coordinator = coordinator or Coordinator()
     executor = executor or Executor()
+    tracer = tracer if tracer is not None else NullTracer()
     usage = Usage()
     request_id = Coordinator.new_request_id()
     received_at = utcnow()
-    plan = coordinator.plan(query, situation=situation, usage=usage)
-    return executor.execute(
-        plan, query, request_id=request_id, received_at=received_at, usage=usage
+
+    trace = tracer.start_request("coordinator_request", request_id=request_id, query=query)
+    plan_span = trace.start_span(
+        "plan",
+        input_text=query,
+        metadata={"has_situation": bool(situation and situation.strip())},
     )
+    plan_usage = Usage()
+    try:
+        plan = coordinator.plan(query, situation=situation, usage=plan_usage)
+    except Exception as exc:
+        # A rejected plan still cost real tokens - the coordinator added them to
+        # plan_usage before raising, so the error span carries the true spend.
+        error = f"{type(exc).__name__}: {exc}"
+        plan_span.end(
+            output=None,
+            status="error",
+            input_tokens=plan_usage.input_tokens,
+            output_tokens=plan_usage.output_tokens,
+            error=error,
+        )
+        trace.end(
+            output=None,
+            status="error",
+            input_tokens=plan_usage.input_tokens,
+            output_tokens=plan_usage.output_tokens,
+            error=error,
+        )
+        raise
+    plan_span.end(
+        output=_describe_plan(plan),
+        status="ok",
+        input_tokens=plan_usage.input_tokens,
+        output_tokens=plan_usage.output_tokens,
+    )
+    usage.add(plan_usage)
+
+    response = executor.execute(
+        plan, query, request_id=request_id, received_at=received_at, usage=usage, trace=trace
+    )
+    trace.end(
+        output=response.answer.value if response.answer.value is not None else response.synthesis,
+        status=response.status.value,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
+    return response
+
+
+def _describe_plan(plan: SelectionPlan) -> str:
+    selected = ", ".join(inv.agent.value for inv in plan.selected_agents) or "none"
+    skipped = ", ".join(s.agent.value for s in plan.skipped_agents) or "none"
+    return f"selected: {selected}; skipped: {skipped}"
 
 
 # ------------------------------------------------------------------------ execution order
 
 
-def _execution_order(plan: SelectionPlan) -> list[AgentInvocation]:
-    """Parallel group, then sequential invocations in dependency order.
+def _sequential_order(plan: SelectionPlan) -> list[AgentInvocation]:
+    """The sequential chain in dependency order (the parallel group has already run).
 
-    Kahn's algorithm over the chain; the plan validator already rejected cycles and
-    dangling ids, so this always drains. Ties keep plan order for determinism.
+    Kahn's algorithm; the plan validator already rejected cycles and dangling ids, so
+    this always drains. Ties keep plan order for determinism.
     """
-    ordered = list(plan.parallel_group)
-    attempted = {inv.invocation_id for inv in ordered}
+    ordered: list[AgentInvocation] = []
+    attempted = {inv.invocation_id for inv in plan.parallel_group}
     pending = list(plan.sequential_chain)
     while pending:
         ready = [inv for inv in pending if set(inv.depends_on) <= attempted]

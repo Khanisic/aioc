@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 60 tests, ~1 second, no network, no API key
+uv run pytest -q              # 253 tests, no network, no API key; 10 skip without the Docker stack
 ```
 
 Selecting a subset:
@@ -47,10 +47,19 @@ A type error in `scripts/runlog.py` will not fail `mypy`.
 
 | File | Tests | Covers |
 |---|---|---|
-| `tests/test_contract.py` | 25 | The Pydantic models against the CONTRACTS.md §8 worked example, plus one negative test per validated invariant |
+| `tests/test_contract.py` | 26 | The Pydantic models against the CONTRACTS.md §8 worked example, plus one negative test per validated invariant |
 | `tests/test_llm_harness.py` | 13 | `LLMClient.complete` / `stream_text` / `run_tool_loop` against a scripted fake client |
-| `tests/test_incident_agent.py` | 18 | Both Incident agent paths - Day 3 prose and Day 4 `diagnose` - including payloads that must be rejected |
+| `tests/test_incident_agent.py` | 19 | Both Incident agent paths - Day 3 prose and Day 4 `diagnose` - including payloads that must be rejected |
 | `tests/test_chaos_inject.py` | 4 | The chaos injector's failure-mode to knob mapping, offline |
+| `tests/test_seed_corpus.py` | 13 | The Day 5 incident corpus SQL against the contract enums, offline |
+| `tests/test_prometheus_context.py` | 15 | Metric reads and context rendering (fake httpx transport), including the `chaos_knob_value` leak guards |
+| `tests/test_coordinator.py` | 29 | Day 6 selection planning; mostly negative tests, one per enforced orchestration rule |
+| `tests/test_executor.py` | 23 | Day 7 delegation (exact context passing, honest gaps) plus Day 9 concurrency (a barrier proves overlap), per-runner usage accounting, and the fake-tracer span assertions |
+| `tests/test_timeline_tool.py` | 28 | Day 6 MCP tool: wire envelope, error taxonomy, description template (4 need the stack) |
+| `tests/test_correlate_tool.py` | 30 | Day 7 MCP tool: validation, chaos gate, correlation math, all four error classes distinctly (3 need the stack) |
+| `tests/test_docs_agent.py` | 18 | Day 8 Docs agent: rendering, grounding rejections, stamped coverage |
+| `tests/test_retrieval.py` | 27 | Day 8 retrieval: stale detection, RRF fusion, Voyage client offline (3 need the stack) |
+| `tests/test_tracing.py` | 8 | Day 9 tracing seam: null-object degradation, the Langfuse adapter against a stub client, the `.env` path regression |
 
 The house rule from `.claude/rules/tests.md`: every validated invariant gets a negative test asserting the violation is rejected.
 A test that only proves the happy path does not prove the invariant is enforced.
@@ -73,6 +82,9 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `check_day5_checkpoint.py` | 1 | Chaos injected -> agent JSON naming the right failure mode, scored against ground truth |
 | `check_agent_selection.py` | 2 by default, 5 with `--all` | The coordinator routes each sample query to the right agents |
 | `check_day7_delegation.py` | 2 (one plan, one diagnose) | Plan -> execute end to end: the agent's prompt is exactly `context_passed` + query, and nothing leaks by inheritance |
+| `ingest_embeddings.py` | 0 Claude; Voyage per new/stale row (`--dry-run` free) | The corpus vectors exist and re-ingestion is idempotent |
+| `check_day8_docs.py` | 1 (+1 Voyage query embed with a key) | The Docs agent answers from the seeded corpus with verbatim citations |
+| `check_day9_trace.py` | ~3, or **0** with `--fake-agents` | One Langfuse trace shows two agents running concurrently (needs the Langfuse keys; `--fake-agents` proves executor concurrency with scripted agents for free) |
 
 ```bash
 # One call per model. Validates diagnose() against the frozen contract.
@@ -90,6 +102,13 @@ uv run python scripts/check_agent_selection.py --all
 
 # Delegation end to end. 2 calls. Needs no Docker stack.
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day7_delegation.py
+
+# Docs agent against the seeded corpus. 1 call. Needs the stack.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py
+
+# One traced request with parallel agents. ~3 calls live; zero with --fake-agents.
+# Needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY either way.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents
 
 # Prints a full validated response. One call.
 uv run python examples/incident_structured_demo.py

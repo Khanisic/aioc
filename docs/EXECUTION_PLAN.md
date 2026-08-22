@@ -184,15 +184,43 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   Day 4 precedent where `IncidentReport` excludes the caller's plumbing. War story #7.
 - **Carried to Day 14:** model-written synthesis, alongside the refinement loop that needs it.
 
-### Day 8 — Docs agent and retrieval
+### Day 8 — Docs agent and retrieval ✅
 - **A:** Docs agent — prompt constrained to retrieved documents only, cites every claim.
 - **B:** pgvector ingestion pipeline — chunking, embeddings, metadata, hybrid search.
 - **Done when:** Docs agent answers from the seeded corpus with citations.
+- **Done:** `DocsAgent.answer` retrieves first (injectable `CorpusRetriever` seam), renders the
+  documents into the prompt, and enforces grounding in code - an uncited-in-retrieval
+  `document_id` or a paraphrased quote raises `DocsAgentError`; `Coverage` counters and the
+  `search_corpus` `ToolCallRef` are stamped by the runtime, never asked of the model.
+  Registered in the executor's `default_runners()` (pinned by test).
+- **Done (B):** `aioc.retrieval`: sha256-idempotent ingestion into `incident_embeddings`
+  (`04-embeddings.sql`, additive), pg_trgm + pgvector hybrid search fused with RRF, Voyage
+  behind the `Embedder` protocol, honest lexical-only `degraded` mode without a key.
+  Vectors ingested 2026-08-21 (18/18, `voyage-3.5`); hybrid search verified live.
+- **Carried:** the Day 8 done-when was proven offline plus real-corpus integration tests;
+  the 1-call live proof is `scripts/check_day8_docs.py`, still unspent.
 
-### Day 9 — Parallelism and tracing
+### Day 9 — Parallelism and tracing ✅
 - **A:** **Parallel Task calls** — Incident + Docs invoked in a single response.
 - **B:** Langfuse instrumentation — traces for every agent call, tool call, token count, cost.
 - **Done when:** One trace shows two agents running concurrently.
+- **Done:** the executor's parallel group now runs on a thread pool (the agents block on the
+  Anthropic SDK, so threads buy real overlap without an async rewrite); the sequential chain
+  stays ordered, results merge in plan order, and every runner gets its **own `Usage`
+  accumulator folded in after the join** - the HANDOFF's named race (`+=` on a shared
+  accumulator losing token counts silently) is closed by construction, not by a lock.
+  Concurrency is proven offline by a barrier test: each fake runner blocks until the *other*
+  arrives, so two clean responses are proof of overlap.
+- **Done (B):** `aioc.observability.tracing` - a `Tracer`/`RequestTrace`/`AgentSpan` seam with
+  a `NullTracer` null object and a `LangfuseTracer` adapter (SDK client built lazily, injectable
+  stub in tests). One trace per request: a `plan` span with the planning call's own tokens, one
+  `agent:<name>` span per invocation opened/closed in the worker thread that ran it (real wall
+  clock, visible overlap), `ToolCallRef` records as child events carrying their measured timing,
+  and `CoordinatorResponse.trace_id` filled from the trace. Tracing is **opt-in at the entry
+  point** (default `NullTracer`) so the offline suite stays network-free even with keys in `.env`.
+- **Carried:** the Langfuse-account checkpoint artifact (one trace in the UI showing the
+  overlap) needs keys from the accounts checklist; `scripts/check_day9_trace.py --fake-agents`
+  produces it for zero Claude calls once they exist.
 
 ### Day 10 — Integration: first real demo
 - **Both tracks:** End-to-end query: *"Why did latency spike after the last deploy?"*
