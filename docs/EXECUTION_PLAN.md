@@ -227,9 +227,23 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **Carried:** the ~3-call no-flag form (a real planned request, traced) is unspent; Day 10's
   demo exercises the same path.
 
-### Day 10 — Integration: first real demo
+### Day 10 — Integration: first real demo ✅
 - **Both tracks:** End-to-end query: *"Why did latency spike after the last deploy?"*
 - **Checkpoint:** Record a GIF. This is your first LinkedIn asset — capture it now.
+- **Done:** `scripts/demo_day10.py` runs the whole story live - inject `downstream_latency`,
+  render live Prometheus metrics as the situation block, then `respond()` end to end with
+  tracing. Two runs, both diagnosing the injected truth (measured numbers in
+  `docs/interview-prep/numbers.md`): the canonical query ran **Incident alone** (2 calls,
+  40.1s) because dynamic selection correctly judged it needs no docs lookup - the demo
+  author's "expect Incident + Docs" prediction losing to the coordinator's judgment is the
+  graded behaviour working; the showcase query (canonical + "how have we resolved similar
+  incidents before?") ran **Incident + Docs in parallel** (3 calls, 41.2s - two agents for
+  the wall-clock price of one), intent `mixed` @ 0.85, `downstream_latency` @ 0.72, 7
+  claims cited across 4 corpus documents, traced to Langfuse.
+- **Checkpoint captured:** `docs/assets/day10-demo.gif`, rendered from the run's recorded
+  transcript by `scripts/render_demo_gif.py` - the real lines and order, with only the
+  dead time compressed. Run 2 doubled as the pending Day 8 live proof (Docs agent
+  grounded, live) and the Day 9 real-request trace.
 
 ---
 

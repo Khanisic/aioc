@@ -139,15 +139,47 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **190** (183 offline + 7 `integration`-marked) |
-| Runtime | ~1.5s offline, ~3.8s with the Docker-backed integration tests |
+| Total tests | **255** (245 offline + 10 `integration`-marked) |
+| Runtime | ~2.7s with the Docker-backed integration tests included |
 | Live API calls needed | **0** |
 
-Split: 25 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 14 executor, 28 timeline tool, 30 correlate tool.
+Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 8 tracing.
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
 
 **And the honest counterweight, measured:** those 186 green tests did not catch the `round` bug that two live calls found on the first attempt (war story #7). Fake-driven tests inherit the assumptions of whoever wrote the fixtures. The offline suite proves the wiring; only a live call proves the model will fill it.
+
+---
+
+## The Day 10 end-to-end demo, measured
+
+Two live runs of `scripts/demo_day10.py` against injected `downstream_latency` chaos (payments-api +800ms), 2026-08-22, both traced to Langfuse and recorded under `test-results/`.
+
+**Run 1 - the canonical query** ("Why did latency spike after the last deploy?"):
+
+| | |
+|---|---|
+| Claude calls | **2** (plan + Incident; the coordinator *skipped* Docs, GitHub, Deployment with reasons) |
+| Cost | 12,469 in / 4,635 out tokens |
+| Wall clock | 40.1s |
+| Diagnosis | `downstream_latency` @ 0.62 - matches the injected truth |
+
+The interesting number is the 2, not the diagnosis: the demo script predicted Incident + Docs in parallel, and the coordinator correctly judged a pure diagnostic query needs no documentation lookup. Dynamic selection deciding *against* the demo author's expectation is the behaviour working, not failing - an empty `skipped_agents` would have been the bug.
+
+**Run 2 - the showcase query** (same, plus "how have we resolved similar payments-api latency incidents before?"):
+
+| | |
+|---|---|
+| Claude calls | **3** (plan + Incident + Docs, the two agents in parallel) |
+| Cost | 20,285 in / 7,742 out tokens |
+| Wall clock | 41.2s - two agents for roughly the wall-clock price of one (run 1 ran one agent in 40.1s) |
+| Intent | `mixed` @ 0.85 |
+| Diagnosis | `downstream_latency` @ 0.72 - matches the injected truth |
+| Docs grounding | 7 supported claims across 4 corpus documents, every quote verbatim (the in-code checks passed live) |
+
+Run 2 is also the first live proof of the Day 8 Docs agent and the Day 9 trace-on-a-real-request, in one spend. The near-identical wall clocks are the parallel executor visible in production numbers; the trace shows the two agent spans overlapping.
+
+One visible limitation, on purpose: the deterministic Day 7 synthesis adopted the Docs report (confidence 0.60) as the top-line answer over the Incident diagnosis (0.58), so the headline answers the historical half of the question. Merging both halves is exactly what the Day 14 model-written synthesis exists to buy.
 
 ---
 
@@ -157,6 +189,6 @@ Say this plainly rather than letting it be discovered:
 
 - **No eval harness.** Accuracy, hallucination rate, and tool-success rate are Day 19. The Day 5 checkpoint is a single-case preview of it.
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
-- **No cost or latency telemetry.** Langfuse is Day 9. Per-call durations are in `test-results/`, but there is no aggregate.
-- **Delegation is verified on one query, not a set.** The Day 7 check is a single case; the coordinator's routing has five, and delegation has one.
+- **No cost/latency aggregate.** Langfuse now traces every request (Day 9), and each response carries measured cost - but nothing aggregates across requests yet.
+- **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
 - **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.
