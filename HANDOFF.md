@@ -1,11 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 9** of 30, after parallel execution and Langfuse tracing landed.
+Written at the end of **Day 10** of 30, after the first real end-to-end demo ran and the
+checkpoint GIF was captured.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 10.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 11.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -89,6 +90,7 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `tools/incident/correlate_server.py` | **Day 7.** `correlate_events` stdio MCP server over the corpus (impulse Pearson over 60s event bins). All four error classes return distinctly - there is a named test producing each from real code paths. |
 | `tools/incident/store.py` | Shared Postgres settings for both servers (the `.env` port override lives through this). |
 | `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are ingested** (18/18, `voyage-3.5`, 2026-08-21) and hybrid search is live. |
+| `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
 | GitHub/Deployment agents | **Empty.** Days 11/12. The executor's `default_runners()` is where each one registers when it lands - nothing forces the registration (there is now a test pinning the current registration set), so wiring it is part of each agent's day. |
 
 ## 4. Environment traps - read before debugging anything
@@ -142,46 +144,50 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
 Costs nothing. Last run: **255 passed** (stack up, all 10 integration tests included),
-lint and mypy clean, after the Langfuse keys landed.
+lint and mypy clean, at the end of Day 10.
 
-The Day 9 live check has **passed** in its zero-cost mode (see §7 item 8 for the trace).
-Re-proving it costs nothing with `--fake-agents`; the default form runs one real request
-end to end (**~3 Claude calls**):
+The whole system has now been proven live end to end - the Day 10 demo (**~3 Claude
+calls** per run, needs the stack; `--skip-inject` reuses active chaos, `--query` overrides
+the canonical query):
 
 ```bash
-PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents
-PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py
+PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
+uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
 ```
 
-Day 8's docs check (`check_day8_docs.py`, 1 call) is still unspent, and Day 7's delegation
-check (`check_day7_delegation.py`, 2 calls) is still worth re-running after any coordinator
-prompt change.
+`check_day9_trace.py --fake-agents` remains the zero-cost tracing smoke test, and Day 7's
+delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running after any
+coordinator prompt change. Remember `make chaos-reset` (or
+`uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 10 - integration, the first real demo
+## 6. Next work: Day 11 - the GitHub agent
 
-**Checkpoint:** the end-to-end query *"Why did latency spike after the last deploy?"*,
-recorded as a GIF - the execution plan calls it the first LinkedIn asset.
+**From the plan:** A: GitHub agent - read repos, analyze PRs, explain diffs. B: GitHub MCP
+server wired in, scoped credentials, repo access verified.
 
 What already exists for it:
 
-- `respond(query, situation=..., tracer=default_tracer())` is the whole entry point:
-  plan -> parallel execution -> deterministic synthesis -> contract `CoordinatorResponse`,
-  traced end to end when the Langfuse keys are set.
-- The demo scenario is Day 4's `code_regression` chaos mode (a 500-spike tied to a
-  commit): `uv run python demo-app/chaos/inject.py --mode code_regression`, and
-  `build_incident_context` renders the live Prometheus metrics as the situation block
-  (see `scripts/check_day5_checkpoint.py` for the working pattern).
-- Expect the plan to select Incident + Docs in parallel and to skip github/deployment
-  with reasons - if it also *selects* them, they will come back as honest
-  `agent_not_implemented` gaps, which is correct behaviour worth showing rather than
-  hiding.
-- Cost per full demo run: ~3 Claude calls (plan + two agents), plus a Voyage query embed.
+- `GitHubFindings` is frozen in the contract (CONTRACTS.md §4.3) and executable in
+  `aioc.contracts` - read both before writing the agent. The `GitHubAgentResponse`
+  envelope already validates.
+- The agent pattern to follow is `agents/docs.py` (Day 8): a forced structured-output
+  tool whose schema is generated from the frozen models and annotated via
+  `agents/_annotate.py`, runtime-stamped plumbing, honest gaps. The Docs agent is the
+  better template than Incident because it also drives a tool loop before emitting.
+- Registration is part of the day: add the runner to the executor's `default_runners()`
+  and update `test_default_runners_register_incident_and_docs` (the test pins the set,
+  so forgetting the wiring fails the suite - that is by design).
+- **A `GITHUB_TOKEN` is needed** (accounts checklist): a fine-grained PAT with read-only
+  Contents / Pull requests / Metadata on the target repo, plus `GITHUB_REPO=owner/name`.
+  `.env.example` documents why read-only matters (the `permission` error class and the
+  Day 16 HITL gate are theatre against an over-scoped token).
+- The plan's Day 13 sequential path (GitHub reads the PR -> Deployment diffs the release)
+  is downstream; today's agent only needs to stand alone.
 
-There is no dedicated Day 10 script yet; decide on the day whether the demo is a small
-`scripts/demo_day10.py` or a documented command sequence. The GIF is the deliverable.
-
-Before the demo, spend the two pending live proofs if budget allows (see §7 items 7-8):
-they are the same 3-4 calls the demo costs and they de-risk it.
+The coordinator already routes github-shaped queries (selection was measured 5/5 with a
+`sequential_dependency` case), and the executor turns a selected-but-unregistered agent
+into an honest `agent_not_implemented` gap - so the day is done when that gap disappears
+for github queries.
 
 ## 7. Carried-over items, none blocking
 
@@ -209,18 +215,18 @@ they are the same 3-4 calls the demo costs and they de-risk it.
    passes (2 calls: one plan, one diagnose) and is worth re-running after any coordinator
    prompt change, but the routing check has five cases and this has one. Adding cases costs
    2 calls each. `check_day8_docs.py` has the same single-query shape.
-7. **The Docs agent has not been proven live yet** (no API call was spent on Day 8; the
-   done-when was proven with the offline suite plus real-corpus integration tests). First
-   session with budget: `PYTHONIOENCODING=utf-8 uv run python scripts/check_day8_docs.py`
-   (1 call).
+7. ~~The Docs agent has not been proven live yet.~~ **Resolved 2026-08-22 by the Day 10
+   demo (run 2)**: the Docs agent answered live from the seeded corpus through the
+   executor - 7 supported claims across 4 documents, every quote verbatim (the in-code
+   grounding checks passed on a real model response). `check_day8_docs.py` (1 call)
+   remains available as the dedicated single-agent form but is no longer a pending proof.
 8. ~~The Day 9 trace artifact does not exist yet - no Langfuse account.~~ **Resolved
    2026-08-22**: keys are in `.env` (US region - see the §4 trap; the first attempt
    401'd against the EU default and crashed on a `trace_url` nicety, both now fixed and
    regression-tested), and `check_day9_trace.py --fake-agents` **passed** for zero Claude
-   calls: two agent spans overlapping 1500 ms, trace
-   `a15143c60aa6fd3c8b97c18ad2eb97dc` in the Langfuse UI. Still open on this thread: the
-   ~3-call no-flag form (a real planned request) has not been spent - Day 10's demo
-   exercises the same path and can double as that proof.
+   calls (trace `a15143c60aa6fd3c8b97c18ad2eb97dc`). The real-request form is also done:
+   both Day 10 demo runs traced end to end, run 2 with Incident + Docs spans in parallel
+   (trace `812168341e05075daf5a96571cee75c0`).
 9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
    adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
    actually starts a request, so offline cost is import weight only.

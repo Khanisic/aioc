@@ -85,6 +85,7 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `ingest_embeddings.py` | 0 Claude; Voyage per new/stale row (`--dry-run` free) | The corpus vectors exist and re-ingestion is idempotent |
 | `check_day8_docs.py` | 1 (+1 Voyage query embed with a key) | The Docs agent answers from the seeded corpus with verbatim citations |
 | `check_day9_trace.py` | ~3, or **0** with `--fake-agents` | One Langfuse trace shows two agents running concurrently (needs the Langfuse keys; `--fake-agents` proves executor concurrency with scripted agents for free) |
+| `demo_day10.py` | ~3 per run | The whole system, live: inject chaos, build the situation from Prometheus, `respond()` end to end with tracing; records a timed transcript that `render_demo_gif.py` (free) turns into the demo GIF |
 
 ```bash
 # One call per model. Validates diagnose() against the frozen contract.
