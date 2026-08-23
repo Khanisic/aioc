@@ -262,8 +262,10 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   ungrounded PRs/commits/excerpts are rejected in code. Registered in `default_runners()`.
 - **Verified:** token is read-only (`pull_requests=read; contents=read`) and reads this repo's
   PRs, files, commits, and compares; the server answered PR #12 over stdio with zero Claude calls.
-- **Carried:** `scripts/check_day11_github.py` (~3-5 calls) could not run - the Anthropic key was
-  rejected (401) on 2026-08-23 after working for the Day 10 demo; re-run once the key is rotated.
+- **Checkpoint produced (2026-08-23):** after rotating the Anthropic key, `scripts/check_day11_github.py`
+  passed on PR #12 - one wire call, two Claude calls, 27.4 s, risk low @ 0.85, every excerpt grounded.
+  Seven attempts to get there, each failure a harness or prompt defect now pinned by a test (the
+  table is in `docs/interview-prep/numbers.md`).
 
 ### Day 12 — Deployment agent
 - **A:** Deployment agent — compare releases, check rollout health.

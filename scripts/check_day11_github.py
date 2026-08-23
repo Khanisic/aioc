@@ -112,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
                 type="llm_call",
                 message=f"{type(exc).__name__}: {exc}",
             )
+            report = getattr(exc, "report", None)
+            if report is not None:
+                run.artifact("rejected_report.json", report.model_dump_json(indent=2))
+                print(f"  the rejected report is saved as rejected_report.json in {run.dir}")
             print(f"  FAIL  {type(exc).__name__}: {exc}")
             return 1
 

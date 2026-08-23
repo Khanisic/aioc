@@ -266,3 +266,7 @@ One subprocess per agent run, closed on exit; the test for this opens the real s
 
 **What I would watch.** The keys-only redaction in patches is a regex over `KEY=value` / `KEY: value` lines plus known token shapes; it is tested, but it is a heuristic, and a value assigned to a lower-case key passes through.
 The contract's rule is enforced one layer up by `diff_release` on Day 12 for the config surface that matters most.
+
+**What the live run taught, the same day.** Seven attempts to the first clean pass, and not one failure was the model inventing data - the grounding check itself was wrong twice (it compared against JSON-escaped wire text, then refused a literal wire quote), the schema was silent about nesting once, and the emit tool was not on the loop's list.
+The last one changed the design: the emit tool is now offered *during* the investigation with a capturing handler, so a model that is done simply says so, and the forced second call is the fallback rather than the rule - 2 calls and 27 s instead of 3 and 82 s on the same PR.
+`GitHubAgentError` now carries the report it refused, which is what the Day 17 retry loop will feed back.

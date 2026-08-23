@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -124,7 +124,12 @@ class ReportedPullRequest(StrictModel):
 
 
 class ReportedFindings(StrictModel):
-    """`GitHubFindings` with the facts removed: PRs by number + judgement, commits by SHA."""
+    """`GitHubFindings` with the facts removed: PRs by number + judgement, commits by SHA.
+
+    `evidence` and `gaps` are deliberately absent: they live on the envelope, one level up.
+    The first live run put `gaps: []` here and the strict model rejected the whole report, so
+    the schema now says so on the object itself (the Day 4 lesson: rules stated only in the
+    prose do not hold; rules on the field do)."""
 
     ref: str | None = None
     pull_requests: list[ReportedPullRequest] = Field(default_factory=list)
@@ -151,6 +156,8 @@ The complete change-analysis report. Every property below is a top-level argumen
 tool - pass them directly; do not nest them inside a wrapper object.
 
 Rules validated after you answer - a violation rejects the whole report:
+0. `evidence` and `gaps` are top-level arguments of this tool. Never put them inside
+   `findings`; `findings` accepts no keys beyond its five.
 1. Every pull request `number`, every entry in `commit_shas`, and every `change_ref` must be
    something a tool call in this conversation actually returned. Never invent one.
 2. Every evidence `excerpt` from a commit or pull request must appear verbatim in a tool reply.
@@ -183,7 +190,12 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
         "overall_confidence": "Your confidence in the report as a whole, on the band table.",
     },
     "ReportedFindings": {
-        "ref": "The branch, tag, or SHA you examined, or null when the question named a PR.",
+        "ref": (
+            "The branch, tag, or SHA you examined, or null when the question named a PR. "
+            "NOTE: `findings` holds ONLY ref, pull_requests, commit_shas, suspect_changes, "
+            "and diff_summary. `evidence` and `gaps` go at the TOP LEVEL of the report, "
+            "never inside `findings` - an extra key here rejects the whole report."
+        ),
         "pull_requests": (
             "One entry per pull request you fetched AND that matters to the question, "
             "with your risk and summary judgements. Facts (title, state, SHA, counts) are "
@@ -195,10 +207,11 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "from the tool reply."
         ),
         "suspect_changes": (
-            "Changes that could explain an observed symptom, each linked to the symptom "
-            "with a confidence-scored `symptom_link`. Empty when the question asks for no "
-            "such link, or when nothing fetched plausibly explains it - say which in "
-            "`diff_summary`."
+            "Changes that PLAUSIBLY explain an observed symptom, each with a "
+            "confidence-scored `symptom_link`. Include an entry ONLY when that confidence "
+            "is 0.25 or higher. NEVER list a change in order to say it does not explain "
+            "the symptom - say that in `diff_summary` instead. When the query names no "
+            "symptom, or nothing fetched plausibly explains it, this list is EMPTY."
         ),
         "diff_summary": (
             "What the examined change(s) do, in plain language, as a judgement with "
@@ -224,7 +237,8 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
         "change_type_detail": "Null unless `change_type` is exactly `other`.",
         "symptom_link": (
             "How this change explains the symptom in the query, with confidence on the "
-            "band table and evidence ids. Below 0.25: leave the change out and add a gap."
+            "band table and evidence ids. Confidence below 0.25 with a non-null value is "
+            "rejected outright: below 0.25, do not list the change at all."
         ),
     },
     "Assessment_RiskLevel_": {
@@ -281,15 +295,18 @@ _EMIT_SCHEMA: dict[str, Any] = _apply_guidance(GitHubReport.model_json_schema())
 GITHUB_SYSTEM_PROMPT = f"""\
 {_GROUND_RULES}
 
-Work in two phases. First, investigate with the repository tools until you can answer the
-question or have established that you cannot. Then, when asked, report your findings by
-calling `{EMIT_TOOL_NAME}` exactly once, with no prose outside the tool call:
+Investigate with the repository tools until you can answer the question or have
+established that you cannot. Then report your findings by calling `{EMIT_TOOL_NAME}`
+exactly once - the report is the only output that counts, so call it as soon as you have
+what it needs and write no prose afterwards:
 
 - List the pull requests that matter under `pull_requests` by number, with your `risk` and
   `summary` judgements; list relevant commits under `commit_shas`. Facts are filled in from
   the tool replies - do not repeat them.
 - If the question links code to a symptom, list `suspect_changes` - each a fetched SHA or
-  `#<number>` with a `change_type` and a confidence-scored `symptom_link`.
+  `#<number>` with a `change_type` and a confidence-scored `symptom_link` of at least
+  0.25. A change that does NOT explain the symptom is not a suspect: leave it out and say
+  so in `diff_summary`. No symptom in the question means an empty `suspect_changes`.
 - Write `diff_summary` as a judgement with confidence and evidence ids. If nothing could be
   read, set its `value` to null and record a gap naming `findings.diff_summary.value`.
 - Every evidence entry quotes a tool reply VERBATIM. Leave `tool_call_id` null; the runtime
@@ -311,7 +328,15 @@ _EMIT_INSTRUCTION = (
 class GitHubAgentError(RuntimeError):
     """The model did not return usable structured output, or its output referenced data it
     was never given. A malformed-but-present payload raises pydantic's ``ValidationError``
-    instead."""
+    instead.
+
+    ``report`` carries the validated-but-ungrounded report when there is one, so a caller
+    (the check script today, the Day 17 validation-retry loop later) can see exactly what
+    the model wrote rather than only why it was refused."""
+
+    def __init__(self, message: str, *, report: GitHubReport | None = None) -> None:
+        super().__init__(message)
+        self.report = report
 
 
 def _emit_never_runs(_args: dict[str, Any]) -> ToolResult:
@@ -408,7 +433,14 @@ class _Ledger:
                 )
             )
             self.ref_for_record[record.id] = tc_id
-            self.outputs.append((tc_id, _normalise(record.output)))
+            # Ground against the DECODED strings, not the wire text: on the wire a commit
+            # message's quotes, newlines, and non-ASCII are JSON-escaped, so a faithful
+            # excerpt would never match the raw output (the first live run failed on this).
+            leaves = list(_string_leaves(envelope)) if envelope is not None else []
+            # The raw wire text stays too: a model that quotes `"touched_paths": [...]` as
+            # it saw it is being faithful, not sloppy.
+            texts = [record.output, *leaves, *(_unmarked(leaf) for leaf in leaves)]
+            self.outputs.append((tc_id, " | ".join(_normalise(t) for t in texts if t)))
 
     def _index(self, data: dict[str, Any], tc_id: str) -> None:
         if isinstance(data.get("repository"), str):
@@ -451,6 +483,34 @@ class _Ledger:
             if needle in text:
                 return tc_id
         return None
+
+
+def _string_leaves(value: Any) -> Iterator[str]:
+    """Every string in a decoded JSON value, depth first, in document order."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _string_leaves(item)
+    elif isinstance(value, list):
+        if value and all(isinstance(item, str) for item in value):
+            # A list of strings (touched paths, say) is quoted naturally as "a, b, c";
+            # accept that join as well as each element on its own.
+            yield ", ".join(value)
+        for item in value:
+            yield from _string_leaves(item)
+
+
+_DIFF_MARKER = re.compile(r"^[+\- ]", re.MULTILINE)
+
+
+def _unmarked(text: str) -> str:
+    """A multi-line patch hunk with its per-line `+`/`-`/space markers removed. Quoting a
+    hunk that way is still verbatim content; quoting it with the markers is too."""
+    if "\n" not in text:
+        return ""
+    stripped = _DIFF_MARKER.sub("", text)
+    return stripped if stripped != text else ""
 
 
 def _parse_envelope(text: str) -> dict[str, Any] | None:
@@ -524,40 +584,65 @@ class GitHubAgent:
             )
 
         prompt = self._prompt(query.strip(), context.strip())
+        # The emit tool is offered during the investigation too, with a handler that
+        # captures the payload: a model that finishes early and emits on its own is done,
+        # and the forced second call is skipped (the first live run spent two rounds
+        # calling an emit tool that was not yet on the list). The last capture wins.
+        captured: list[dict[str, Any]] = []
+
+        def capture(args: dict[str, Any]) -> ToolResult:
+            captured.append(dict(args))
+            return ToolResult(content="Report recorded. Stop; no further output is needed.")
+
+        emit_tool = ToolSpec(
+            name=EMIT_TOOL_NAME,
+            description=_EMIT_TOOL.description,
+            input_schema=_EMIT_TOOL.input_schema,
+            handler=capture,
+        )
         with self._toolset() as toolset:
             server = toolset.server_name
             data_tools = list(toolset.tools)
             loop = self._client.run_tool_loop(
                 messages=[{"role": "user", "content": prompt}],
-                tools=data_tools,
+                tools=[*data_tools, emit_tool],
                 system=GITHUB_SYSTEM_PROMPT,
                 max_iterations=self._max_rounds,
             )
         if usage is not None:
             usage.add(loop.usage)
 
-        # Phase 2: the same conversation, now forced through the emit tool. The data tools
-        # stay defined so the prior tool_use blocks in the history remain well-formed.
-        resp = self._client.complete(
-            messages=[*loop.messages, {"role": "user", "content": _EMIT_INSTRUCTION}],
-            system=GITHUB_SYSTEM_PROMPT,
-            tools=[*data_tools, _EMIT_TOOL],
-            tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
-        )
-        if usage is not None:
-            usage.input_tokens += resp.usage.input_tokens
-            usage.output_tokens += resp.usage.output_tokens
-        if resp.stop_reason == "max_tokens":
-            raise GitHubAgentError(
-                f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
-                f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
-                "Raise AIOC_MAX_TOKENS or narrow the query."
+        if captured:
+            payload = captured[-1]
+        else:
+            # Phase 2: the same conversation, now forced through the emit tool. The data
+            # tools stay defined so the prior tool_use blocks in the history stay valid.
+            resp = self._client.complete(
+                messages=[*loop.messages, {"role": "user", "content": _EMIT_INSTRUCTION}],
+                system=GITHUB_SYSTEM_PROMPT,
+                tools=[*data_tools, emit_tool],
+                tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
             )
+            if usage is not None:
+                usage.input_tokens += resp.usage.input_tokens
+                usage.output_tokens += resp.usage.output_tokens
+            if resp.stop_reason == "max_tokens":
+                raise GitHubAgentError(
+                    f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
+                    f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
+                    "Raise AIOC_MAX_TOKENS or narrow the query."
+                )
+            payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
 
-        payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
         report = GitHubReport.model_validate(payload)
-        ledger = _Ledger(loop.tool_calls, server)
-        return self._assemble(report, ledger, request_id, invocation_id)
+        # Only wire calls are tool calls. The emit capture is this process's own bookkeeping.
+        wire_calls = [r for r in loop.tool_calls if r.name != EMIT_TOOL_NAME]
+        ledger = _Ledger(wire_calls, server)
+        try:
+            return self._assemble(report, ledger, request_id, invocation_id)
+        except GitHubAgentError as exc:
+            exc.report = report
+            raise
 
     @staticmethod
     def _prompt(query: str, context: str) -> str:

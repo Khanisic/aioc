@@ -139,11 +139,11 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **318** (308 offline + 10 `integration`-marked) |
+| Total tests | **323** (313 offline + 10 `integration`-marked) |
 | Runtime | ~80s offline (the Day 11 MCP-wire tests launch a real server subprocess, ~20s of it) |
 | Live API calls needed | **0** |
 
-Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 8 tracing, 18 github agent, 38 github tool, 7 MCP toolset (real stdio wire, token blanked so no network).
+Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 8 tracing, 23 github agent, 38 github tool, 7 MCP toolset (real stdio wire, token blanked so no network).
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
 
@@ -180,6 +180,34 @@ The interesting number is the 2, not the diagnosis: the demo script predicted In
 Run 2 is also the first live proof of the Day 8 Docs agent and the Day 9 trace-on-a-real-request, in one spend. The near-identical wall clocks are the parallel executor visible in production numbers; the trace shows the two agent spans overlapping.
 
 One visible limitation, on purpose: the deterministic Day 7 synthesis adopted the Docs report (confidence 0.60) as the top-line answer over the Incident diagnosis (0.58), so the headline answers the historical half of the question. Merging both halves is exactly what the Day 14 model-written synthesis exists to buy.
+
+---
+
+## The Day 11 GitHub agent, live
+
+`scripts/check_day11_github.py`, PR #12 of this repository, Sonnet, 2026-08-23. Seven live attempts before the first clean pass; every failure was in the harness or the prompt, never in the wire - and each is now a named regression test.
+
+| Attempt | Outcome | Cause | Fix |
+|---|---|---|---|
+| 1 | `ValidationError`: `findings.gaps` extra field | the model nested `gaps: []` inside `findings`; the rule lived only in the system prompt | the no-nesting rule stated on the schema object itself (the Day 4 lesson again) |
+| 2 | grounding rejected a verbatim excerpt | the check compared excerpts against the raw JSON wire text, where quotes and newlines are escaped | ground against the decoded string values |
+| 3-4 | grounding rejected `"touched_paths": [...]` | the model quoted the wire text literally, which the decoded-only check then refused; also a list quoted as `a, b, c` | accept raw wire text, decoded leaves, `", "`-joined string lists, and patch hunks quoted without their `+`/`-` markers |
+| 5 | contract sec 2.1: `symptom_link` value non-null at confidence 0.1 | the model listed a change to say it did *not* explain a symptom | schema guidance: a change below 0.25 is not a suspect; say so in `diff_summary` |
+| 6 | **PASS**, but two phantom `transient` tool calls | the model called `emit_github_report` during the investigation, where it was not offered; the harness's "unknown tool" error was recorded as a wire call | the emit tool is offered in the loop with a capturing handler; non-wire records never become `ToolCallRef`s |
+| 7 | **PASS**, clean | | |
+
+(Attempt 4 was a wasted repeat of 3: an edit script aborted before writing and the run went out unchanged. Counted honestly.)
+
+| | Attempt 6 (three-call path) | Attempt 7 (emit inside the loop) |
+|---|---|---|
+| Claude calls | 3 (two investigation rounds + forced emit) | 2 |
+| Wire calls | 1 (`get_pull_request`, include_patch) | 1 |
+| Input / output tokens | 89,984 / 7,908 | 56,643 / 2,295 |
+| Wall clock | 81.8 s | 27.4 s |
+| Verdict | PR #12 merged, 8 files +549/-48, risk **low @ 0.85**, `diff_summary` @ 0.85 | same |
+| Evidence / gaps | 6 / 2 (two patches truncated at 4000 chars - reported, not hidden) | 3 / 1 |
+
+The input-token number is dominated by the PR's patch (~7.1k tokens by `meta.token_estimate`) being re-sent on every round, which is the Day 21 trimming work's target. The rejected reports from attempts 1-6 are saved under `test-results/runs/2026-08-23/` - `GitHubAgentError` now carries the report it refused, which is the input the Day 17 validation-retry loop consumes.
 
 ---
 

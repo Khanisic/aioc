@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 318-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 323-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
@@ -142,11 +142,11 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 318 passed
+uv run pytest -q                                                   # expect 323 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **308 passed, 10 skipped** (stack was down; the 10 integration
+Costs nothing. Last run: **313 passed, 10 skipped** (stack was down; the 10 integration
 tests skip), lint and mypy clean, at the end of Day 11. The suite now takes ~80s: the
 `test_mcp_toolset.py` tests launch the real GitHub server subprocess.
 
@@ -186,10 +186,9 @@ What already exists for it:
 - Registration: `default_runners()` + the pinning test, same as every agent day.
 - Day 13 chains GitHub -> Deployment sequentially; today's agent only needs to stand alone.
 
-**First, re-run the Day 11 live check** once the Anthropic credential is restored - a
-rotated key, or Workload Identity Federation (sec 7 item 10 has both paths):
-`PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py` (~3-5 calls). Its
-numbers belong in `docs/interview-prep/numbers.md`.
+The Day 11 live check has passed (2026-08-23, numbers in `docs/interview-prep/numbers.md`);
+`check_day11_github.py` (~2-3 calls) is the regression to re-run after any change to the
+GitHub agent's prompt or schema guidance.
 
 <!-- superseded Day 11 notes follow, kept for the record -->
 **Day 11 as planned:** A: GitHub agent - read repos, analyze PRs, explain diffs. B: GitHub MCP
@@ -257,7 +256,9 @@ for github queries.
    calls (trace `a15143c60aa6fd3c8b97c18ad2eb97dc`). The real-request form is also done:
    both Day 10 demo runs traced end to end, run 2 with Incident + Docs spans in parallel
    (trace `812168341e05075daf5a96571cee75c0`).
-10. **The Anthropic API key was rejected (401 "API key is invalid") on 2026-08-23**, on a
+10. ~~The Anthropic API key was rejected (401) on 2026-08-23.~~ **Resolved the same day by
+   rotating the key**; the Day 11 live check then passed. The WIF notes below stay because
+   they are the keyless path for CI. Original record: the key was rejected on a
    free `models.list` call, after working for both Day 10 demo runs the day before. Nothing
    in the repo touched it (the `.env` value hashes identically to what `LLMSettings` loads,
    and no shell variable shadows it), so it was revoked or rotated at console.anthropic.com.

@@ -346,7 +346,12 @@ def test_context_is_passed_explicitly_and_the_emit_call_is_forced():
     assert first["system"] == GITHUB_SYSTEM_PROMPT
     user_text = first["messages"][0]["content"]
     assert _CONTEXT in user_text and _QUERY in user_text
-    assert {t["name"] for t in first["tools"]} == {"get_pull_request", "list_commits", "diff_refs"}
+    assert {t["name"] for t in first["tools"]} == {
+        "get_pull_request",
+        "list_commits",
+        "diff_refs",
+        GITHUB_EMIT_TOOL_NAME,  # offered, never forced, during the investigation
+    }
     assert "tool_choice" not in first or first["tool_choice"] is None
 
     emit = messages.calls[2]
@@ -355,6 +360,32 @@ def test_context_is_passed_explicitly_and_the_emit_call_is_forced():
     # The whole investigation (assistant turns + tool results) precedes the emit request.
     roles = [m["role"] for m in emit["messages"]]
     assert roles == ["user", "assistant", "user", "assistant", "user"]
+
+
+def test_a_model_that_emits_inside_the_loop_skips_the_forced_call():
+    """Live run 6: the model called the emit tool on its own. Offering it in the loop
+    makes that the cheap path - two calls, not three - and the capture is not a wire call."""
+    script = [
+        _tool_call_message("get_pull_request", {"number": 12}),
+        _message(
+            [
+                ToolUseBlock(
+                    type="tool_use", id="toolu_2", name=GITHUB_EMIT_TOOL_NAME, input=_report()
+                )
+            ],
+            stop_reason="tool_use",
+        ),
+        _done_message(),
+    ]
+    agent, messages, _ = _agent(script)
+    usage = Usage()
+    resp = agent.analyze(_QUERY, context=_CONTEXT, usage=usage)
+    assert len(messages.calls) == 3 and "tool_choice" not in messages.calls[-1]
+    assert [tc.tool_name for tc in resp.tool_calls] == ["get_pull_request"]
+    assert resp.findings.pull_requests[0].number == 12
+    assert usage.input_tokens == 1500
+    # The emit tool is on the loop's list from the first call.
+    assert GITHUB_EMIT_TOOL_NAME in {t["name"] for t in messages.calls[0]["tools"]}
 
 
 @pytest.mark.parametrize("bad", ["", "   "])
@@ -398,6 +429,59 @@ def test_a_paraphrased_excerpt_is_rejected():
     agent, _, _ = _agent([*_SCRIPT, _emit_message(report)])
     with pytest.raises(GitHubAgentError, match="does not appear verbatim"):
         agent.analyze(_QUERY, context=_CONTEXT)
+
+
+def test_excerpts_are_grounded_against_decoded_text_not_json_escaped_wire_text():
+    """Regression from the first live run: a commit message with quotes and a newline is
+    JSON-escaped on the wire, so a verbatim excerpt never matched the raw output."""
+    message = 'Fix the "pool" ceiling' + chr(10) + chr(10) + "DB_POOL_MAX was lowered by mistake"
+    envelope = _pr_envelope()
+    envelope["data"]["commits"][0]["message"] = message
+    report = _report()
+    report["evidence"][1]["excerpt"] = 'Fix the "pool" ceiling DB_POOL_MAX was lowered by mistake'
+    agent, _, _ = _agent([*_SCRIPT, _emit_message(report)], envelope=envelope)
+    resp = agent.analyze(_QUERY, context=_CONTEXT)
+    assert resp.findings.commits[0].message == message
+    assert resp.evidence[1].tool_call_id == resp.tool_calls[0].id
+
+
+def test_an_excerpt_quoting_the_wire_text_literally_is_grounded():
+    """The model may quote what it saw on the wire - a JSON fragment like
+    `"touched_paths": ["CLAUDE.md", ...]` is faithful, not a paraphrase (live run 4)."""
+    report = _report()
+    report["evidence"][0]["excerpt"] = (
+        '"touched_paths": ["CLAUDE.md", "HANDOFF.md", "scripts/demo_day10.py"]'
+    )
+    agent, _, _ = _agent([*_SCRIPT, _emit_message(report)])
+    resp = agent.analyze(_QUERY, context=_CONTEXT)
+    assert resp.evidence[0].tool_call_id == resp.tool_calls[0].id
+
+
+def test_a_patch_hunk_quoted_without_diff_markers_is_grounded():
+    """Multi-line patch text quoted without the per-line +/- markers is still verbatim."""
+    hunk = (
+        "+Costs ~3 Claude API calls"
+        + chr(10)
+        + "+plus a Voyage query embed"
+        + chr(10)
+        + " unchanged line"
+    )
+    envelope = _pr_envelope()
+    envelope["data"]["commits"][0]["message"] = hunk
+    report = _report()
+    report["evidence"][1]["excerpt"] = "Costs ~3 Claude API calls plus a Voyage query embed"
+    agent, _, _ = _agent([*_SCRIPT, _emit_message(report)], envelope=envelope)
+    resp = agent.analyze(_QUERY, context=_CONTEXT)
+    assert resp.evidence[1].tool_call_id == resp.tool_calls[0].id
+
+
+def test_a_rejected_report_rides_on_the_error_for_the_retry_loop():
+    report = _report()
+    report["evidence"][0]["excerpt"] = "a paraphrase that appears nowhere"
+    agent, _, _ = _agent([*_SCRIPT, _emit_message(report)])
+    with pytest.raises(GitHubAgentError) as exc:
+        agent.analyze(_QUERY, context=_CONTEXT)
+    assert exc.value.report is not None and exc.value.report.evidence[0].id == "ev_1"
 
 
 def test_evidence_citing_an_unfetched_source_is_rejected():
