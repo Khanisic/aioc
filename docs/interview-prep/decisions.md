@@ -241,3 +241,28 @@ Instrumenting inside the agents would buy timing granularity the trace does not 
 The one honesty compromise: `ToolCallRef` timings are recorded after the fact, so they ride as child events whose metadata carries the measured `started_at` and `duration_ms` rather than as retro-timed spans.
 
 **What I would watch.** The Langfuse adapter is pinned to the v4 SDK observation API by offline stub tests; an SDK major bump is a deliberate adapter change, not a transitive surprise.
+
+---
+
+## 17. The GitHub agent consumes a custom MCP server over the real wire, and the model never owns a fact
+
+**Context.** Day 11 needed the GitHub agent to read repositories.
+The plan said "GitHub MCP server wired in", which could mean GitHub's official server (a ~50-tool surface, Docker at runtime) or a custom one.
+Until Day 11 no agent had consumed an AIOC MCP server at all - Incident reads Prometheus and Docs reads the corpus in-process - so the contract's tool envelope and error taxonomy were real for tests and for Claude Code, but not for the reasoning layer.
+
+**Decision.** A custom stdio server, `aioc-github`, with three tools (`get_pull_request`, `list_commits`, `diff_refs`) over the GitHub REST API, and a reusable client seam (`aioc.llm.mcp.McpStdioToolset`) that launches any stdio server as a subprocess and exposes its tools as harness `ToolSpec`s.
+The agent drives those in an ordinary `run_tool_loop`, then is forced through `emit_github_report`.
+The official server was rejected for three reasons: its descriptions are not ours (part 4 of the template is the routing-case-study intervention), its error shape is not the contract's, and a Docker-at-runtime dependency for one agent is a demo liability.
+
+**The schema split is the interesting part.** `PullRequestAnalysis` is mostly facts - title, state, head SHA, counts, paths - that the tool just returned.
+The model is asked for a PR number plus its two judgements (`risk`, `summary`), and the runtime stamps every fact from a ledger built from the tool replies.
+`CommitRef` is all facts, so the model reports SHAs only.
+This is the planner's `round` lesson (war story #7) applied wholesale: plumbing the process already knows is a field the model can only get wrong.
+The same ledger grounds the report - a PR, SHA, `change_ref`, or excerpt that no tool call returned raises, exactly as the Docs agent rejects an unretrieved document.
+
+**Why a thread owns the MCP session.** The MCP client is async and its transport must be entered and exited from one task; the agents are synchronous and already run on the executor's worker threads in the parallel group.
+So the session lives on one dedicated thread with its own event loop for the toolset's lifetime, and calls are submitted to it from whichever thread asks.
+One subprocess per agent run, closed on exit; the test for this opens the real server with a blanked token so the wire is exercised and the network is not.
+
+**What I would watch.** The keys-only redaction in patches is a regex over `KEY=value` / `KEY: value` lines plus known token shapes; it is tested, but it is a heuristic, and a value assigned to a lower-case key passes through.
+The contract's rule is enforced one layer up by `diff_release` on Day 12 for the config surface that matters most.

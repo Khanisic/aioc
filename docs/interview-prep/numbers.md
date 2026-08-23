@@ -139,11 +139,11 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **255** (245 offline + 10 `integration`-marked) |
-| Runtime | ~2.7s with the Docker-backed integration tests included |
+| Total tests | **318** (308 offline + 10 `integration`-marked) |
+| Runtime | ~80s offline (the Day 11 MCP-wire tests launch a real server subprocess, ~20s of it) |
 | Live API calls needed | **0** |
 
-Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 8 tracing.
+Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 8 tracing, 18 github agent, 38 github tool, 7 MCP toolset (real stdio wire, token blanked so no network).
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
 

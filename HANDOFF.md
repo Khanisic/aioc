@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 10** of 30, after the first real end-to-end demo ran and the
-checkpoint GIF was captured.
+Written at the end of **Day 11** of 30, after the GitHub agent landed as the first agent to
+consume an AIOC MCP server over the real wire.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 11.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 12.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 253-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 318-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
@@ -89,9 +89,12 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
 | `tools/incident/correlate_server.py` | **Day 7.** `correlate_events` stdio MCP server over the corpus (impulse Pearson over 60s event bins). All four error classes return distinctly - there is a named test producing each from real code paths. |
 | `tools/incident/store.py` | Shared Postgres settings for both servers (the `.env` port override lives through this). |
+| `tools/github/` | **Day 11.** `api.py` (read-only REST client, four-class error mapping: `GITHUB_SCOPE_MISSING` permission, `NOT_FOUND` business, `GITHUB_RATE_LIMITED`/`GITHUB_UNAVAILABLE` transient, `GITHUB_REJECTED_INPUT` validation) + `server.py` (the `aioc-github` stdio server: `get_pull_request`, `list_commits`, `diff_refs`; keys-only patch redaction; bounded output with honest `meta.truncated`). Verified over the wire against this repo, zero Claude calls. |
+| `llm/mcp.py` | **Day 11.** `McpStdioToolset`: launches a stdio MCP server as a subprocess (same interpreter, `-m module`) and exposes its tools as `ToolSpec`s; the session lives on a dedicated thread so sync agents on the executor's worker threads can call it. Reuse it for Day 12. |
+| `agents/github.py` | **Day 11.** `GitHubAgent.analyze`: opens the toolset (injectable `Toolset` seam), `run_tool_loop` with the three tools, then a forced `emit_github_report`. Facts stamped from the ledger of tool replies; an unfetched PR/SHA/`change_ref` or a paraphrased excerpt raises `GitHubAgentError`; each wire call is a contract `ToolCallRef`. Registered in `default_runners()`. |
 | `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are ingested** (18/18, `voyage-3.5`, 2026-08-21) and hybrid search is live. |
 | `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
-| GitHub/Deployment agents | **Empty.** Days 11/12. The executor's `default_runners()` is where each one registers when it lands - nothing forces the registration (there is now a test pinning the current registration set), so wiring it is part of each agent's day. |
+| Deployment agent | **Empty.** Day 12. Register it in `default_runners()` and update the test that pins the set (`test_default_runners_register_incident_docs_and_github`). |
 
 ## 4. Environment traps - read before debugging anything
 
@@ -139,12 +142,13 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 255 passed
+uv run pytest -q                                                   # expect 318 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **255 passed** (stack up, all 10 integration tests included),
-lint and mypy clean, at the end of Day 10.
+Costs nothing. Last run: **308 passed, 10 skipped** (stack was down; the 10 integration
+tests skip), lint and mypy clean, at the end of Day 11. The suite now takes ~80s: the
+`test_mcp_toolset.py` tests launch the real GitHub server subprocess.
 
 The whole system has now been proven live end to end - the Day 10 demo (**~3 Claude
 calls** per run, needs the stack; `--skip-inject` reuses active chaos, `--query` overrides
@@ -160,10 +164,35 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 11 - the GitHub agent
+## 6. Next work: Day 12 - the Deployment agent
 
-**From the plan:** A: GitHub agent - read repos, analyze PRs, explain diffs. B: GitHub MCP
-server wired in, scoped credentials, repo access verified.
+**From the plan:** A: Deployment agent - compare releases, check rollout health. B:
+`diff_release` and `check_rollout_health` custom tools (CONTRACTS.md sec 7.3, 7.4 - these
+two ARE contract-named tools, so their input/output schemas are frozen; read sec 7 first).
+
+What already exists for it:
+
+- `DeploymentFindings` is frozen (sec 4.4) and executable. `changed_config_keys` is keys
+  only and `approval` is an `ApprovalRequirement` - the Day 16 HITL gate reads it.
+- **The pattern to copy is Day 11 end to end:** a stdio server under `tools/deployment/`
+  following `tools/github/server.py` (envelope, hand validation, four-part descriptions),
+  consumed by the agent through `McpStdioToolset.for_module(...)` exactly as
+  `agents/github.py` does, with facts stamped from the tool replies and ungrounded
+  references rejected. The `Toolset` protocol and `_Ledger` idea in `github.py` are worth
+  lifting into a shared helper once a second agent needs them.
+- Data source: the demo app exposes `/version` per service (`DEMO_GIT_SHA`), Prometheus
+  has the rollout signals, and `diff_release` can compare git refs through the Day 11
+  `GitHubApi.compare` - the release diff is the GitHub diff plus the config-key diff.
+- Registration: `default_runners()` + the pinning test, same as every agent day.
+- Day 13 chains GitHub -> Deployment sequentially; today's agent only needs to stand alone.
+
+**First, re-run the Day 11 live check** once the Anthropic key is rotated (sec 7 item 10):
+`PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py` (~3-5 calls). Its
+numbers belong in `docs/interview-prep/numbers.md`.
+
+<!-- superseded Day 11 notes follow, kept for the record -->
+**Day 11 as planned:** A: GitHub agent - read repos, analyze PRs, explain diffs. B: GitHub MCP
+server wired in, scoped credentials, repo access verified. Done; see sec 3.
 
 What already exists for it:
 
@@ -227,6 +256,16 @@ for github queries.
    calls (trace `a15143c60aa6fd3c8b97c18ad2eb97dc`). The real-request form is also done:
    both Day 10 demo runs traced end to end, run 2 with Incident + Docs spans in parallel
    (trace `812168341e05075daf5a96571cee75c0`).
+10. **The Anthropic API key was rejected (401 "API key is invalid") on 2026-08-23**, on a
+   free `models.list` call, after working for both Day 10 demo runs the day before. Nothing
+   in the repo touched it (the `.env` value hashes identically to what `LLMSettings` loads,
+   and no shell variable shadows it), so it was revoked or rotated at console.anthropic.com.
+   Until it is replaced, every live script fails before doing anything; the offline suite
+   is unaffected. The Day 11 live check is the first thing to run afterwards.
+11. **Five more additive error codes** joined item 3's paperwork queue with the GitHub
+   server: `NOT_FOUND`, `GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `GITHUB_REJECTED_INPUT`,
+   `REPOSITORY_NOT_CONFIGURED`. (`GITHUB_SCOPE_MISSING` is already in sec 6.4.) The same
+   `1.0.1` entry clears them all.
 9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
    adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
    actually starts a request, so offline cost is import weight only.

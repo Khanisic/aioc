@@ -61,7 +61,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import uuid4
 
-from aioc.agents import DocsAgent, IncidentAgent
+from aioc.agents import DocsAgent, GitHubAgent, IncidentAgent
 from aioc.contracts import (
     AgentInvocation,
     AgentName,
@@ -155,9 +155,40 @@ class DocsRunner:
         )
 
 
+class GitHubRunner:
+    """Adapts `GitHubAgent.analyze` to the `AgentRunner` protocol - the same straight
+    pass-through as the other two, for the same reason. The agent's tool calls over the
+    MCP wire happen inside the agent, after the handoff; the runner passes exactly
+    ``context_passed`` and nothing else."""
+
+    def __init__(self, agent: GitHubAgent | None = None) -> None:
+        self._agent = agent or GitHubAgent()
+
+    def run(
+        self,
+        query: str,
+        *,
+        context: str,
+        request_id: str,
+        invocation_id: str,
+        usage: Usage,
+    ) -> AgentResponse:
+        return self._agent.analyze(
+            query,
+            context=context,
+            request_id=request_id,
+            invocation_id=invocation_id,
+            usage=usage,
+        )
+
+
 def default_runners() -> dict[AgentName, AgentRunner]:
-    """Every agent that exists today. Days 11/12 add github and deployment."""
-    return {AgentName.INCIDENT: IncidentRunner(), AgentName.DOCS: DocsRunner()}
+    """Every agent that exists today. Day 12 adds deployment."""
+    return {
+        AgentName.INCIDENT: IncidentRunner(),
+        AgentName.DOCS: DocsRunner(),
+        AgentName.GITHUB: GitHubRunner(),
+    }
 
 
 def _new_id(prefix: str) -> str:
