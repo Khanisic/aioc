@@ -251,9 +251,21 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 *Goal: all four agents live, plus the routing case study.*
 
-### Day 11 — GitHub agent
+### Day 11 — GitHub agent ✅
 - **A:** GitHub agent — read repos, analyze PRs, explain diffs.
 - **B:** GitHub MCP server wired in, scoped credentials, repo access verified.
+- **Done (2026-08-23):** `src/aioc/tools/github/` is a custom stdio MCP server (`get_pull_request`,
+  `list_commits`, `diff_refs`) over the GitHub REST API - four-class errors, `GITHUB_SCOPE_MISSING`
+  for a missing/under-scoped token, keys-only patch redaction, bounded output with honest
+  `meta.truncated`. `aioc.llm.mcp.McpStdioToolset` is the client seam; the GitHub agent is the
+  first agent to consume an AIOC tool over the real wire. Facts are stamped from tool replies,
+  ungrounded PRs/commits/excerpts are rejected in code. Registered in `default_runners()`.
+- **Verified:** token is read-only (`pull_requests=read; contents=read`) and reads this repo's
+  PRs, files, commits, and compares; the server answered PR #12 over stdio with zero Claude calls.
+- **Checkpoint produced (2026-08-23):** after rotating the Anthropic key, `scripts/check_day11_github.py`
+  passed on PR #12 - one wire call, two Claude calls, 27.4 s, risk low @ 0.85, every excerpt grounded.
+  Seven attempts to get there, each failure a harness or prompt defect now pinned by a test (the
+  table is in `docs/interview-prep/numbers.md`).
 
 ### Day 12 — Deployment agent
 - **A:** Deployment agent — compare releases, check rollout health.

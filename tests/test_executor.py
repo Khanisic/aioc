@@ -524,15 +524,14 @@ def test_a_cyclic_plan_is_rejected_at_validation():
 # ------------------------------------------------------------------------- registration
 
 
-def test_default_runners_register_incident_and_docs():
-    """Day 8's easy-to-forget step: the Docs agent is wired into the default executor.
-
-    Nothing else forces this registration (HANDOFF called it out) - until Days 11/12,
-    github and deployment are the only honest agent_not_implemented gaps left.
+def test_default_runners_register_incident_docs_and_github():
+    """The easy-to-forget step each agent day has: wiring the agent into the default
+    executor. Nothing else forces this registration (HANDOFF calls it out) - until Day 12,
+    deployment is the only honest agent_not_implemented gap left.
     """
     from aioc.coordinator.executor import default_runners
 
-    assert set(default_runners()) == {AgentName.INCIDENT, AgentName.DOCS}
+    assert set(default_runners()) == {AgentName.INCIDENT, AgentName.DOCS, AgentName.GITHUB}
 
 
 # ---------------------------------------------------- Day 9: the parallel group is parallel
