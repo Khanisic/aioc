@@ -186,7 +186,8 @@ What already exists for it:
 - Registration: `default_runners()` + the pinning test, same as every agent day.
 - Day 13 chains GitHub -> Deployment sequentially; today's agent only needs to stand alone.
 
-**First, re-run the Day 11 live check** once the Anthropic key is rotated (sec 7 item 10):
+**First, re-run the Day 11 live check** once the Anthropic credential is restored - a
+rotated key, or Workload Identity Federation (sec 7 item 10 has both paths):
 `PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py` (~3-5 calls). Its
 numbers belong in `docs/interview-prep/numbers.md`.
 
@@ -262,6 +263,54 @@ for github queries.
    and no shell variable shadows it), so it was revoked or rotated at console.anthropic.com.
    Until it is replaced, every live script fails before doing anything; the offline suite
    is unaffected. The Day 11 live check is the first thing to run afterwards.
+
+   **Two ways to replace it - a new key, or no key at all.** Verified against the platform
+   docs on 2026-08-23 (the earlier in-session claim that the direct API is keys-only was
+   wrong and is superseded by this item):
+
+   - **Workload Identity Federation is supported directly on the Anthropic API** - no
+     Bedrock or Vertex needed. Release notes date the launch to **2026-05-04**; the docs
+     page (`platform.claude.com/docs/en/manage-claude/workload-identity-federation`) does
+     not print a GA date, so treat "GA on 2026-06-17" as unconfirmed by the docs. The
+     workload presents an OIDC JWT from an IdP you run (GitHub Actions, AWS, GCP, Entra
+     ID, Kubernetes, SPIFFE, Okta, or any OIDC issuer); Anthropic exchanges it at
+     `POST /v1/oauth/token` (RFC 7523 jwt-bearer) for a short-lived `sk-ant-oat01-...`
+     token bound to a **service account** (`svac_...`) under a **federation rule**
+     (`fdrl_...`) on a registered **issuer** (`fdis_...`). Console: Settings -> Workload
+     identity -> Connect workload creates all three. Default scope `workspace:developer`
+     (same access as a key); `workspace:inference` is the tighter Messages-only scope.
+     Token lifetime 60-86400 s (default 3600; the wizard prefills 600).
+   - **The installed SDK already supports it** (`anthropic 0.119.0` exposes
+     `WorkloadIdentityCredentials` / `IdentityTokenFile`), and `LLMClient` needs no
+     change: it constructs `anthropic.Anthropic(api_key=None)` when no key is set, and the
+     SDK then resolves credentials by precedence - constructor arg, then
+     `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_PROFILE`, then the
+     federation env vars, then the active profile. Verified offline: with the key unset and
+     dummy federation vars exported, the client reached the real exchange endpoint.
+   - **Zero-argument setup is four exported variables:** `ANTHROPIC_FEDERATION_RULE_ID`,
+     `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, and one of
+     `ANTHROPIC_IDENTITY_TOKEN_FILE` / `ANTHROPIC_IDENTITY_TOKEN` (plus
+     `ANTHROPIC_WORKSPACE_ID` when the rule spans workspaces). Or a profile file at
+     `%APPDATA%\Anthropic\configs\<name>.json` (Windows) / `~/.config/anthropic/...`,
+     which Claude Code honours too.
+   - **Three traps, all from the docs:** (1) `ANTHROPIC_API_KEY` *shadows* federation, and
+     an *empty* `ANTHROPIC_API_KEY=""` still wins its slot - unset it, never blank it.
+     (2) The SDK reads the federation variables from the process environment; values in
+     `.env` are loaded by pydantic-settings into `LLMSettings`, not exported, so they
+     must be in the shell (or a profile file) for the SDK to see them. (3) Every exchange
+     denial is an opaque `401 Authentication failed`; the real reason is in the Console's
+     authentication-history tab, not the response.
+   - **What WIF does not solve on this laptop:** a federated workload needs an IdP that
+     will sign a JWT for it. GitHub Actions, a cloud VM, or Kubernetes have that ambiently;
+     a Windows dev box does not, short of an Okta/Entra client-credentials app or a GCP
+     identity token via `gcloud`. So the practical split is: **rotate the key for local
+     work now**, and adopt WIF for CI (Day 22's GitHub Actions work is the natural home -
+     the `token.actions.githubusercontent.com` issuer with a `repo:m-misbahuddin/aioc:*`
+     subject prefix, no secret in the pipeline).
+   - **Code impact when WIF is adopted:** the eight `scripts/check_*.py` / demo scripts
+     gate on `LLMSettings().anthropic_api_key is None` and exit 2 - under federation that
+     guard is wrong and should become "a key OR the four federation variables". Nothing
+     else in the harness assumes a key.
 11. **Five more additive error codes** joined item 3's paperwork queue with the GitHub
    server: `NOT_FOUND`, `GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `GITHUB_REJECTED_INPUT`,
    `REPOSITORY_NOT_CONFIGURED`. (`GITHUB_SCOPE_MISSING` is already in sec 6.4.) The same
