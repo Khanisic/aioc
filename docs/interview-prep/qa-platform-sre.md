@@ -68,6 +68,17 @@ No, and that distinction is the point of the target. A container reporting healt
 
 So `verify` asserts the `vector` extension is installed, Redis answers, all three services expose metrics, Prometheus is actually scraping them, and - since the corpus landed - that the incident corpus is present, is 15-20 rows, and covers all five failure modes. That last one is there because a mode with zero rows cannot be scored by the eval at all.
 
+**Q: How is tracing wired, and why is it opt-in?**
+
+One Langfuse trace per coordinator request: a `plan` span carrying the planning call's own tokens, one `agent:<name>` span per invocation, tool calls as child events, and the trace id on the contract response.
+The executor talks to three small protocols (`Tracer` / `RequestTrace` / `AgentSpan`); the default implementation everywhere is a null object, and only entry points that explicitly pass `default_tracer()` ever emit a span.
+
+Opt-in is the design decision worth defending.
+The 323-test offline suite must make zero network calls, and it must keep that property on a machine whose `.env` carries real Langfuse keys - a tracer that self-activated from the environment would break that silently the day the keys landed.
+Same shape as retrieval's honest degradation: configuration decides *which* tracer, but the entry point decides *whether*.
+
+Two implementation details that earn their keep: agent spans open and close in the worker thread that runs the agent, so span timing is real wall clock and a parallel plan shows visibly overlapping spans (that overlap was the Day 9 checkpoint artifact); and the adapter's `auth_check()` runs before any work in the live scripts, because span export happens on a background thread where a 401 is otherwise logged-and-swallowed while the run reports success (war story #8 - the keys were valid, the account was US-region, and the default EU host called it a credentials error).
+
 ---
 
 ## MCP tool design
