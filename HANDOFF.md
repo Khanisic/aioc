@@ -331,7 +331,7 @@ for github queries.
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
 | Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 9 added #15 and #16) |
-| Six debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` |
+| Eight debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |
 

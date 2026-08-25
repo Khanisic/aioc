@@ -1,11 +1,11 @@
 # War stories
 
-Seven things that went wrong, what the symptom looked like, and what it actually was.
+Eight things that went wrong, what the symptom looked like, and what it actually was.
 These are the answers to "tell me about a time when..." questions.
 Every one is traceable to a recorded run under `test-results/` or to a commit.
 
-The through-line worth naming out loud: **six of the seven looked like the model being unreliable and were not.**
-Five were engineering defects on my side and one was my own test being wrong.
+The through-line worth naming out loud: **six of the eight looked like the model being unreliable and were not** - five were engineering defects on my side and one was my own test being wrong.
+The other two looked like bad credentials and were the environment naming the wrong cause.
 That is the most useful thing I learned building this, and it is a better interview answer than any architecture description.
 
 ---
@@ -180,6 +180,34 @@ That is the clearest argument for the opt-in live scripts that I have found so f
 
 ---
 
+## 8. The keys were valid and Langfuse still said they were not
+
+**Symptom.** The first run with real Langfuse keys printed `Failed to export span batch code: 401, reason: Unauthorized` from somewhere in the background - and then the check script crashed with `UnauthorizedError` *after* printing a passing-looking report.
+The 401 body said: "Invalid credentials. Confirm that you've configured the correct host."
+
+**The hunt.** I could not read `.env` (settings deny it, correctly - same constraint as story 4, same tools).
+Loading the settings object and printing only prefixes and lengths showed both keys the right shape in the right slots: `pk-lf-` and `sk-lf-`, 42 characters each.
+SHA-256 hashes proved public and secret were different values, ruling out a double-paste.
+So the keys were fine, and the credentials error was lying about something.
+
+The probe that ended it: the same basic-auth request against both regional hosts.
+The default EU host (`cloud.langfuse.com`) returned 401; the US host (`us.cloud.langfuse.com`) returned 200 and the project.
+The account was US-region.
+The message said credentials; the cause was geography.
+
+**What it exposed besides the config.** Two real defects in my own Day 9 code, both invisible until real keys failed.
+Span export runs on a background thread, so the 401 was logged-and-swallowed while the run reported success - the trace this script exists to produce was silently lost.
+And `get_trace_url`, a pure UI nicety, needed an API round-trip and raised after the real work had finished, taking the whole script down with it.
+
+**Fix.** `LANGFUSE_HOST` pinned in `.env`, with the trap recorded in `.env.example` and the handoff (it returns the moment `.env` is regenerated).
+`auth_check()` now runs before any work, so bad credentials fail loudly, early, and with the region hint attached; `trace_url()` never raises.
+Both are regression-tested against a stub client.
+
+**Transferable lesson.** An error that names the wrong cause costs more than one that says nothing - this is the second time in this project (story 4), and both times the fix included making the *next* failure say the right thing.
+And any failure path that lives on a background thread needs one synchronous check at startup, or it will fail silently forever.
+
+---
+
 ## How to tell these in an interview
 
 Lead with the symptom, not the answer.
@@ -187,5 +215,5 @@ Lead with the symptom, not the answer.
 Opening with "I had a max_tokens misconfiguration" throws the story away.
 
 Have one sentence ready for what you changed *besides* the fix.
-Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence.
+Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check.
 Fixing the bug is table stakes. Making the failure legible next time is the part that reads as seniority.

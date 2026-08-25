@@ -95,6 +95,51 @@ When a deterministic workflow would do the job. Most of this project's routing c
 
 The honest general answer: agents earn their cost when the task is multi-step and hard to fully specify in advance, the outcome justifies the latency, and errors are recoverable. My four failure modes are recoverable and the diagnosis is genuinely open-ended, so it fits. A fixed extract-and-classify pipeline would not.
 
+**Q: The agents run in parallel. What breaks when you do that naively?**
+
+Token accounting.
+Cost is measured by a plain `Usage` accumulator that every agent mutates with `+=`, and handing that shared object to two threads loses counts silently - corrupted `cost` on the response, with no failing test and no error anywhere.
+
+The fix is per-runner accumulators folded into the total after the join, not a lock: a lock inside `Usage` would make every single-threaded consumer pay for one call site's concurrency, and the merge-after-join version is correct by construction rather than by discipline.
+Threads rather than async because the agents block on the synchronous SDK - threads buy real wall-clock overlap without rewriting every agent, and the Day 7 executor had recorded `mode` and `depends_on` on every invocation precisely so the execution strategy could change without touching the plan or the accounting.
+
+The proof is the part worth telling: the offline test does not sleep-and-hope, it blocks each fake runner on a barrier until the *other* runner arrives, so the suite fails if execution ever goes serial again.
+Measured live on Day 10: one agent took 40.1s, two agents in parallel took 41.2s.
+
+**Q: Did dynamic selection ever surprise you?**
+
+Yes, and the surprise was the feature working.
+The Day 10 demo script predicted the canonical query would route to Incident + Docs in parallel; the coordinator read a pure diagnostic question, selected Incident alone, and skipped Docs with the reason that no documentation lookup was being asked for.
+It was right and the demo author was wrong.
+An empty `skipped_agents` would have been the bug; a skip list that overrules the developer's expectation with a defensible reason is the graded behaviour doing its job.
+
+---
+
+## Retrieval and grounding
+
+**Q: Describe your RAG setup.**
+
+Hybrid search over an 18-incident corpus in Postgres: pg_trgm trigram similarity for the lexical half, pgvector cosine over `voyage-3.5` embeddings (1024 dims) for the semantic half, fused with Reciprocal Rank Fusion.
+RRF rather than score mixing because trigram similarity and cosine similarity live on incomparable scales - ranks are the only thing they share.
+
+Vectors live in a separate `incident_embeddings` table keyed `(incident_id, model)`, never as a column on the corpus, because the corpus doubles as the eval set and re-embedding must never touch it.
+Ingestion is idempotent via a sha256 of the embedded text - unchanged rows cost nothing, which is what makes the ingest script safe to run casually.
+
+The part I lead with: **degradation is honest**.
+Without a Voyage key the searcher runs lexical-only and says so in a `degraded` field that is rendered into the agent's prompt and carried in the response.
+A silent fallback would hide a misconfigured provider forever while recall quietly halved - and that exact defect happened during ingestion (a settings path bug read the key as unset, and the lexical fallback masked it until the `degraded` flag exposed it).
+
+**Q: How do you stop the agent hallucinating citations?**
+
+In code, after the model responds - never by asking nicely.
+A cited `document_id` that retrieval did not return raises.
+A quote that does not appear verbatim (whitespace-normalised) in the retrieved document raises.
+The coverage counters - documents searched, retrieved, cited - are stamped by the runtime from the actual retrieval call, so the model is never asked to report numbers the process already knows.
+
+The reasoning is the Day 4 lesson applied to provenance: an invariant that lives only in prompt text demonstrably does not hold, and a hallucinated citation is worse than no answer because it *looks* like provenance.
+Proven live on Day 10: seven claims, four documents, every quote verbatim on a real model response.
+The GitHub agent (Day 11) applies the same pattern to tool replies - facts are stamped from what the wire returned, and ungrounded references are rejected in code.
+
 ---
 
 ## Prompting
