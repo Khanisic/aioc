@@ -14,8 +14,10 @@ Everything is driven by environment variables (see docker-compose.yml):
     SERVICE_PORT          listen port (default 8000; compose maps host ports onto it)
     DOWNSTREAM_URLS       comma-separated base URLs this service calls per /process
     SELF_TRAFFIC_SECONDS  >0 enables the background traffic loop at that interval
-    DEMO_GIT_SHA          fake "deployed commit" reported by /version - Day 4's
-                          code_regression failure mode ties a 500-spike to this value
+    DEMO_GIT_SHA          fake "deployed commit" reported by /version and exported as the
+                          ``service_build_info`` gauge - Day 4's code_regression failure
+                          mode ties a 500-spike to this value; Day 12's rollout-health
+                          tool reads the deployed version from the gauge
 
 The ``/_chaos`` knobs are the service-side surface Day 4's ``demo-app/chaos/inject.py``
 drives. Day 3 ships them healthy-by-default and reversible (POST {"reset": true}); the
@@ -63,6 +65,17 @@ CHAOS_KNOB = Gauge(
     "Current value of each chaos knob - lets the eval compare agent output to injected truth.",
     ["service", "knob"],
 )
+# The deployed version as a metric, the way real services export `*_build_info`: constant 1
+# with the identity in labels. It is what makes "which version is running" a Prometheus
+# fact with history - Day 12's `check_rollout_health` reads the current version, the
+# previous one (its baseline), and whether a requested version ever ran, all from here.
+# /version stays for humans and curl.
+BUILD_INFO = Gauge(
+    "service_build_info",
+    "Deployed version identity: constant 1, the version in the git_sha label.",
+    ["service", "git_sha"],
+)
+BUILD_INFO.labels(service=SERVICE, git_sha=GIT_SHA).set(1)
 
 # ----------------------------------------------------------------------------- chaos knobs
 

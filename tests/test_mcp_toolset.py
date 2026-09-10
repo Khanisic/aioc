@@ -16,6 +16,7 @@ import sys
 import pytest
 
 from aioc.llm import McpStdioToolset, McpToolsetError, ToolResult
+from aioc.tools.deployment import server as ds
 from aioc.tools.github import server as gs
 
 _OFFLINE_ENV = {
@@ -75,6 +76,49 @@ def test_calls_can_be_made_from_another_thread(toolset: McpStdioToolset):
             pool.map(lambda _: toolset.call("diff_refs", {"base": "a", "head": "b"}), range(2))
         )
     assert all(json.loads(r.content)["error"]["class"] == "permission" for r in results)
+
+
+# ------------------------------------------------- Day 12: the deployment server, same wire
+
+
+@pytest.fixture(scope="module")
+def deployment_toolset():
+    env = {
+        **_OFFLINE_ENV,
+        "PROMETHEUS_URL": "http://127.0.0.1:9",
+        "PROMETHEUS_TIMEOUT_SECONDS": "1",
+    }
+    with McpStdioToolset.for_module(ds.__name__, env=env) as ts:
+        yield ts
+
+
+def test_the_deployment_server_lists_both_contract_tools_over_stdio(
+    deployment_toolset: McpStdioToolset,
+):
+    assert deployment_toolset.server_name == ds.SERVER_NAME
+    by_name = {t.name: t for t in deployment_toolset.tools}
+    assert list(by_name) == list(ds.TOOL_NAMES)
+    assert by_name["diff_release"].description == ds.DIFF_RELEASE_DESCRIPTION
+    assert by_name["check_rollout_health"].input_schema["required"] == ["service", "environment"]
+
+
+def test_deployment_errors_arrive_structured_over_the_wire(deployment_toolset: McpStdioToolset):
+    # No token: diff_release is a permission error under its own sec 7.3 code.
+    diff = deployment_toolset.call(
+        "diff_release", {"service": "s", "from_version": "a", "to_version": "b"}
+    )
+    assert diff.is_error is True
+    assert json.loads(diff.content)["error"]["code"] == "REGISTRY_SCOPE_MISSING"
+    # No Prometheus: check_rollout_health is transient, with a retry hint, not framework text.
+    health = deployment_toolset.call(
+        "check_rollout_health", {"service": "checkout-api", "environment": "development"}
+    )
+    assert health.is_error is True
+    error = json.loads(health.content)["error"]
+    assert error["class"] == "transient" and error["retry_after_ms"] is not None
+    # And validation is structured too.
+    bad = deployment_toolset.call("check_rollout_health", {"service": "s"})
+    assert json.loads(bad.content)["error"]["details"]["field"] == "environment"
 
 
 def test_a_server_that_cannot_start_raises_clearly():

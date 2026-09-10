@@ -270,3 +270,50 @@ The contract's rule is enforced one layer up by `diff_release` on Day 12 for the
 **What the live run taught, the same day.** Seven attempts to the first clean pass, and not one failure was the model inventing data - the grounding check itself was wrong twice (it compared against JSON-escaped wire text, then refused a literal wire quote), the schema was silent about nesting once, and the emit tool was not on the loop's list.
 The last one changed the design: the emit tool is now offered *during* the investigation with a capturing handler, so a model that is done simply says so, and the forced second call is the fallback rather than the rule - 2 calls and 27 s instead of 3 and 82 s on the same PR.
 `GitHubAgentError` now carries the report it refused, which is what the Day 17 retry loop will feed back.
+
+---
+
+## 18. A release diff is a structural comparison of manifests with the values hashed at parse time, and a rollout's version is a metric
+
+**Context.** Day 12 needed the two contract-named deployment tools.
+`diff_release` (sec 7.3) has to answer "which configuration keys changed" without ever returning a value, and `check_rollout_health` (sec 7.4) has to say which version is running and how it behaves.
+The obvious implementation of the first is to scan the GitHub patch for `+KEY=` / `-KEY=` lines; the obvious source for the second is each service's `/version` endpoint.
+
+**Decision.** Neither.
+`diff_release` fetches the release manifests (compose files, `.env`-style files, Kubernetes manifests) at *both* refs and parses them - a value is replaced by its sha256 the moment it is read, and only the digest is kept - then diffs the parsed structures.
+`check_rollout_health` reads the version from a `service_build_info{service, git_sha} = 1` gauge the demo app now exports, the way real services export `*_build_info`, and reads everything else from the same Prometheus.
+
+**Why structural.** A patch-line scan cannot tell a key whose value changed from one that was removed and re-added, reports an image that moved because a block was re-indented as a change, and has no idea which compose service a changed line belongs to.
+Parsing both ends answers all three, and the test that a `yaml.safe_dump` re-indentation of the same compose file diffs to nothing is the one that would fail under the patch approach.
+The cost is two GitHub reads per changed manifest (bounded at 40, flagged in `meta.truncated`) and a `pyyaml` dependency.
+
+**Why hash on read.** "Config values are never returned" (sec 4.4) is enforced at every layer that could leak one; this is the layer where the value first exists in memory.
+Hashing it there means the comparison still works ("did it change?") while the value is not held anywhere a serialiser, a log line, or a future refactor could reach.
+The test is over the whole serialised payload, not a field: it asserts the fixture's secret strings appear nowhere in the response.
+
+**Why a metric and not `/version`.** `/version` answers "what is running now"; it has no history.
+The gauge in Prometheus answers "what is running now", "what ran before it" (the most recent other `git_sha` in the window, which becomes `compared_to_baseline`), and "did the version I was asked about ever run" (which separates `rolled_back` from `VERSION_NOT_DEPLOYED`) from one series, with the same retention as every other signal.
+The status rule is deterministic and stated in the tool description, so an agent reading `degraded` can also read why from the signals beside it; the judgement about what to do stays with the agent, where it carries a confidence.
+
+**What I would watch.** The status thresholds (5% error rate; any restart or failed scrape) are stated, not tuned - the Day 19 eval is where they get tested against injected truth.
+And an image rebuild is now required for the gauge to exist; a stale image reports `version: null` honestly, but it is one more thing a fresh clone must do.
+
+---
+
+## 19. "Not looked" is a gap, never an empty list - and the second tool-driven agent shares the first one's ledger
+
+**Context.** `DeploymentFindings.changed_config_keys` and `image_changes` are non-null lists, and `health_signals` is a block of nullable scalars.
+A Deployment agent that answers a health-only question never runs `diff_release`; a diff-only question never runs `check_rollout_health`.
+The contract's null-versus-`[]` rule (sec 1) says `[]` means "looked and found nothing", so an agent that did not look may not say `[]` - but the schema gives it nothing else to say.
+
+**Decision.** The runtime stamps the lists and the signals from the tool replies for the reported releases, and refuses the report when a tool that would have filled a field was not run *unless* the report carries a gap whose `blocks_field` names that field (`findings.changed_config_keys` or `findings.image_changes` for the diff; `findings.health_signals` for health).
+The gap is the honest reading of the empty list, and it is what the Day 14 refinement loop consumes to go and look.
+A health reply that assessed a *different* version than the one reported does not count as having looked: signals measured on v1.4.4 presented as v1.4.3's health would be a fabrication with real numbers in it.
+
+**The shared ledger.** The GitHub agent's `Toolset` protocol and `_Ledger` were lifted into `agents/_toolset.py` the moment a second agent needed them, as the Day 11 handoff said to.
+The shared part is everything about a tool call that is not domain-specific: the honest `ToolCallRef` per wire call, the grounding text (decoded strings, raw wire text, and a `key: value` line per scalar leaf, so `"error_rate": 0.31` quoted with or without its JSON quotes is the tool's fact), and the agent's own context block as a third grounding source - the agent literally has no information beyond the context it was handed and the replies it received, so an excerpt must appear in one of them.
+Each agent's subclass overrides one hook, `index`, to pick out what it stamps from (PRs and commits; diffs and health replies with their call arguments, because the health lookback is an argument, not a reply field).
+
+**What I would watch.** The gap requirement is a rule the model has to satisfy, and rules the model has to satisfy are where live runs fail first (Day 11 took seven).
+It is stated on the schema object and in the system prompt, and the first live run satisfied it without a retry - but a model that runs both tools and then reports a release neither returned will still be refused, correctly, and that is the case the Day 17 retry loop should feed back with the exact reason.
+

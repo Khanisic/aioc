@@ -12,12 +12,14 @@ literally, argument by argument.
 The deliberate decisions, written down because the handoff asked for them:
 
 **An invocation the executor cannot run produces a `Gap`, never a fabricated response.**
-Incident (Day 4) and Docs (Day 8) are live; GitHub and Deployment land on Days 11 and 12,
-and a plan can legitimately select any of the four. The contract-honest answer for an agent
-that does not exist is a `Gap` with ``resolvable: false`` plus a `status` of ``partial`` or
-weaker - a plausible placeholder `AgentResponse` is precisely the failure mode the
-null-vs-`[]` rule exists to prevent. ``resolvable: false`` is load-bearing: the Day 14
-refinement loop must not spend rounds re-delegating to an agent that is not there.
+All four agents are registered as of Day 12 (Incident Day 4, Docs Day 8, GitHub Day 11,
+Deployment Day 12), so with the default runners this path no longer fires - but an
+executor built with a partial runner set (tests, a deployment that ships fewer agents) can
+still be handed a plan that selects an agent it lacks. The contract-honest answer for an
+agent that is not there is a `Gap` with ``resolvable: false`` plus a `status` of
+``partial`` or weaker - a plausible placeholder `AgentResponse` is precisely the failure
+mode the null-vs-`[]` rule exists to prevent. ``resolvable: false`` is load-bearing: the
+Day 14 refinement loop must not spend rounds re-delegating to an agent that is not there.
 
 **Synthesis is deterministic on Day 7, not model-written.** The `answer` is adopted from the
 highest-confidence agent report and cites that report's own evidence ids, so the
@@ -61,7 +63,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import uuid4
 
-from aioc.agents import DocsAgent, GitHubAgent, IncidentAgent
+from aioc.agents import DeploymentAgent, DocsAgent, GitHubAgent, IncidentAgent
 from aioc.contracts import (
     AgentInvocation,
     AgentName,
@@ -83,7 +85,7 @@ from .planner import Coordinator, SelectionPlan, utcnow
 class AgentRunner(Protocol):
     """One runnable subagent, as the executor sees it.
 
-    The protocol is the executor's seam: tests inject recording fakes, Day 8/11/12 register
+    The protocol is the executor's seam: tests inject recording fakes, the agent days register
     real agents, and the executor stays agnostic about what is behind it. ``context`` is the
     plan's ``context_passed`` verbatim - a runner must not be handed anything else.
     """
@@ -182,12 +184,40 @@ class GitHubRunner:
         )
 
 
+class DeploymentRunner:
+    """Adapts `DeploymentAgent.assess` to the `AgentRunner` protocol - the same straight
+    pass-through as the other three. The Day 13 sequential path (GitHub reads the PR, then
+    Deployment diffs the release) arrives here as ``context_passed`` written by the
+    coordinator, not as anything this runner adds."""
+
+    def __init__(self, agent: DeploymentAgent | None = None) -> None:
+        self._agent = agent or DeploymentAgent()
+
+    def run(
+        self,
+        query: str,
+        *,
+        context: str,
+        request_id: str,
+        invocation_id: str,
+        usage: Usage,
+    ) -> AgentResponse:
+        return self._agent.assess(
+            query,
+            context=context,
+            request_id=request_id,
+            invocation_id=invocation_id,
+            usage=usage,
+        )
+
+
 def default_runners() -> dict[AgentName, AgentRunner]:
-    """Every agent that exists today. Day 12 adds deployment."""
+    """Every agent: all four exist as of Day 12."""
     return {
         AgentName.INCIDENT: IncidentRunner(),
         AgentName.DOCS: DocsRunner(),
         AgentName.GITHUB: GitHubRunner(),
+        AgentName.DEPLOYMENT: DeploymentRunner(),
     }
 
 

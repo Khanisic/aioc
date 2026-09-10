@@ -21,12 +21,17 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   `answer` with in-code grounding checks - an uncited-in-retrieval document id or a paraphrased
   quote raises. GitHub is live (Day 11): tool-driven `analyze` over the `aioc-github` MCP server
   through `aioc.llm.mcp.McpStdioToolset`, facts stamped from tool replies, ungrounded references
-  rejected in code. Deployment lands on Day 12.
+  rejected in code. Deployment is live (Day 12): the same shape over `aioc-deployment`, with keys,
+  images, and health signals stamped from the replies and a gap required for any tool not run.
+  `_toolset.py` is the shared `Toolset` seam and grounding ledger for the tool-driven agents.
 - `retrieval/` - Day 8 ingestion and hybrid search over the incident corpus (pg_trgm + pgvector,
   RRF fusion, Voyage embeddings behind the `Embedder` protocol, lexical-only without a key).
   Consumed by the Docs agent through the `CorpusRetriever` seam.
 - `coordinator/` - intent classification, dynamic agent selection, and the refinement loop. Phase 1.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `github/`, `docs/`, `deployment/` (Phase 2).
+  `deployment/` (Day 12) is the two contract-named tools: `release.py` diffs release manifests
+  structurally with values hashed at parse time (keys and paths only, by construction), `health.py`
+  reads Prometheus and applies the deterministic rollout-status rule, `server.py` is the wire.
 - `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and
   the human-in-the-loop approval gate (later phases).
 

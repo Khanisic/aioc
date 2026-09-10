@@ -32,6 +32,10 @@ dependencies = [
     # Day 9 - tracing. The v4 SDK's observation API is what the LangfuseTracer
     # adapter is written against (pinned by offline stub tests).
     "langfuse>=4.14.4",
+
+    # Day 12 - the release diff parses compose files and Kubernetes manifests
+    # structurally (keys and paths only; values never leave the parser).
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
@@ -40,6 +44,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "mypy>=1.13",
+    "types-PyYAML>=6.0",
 ]
 
 [build-system]

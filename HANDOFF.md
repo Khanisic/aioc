@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 11** of 30, after the GitHub agent landed as the first agent to
-consume an AIOC MCP server over the real wire.
+Written at the end of **Day 12** of 30, after the Deployment agent landed and all four agents
+exist.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 12.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 13.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 323-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 422-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
@@ -91,10 +91,12 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `tools/incident/store.py` | Shared Postgres settings for both servers (the `.env` port override lives through this). |
 | `tools/github/` | **Day 11.** `api.py` (read-only REST client, four-class error mapping: `GITHUB_SCOPE_MISSING` permission, `NOT_FOUND` business, `GITHUB_RATE_LIMITED`/`GITHUB_UNAVAILABLE` transient, `GITHUB_REJECTED_INPUT` validation) + `server.py` (the `aioc-github` stdio server: `get_pull_request`, `list_commits`, `diff_refs`; keys-only patch redaction; bounded output with honest `meta.truncated`). Verified over the wire against this repo, zero Claude calls. |
 | `llm/mcp.py` | **Day 11.** `McpStdioToolset`: launches a stdio MCP server as a subprocess (same interpreter, `-m module`) and exposes its tools as `ToolSpec`s; the session lives on a dedicated thread so sync agents on the executor's worker threads can call it. Reuse it for Day 12. |
-| `agents/github.py` | **Day 11.** `GitHubAgent.analyze`: opens the toolset (injectable `Toolset` seam), `run_tool_loop` with the three tools, then a forced `emit_github_report`. Facts stamped from the ledger of tool replies; an unfetched PR/SHA/`change_ref` or a paraphrased excerpt raises `GitHubAgentError`; each wire call is a contract `ToolCallRef`. Registered in `default_runners()`. |
+| `agents/github.py` | **Day 11.** `GitHubAgent.analyze`: opens the toolset (injectable `Toolset` seam), `run_tool_loop` with the three tools, then a forced `emit_github_report`. Facts stamped from the ledger of tool replies; an unfetched PR/SHA/`change_ref` or a paraphrased excerpt raises `GitHubAgentError`; each wire call is a contract `ToolCallRef`. Registered in `default_runners()`. Since Day 12 the `Toolset` seam and the ledger live in `agents/_toolset.py`, shared with Deployment. |
+| `tools/deployment/` | **Day 12.** The `aioc-deployment` stdio server for the two contract-named tools. `release.py`: `diff_release` reads compose, `.env`-style, and Kubernetes manifests at both refs (`GitHubApi.file_content`) and diffs them structurally, every value hashed the moment it is parsed - keys, image references, manifest paths, and commits come back, values cannot. `health.py`: `check_rollout_health` runs a Prometheus battery for one service and applies the deterministic status rule; the deployed version is the demo app's new `service_build_info` gauge, which also gives the baseline (previous version in the window) and `rolled_back`. Sec 7.3/7.4 codes plus additive `PROMETHEUS_UNAVAILABLE`, `VERSION_NOT_OBSERVABLE`, `ENVIRONMENT_NOT_MONITORED`. Verified over the wire against the live stack. |
+| `agents/deployment.py` | **Day 12.** `DeploymentAgent.assess`: the Day 11 shape over `aioc-deployment`. The model reports the service, the releases, and four judgements (`rollout_status`, `regression_suspected`, `rollback_recommendation`, `approval`); the runtime stamps `changed_config_keys`, `image_changes`, `health_signals` (lookback from the call's arguments) from the replies for those releases, refuses a service or release no tool returned, requires a gap against any tool's fields when that tool was not run (not looked is never `[]`), grounds every excerpt against the replies or the context block, and stamps `requires_approval: true`. Registered in `default_runners()` - the set is complete. |
 | `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are ingested** (18/18, `voyage-3.5`, 2026-08-21) and hybrid search is live. |
 | `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
-| Deployment agent | **Empty.** Day 12. Register it in `default_runners()` and update the test that pins the set (`test_default_runners_register_incident_docs_and_github`). |
+| `demo-app/services/app.py` | **Day 12** added `service_build_info{service,git_sha} = 1` (the deployed version as a metric, next to `/version`). The image must be rebuilt for it to exist: `docker compose up -d --build --wait`. |
 
 ## 4. Environment traps - read before debugging anything
 
@@ -111,7 +113,7 @@ POSTGRES_PORT=55432
 DATABASE_URL=postgresql://aioc:aioc_dev_only@localhost:55432/aioc
 ```
 
-Verified: `uv run pytest -q` runs all 253 including the 10 `integration`-marked tests with no
+Verified: `uv run pytest -q` runs everything including the 10 `integration`-marked tests with no
 inline override. If those ten start skipping again, this is why. (They also skip when Docker
 Desktop itself is not running - the skip message says "connection timeout expired" either way,
 so check `docker compose ps` before re-reading this section.)
@@ -136,19 +138,29 @@ Other traps:
 - `make db-reset`, `docker compose down -v`, and `git push` prompt for permission.
   **`down -v` destroys the seeded corpus.**
 - Bring the stack up with `docker compose up -d --wait`; `.env` now supplies the port.
+- **The demo services report whatever `DEMO_GIT_SHA` they were started with** (`baseline` by
+  default). `check_rollout_health` reads that from `service_build_info`, so a release under test
+  must be deployed first: `DEMO_GIT_SHA=<sha> docker compose up -d --wait` recreates the
+  containers with that identity (the Day 12 check's `--deploy` does exactly this), and a plain
+  `docker compose up -d` later puts them back on `baseline`. Recreating a container is one
+  restart and one failed scrape in the next health window, and the tool reports it as such.
+- **The demo image must be rebuilt after `app.py` changes** (`docker compose up -d --build`).
+  A stale image has no `service_build_info`, which the health tool reports honestly as
+  `version: null` (or `VERSION_NOT_OBSERVABLE` when a version was asked about) rather than as
+  a healthy unknown.
 
 ## 5. Verify the state in one go
 
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 323 passed
+uv run pytest -q                                                   # expect 422 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **313 passed, 10 skipped** (stack was down; the 10 integration
-tests skip), lint and mypy clean, at the end of Day 11. The suite now takes ~80s: the
-`test_mcp_toolset.py` tests launch the real GitHub server subprocess.
+Costs nothing. Last run: **422 passed** with the stack up (412 passed, 10 skipped without
+it), lint and mypy clean, at the end of Day 12. The suite takes ~80s offline: the
+`test_mcp_toolset.py` tests launch the real GitHub and deployment server subprocesses.
 
 The whole system has now been proven live end to end - the Day 10 demo (**~3 Claude
 calls** per run, needs the stack; `--skip-inject` reuses active chaos, `--query` overrides
@@ -159,12 +171,56 @@ PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
 ```
 
-`check_day9_trace.py --fake-agents` remains the zero-cost tracing smoke test, and Day 7's
+`check_day12_deployment.py --deploy` (~3-5 calls) is the Day 12 regression: it recreates the
+demo containers at `origin/main`, then the Deployment agent diffs two real refs and reads the
+live rollout over the wire. `check_day9_trace.py --fake-agents` remains the zero-cost tracing smoke test, and Day 7's
 delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running after any
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 12 - the Deployment agent
+## 6. Next work: Day 13 - the sequential path, and the routing experiment (part 1)
+
+**From the plan:** A: the sequential dependency path - GitHub reads the PR, then Deployment
+diffs the release - with a code comment on why this one *cannot* be parallel. B: build the
+two deliberately overlapping tools (`analyze_logs` vs `analyze_events`, CONTRACTS.md sec
+7.5 / 7.6), run 20 queries, and **record the misrouting rate**. Day 14 splits and renames
+them and re-runs the same 20; the v1.0.0 definitions must stay in the contract verbatim
+(struck through, not deleted) - they are the case-study baseline, and this is the one
+pre-authorised `1.1.0` change.
+
+What already exists for the sequential path:
+
+- The planner already emits `mode: sequential` with a non-empty `depends_on` for the
+  `sequential_dependency` case (measured 5/5), and the executor already runs the chain in
+  dependency order after the parallel group, failing dependents honestly when a
+  dependency produced nothing (`_dependency_unmet_gap`).
+- **What is missing is the handoff itself.** Today `context_passed` for every invocation
+  is written by the planner *before* anything runs, so Deployment's context cannot carry
+  what GitHub found. Day 13 is the executor composing the dependent's context from the
+  dependency's response - a structured digest (BUILD_PLAN Phase 4: "pass Incident's
+  digest to Deployment, not the raw dump"), appended to the planner's block, never
+  replacing it, and recorded verbatim in the invocation's `context_passed` so the
+  explicit-passing test still holds argument for argument.
+- The Deployment agent already grounds excerpts against its context block as well as its
+  tool replies (a context quote keeps `tool_call_id` null), so a digest passed in context
+  can be cited as evidence without a grounding failure. `diff_release` takes any git ref,
+  so GitHub's `head_sha` / base ref flow straight into `from_version` / `to_version`.
+- Both agents are on the wire and both live checks pass; the natural Day 13 live proof is
+  `respond()` on the sequential case with both spans in one Langfuse trace, the second
+  starting after the first ends.
+
+For the overlapping tools: there is no log store in the stack (the demo app logs to stdout
+and nothing collects it), so `analyze_logs` needs a source before it can misroute against
+`analyze_events` (which can read the seeded timeline). Decide that first; a tool over
+`docker compose logs` is the cheapest honest option. `check_agent_selection.py`'s five cases
+are the routing baseline to extend to 20.
+
+<!-- superseded Day 12 notes follow, kept for the record -->
+**Day 12 as planned:** A: Deployment agent - compare releases, check rollout health. B:
+`diff_release` and `check_rollout_health` custom tools. Done; see sec 3, and the live check
+passed first time on 2026-09-09 (numbers in `docs/interview-prep/numbers.md`).
+`check_day12_deployment.py --deploy` is the regression to re-run after any change to the
+Deployment agent's prompt or schema guidance.
 
 **From the plan:** A: Deployment agent - compare releases, check rollout health. B:
 `diff_release` and `check_rollout_health` custom tools (CONTRACTS.md sec 7.3, 7.4 - these
@@ -316,6 +372,26 @@ for github queries.
    server: `NOT_FOUND`, `GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `GITHUB_REJECTED_INPUT`,
    `REPOSITORY_NOT_CONFIGURED`. (`GITHUB_SCOPE_MISSING` is already in sec 6.4.) The same
    `1.0.1` entry clears them all.
+12. **Three more from the deployment server (Day 12):** `PROMETHEUS_UNAVAILABLE` (transient -
+   unreachable is not a timeout, and the contract's `PROMETHEUS_TIMEOUT` would be a lie for
+   a refused connection), `VERSION_NOT_OBSERVABLE` (business - the running image exports
+   no `service_build_info`, so a requested version can be neither confirmed nor ruled
+   out), and `ENVIRONMENT_NOT_MONITORED` (business - this stack is one environment, and
+   `production` must not be answered with `development` numbers). All flagged in the
+   server's module docstring; the same `1.0.1` entry clears them. The sec 7.3 / 7.4 codes
+   themselves (`SAME_VERSION`, `UNKNOWN_RELEASE_VERSION`, `REGISTRY_UNAVAILABLE`,
+   `REGISTRY_SCOPE_MISSING`, `UNKNOWN_SERVICE`, `VERSION_NOT_DEPLOYED`, `INVALID_LOOKBACK`,
+   `PROMETHEUS_TIMEOUT`) are contract-named and need no paperwork.
+13. **`diff_release` input tokens are the next trimming target.** The Day 12 live run's diff
+   reply was ~7.4k tokens by `meta.token_estimate`, mostly commit messages (up to 1000
+   chars each, 16 commits between the refs), and it was re-sent on every round: 62.7k input
+   tokens for one question. Day 21 owns this; the honest fix is a first-line-only commit
+   message with a `message_truncated` flag, or `include: config` by default and commits on
+   request.
+14. **`pyyaml>=6.0` is a new runtime dependency** (`types-PyYAML` for mypy). The release
+   diff parses manifests structurally rather than pattern-matching patch lines, which is
+   what makes "an image that moved because a block was re-indented" a non-change and a
+   value change a `changed` key rather than removed-then-added.
 9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
    adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
    actually starts a request, so offline cost is import weight only.

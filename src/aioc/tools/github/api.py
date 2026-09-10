@@ -26,6 +26,8 @@ from this file because an MCP client launches the server from wherever it happen
 
 from __future__ import annotations
 
+import base64
+import binascii
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -172,6 +174,32 @@ class GitHubApi:
         return self._get_object(
             f"/repos/{repo}/compare/{base}...{head}", what=f"compare {base}...{head}"
         )
+
+    def file_content(self, repo: str, path: str, *, ref: str) -> str | None:
+        """The text of one file at ``ref``, or ``None`` when the file does not exist there
+        (Day 12: a release diff reads a manifest at both ends of the comparison, and one
+        end legitimately has no file when the manifest was added or removed).
+
+        A missing *ref* is still `NOT_FOUND`; the caller resolves both refs before asking
+        for files, so a 404 here can only mean the path.
+        """
+        try:
+            payload = self._get_object(
+                f"/repos/{repo}/contents/{path}", what=f"{path} at {ref}", ref=ref
+            )
+        except GitHubApiError as exc:
+            if exc.code == "NOT_FOUND":
+                return None
+            raise
+        if payload.get("type") != "file":
+            return None
+        encoded = payload.get("content")
+        if payload.get("encoding") != "base64" or not isinstance(encoded, str):
+            raise _unexpected_shape(f"{path} at {ref}")
+        try:
+            return base64.b64decode(encoded).decode("utf-8", errors="replace")
+        except (ValueError, binascii.Error) as exc:
+            raise _unexpected_shape(f"{path} at {ref}") from exc
 
     # ------------------------------------------------------------------ plumbing
 

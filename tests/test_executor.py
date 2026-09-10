@@ -524,14 +524,15 @@ def test_a_cyclic_plan_is_rejected_at_validation():
 # ------------------------------------------------------------------------- registration
 
 
-def test_default_runners_register_incident_docs_and_github():
+def test_default_runners_register_all_four_agents():
     """The easy-to-forget step each agent day has: wiring the agent into the default
-    executor. Nothing else forces this registration (HANDOFF calls it out) - until Day 12,
-    deployment is the only honest agent_not_implemented gap left.
+    executor. Nothing else forces this registration (HANDOFF calls it out). As of Day 12
+    the set is complete, so a default executor never produces an agent_not_implemented gap
+    - that path stays for partial runner sets (the test above proves it still works).
     """
     from aioc.coordinator.executor import default_runners
 
-    assert set(default_runners()) == {AgentName.INCIDENT, AgentName.DOCS, AgentName.GITHUB}
+    assert set(default_runners()) == set(AgentName)
 
 
 # ---------------------------------------------------- Day 9: the parallel group is parallel

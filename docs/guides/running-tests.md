@@ -59,7 +59,12 @@ A type error in `scripts/runlog.py` will not fail `mypy`.
 | `tests/test_correlate_tool.py` | 30 | Day 7 MCP tool: validation, chaos gate, correlation math, all four error classes distinctly (3 need the stack) |
 | `tests/test_docs_agent.py` | 18 | Day 8 Docs agent: rendering, grounding rejections, stamped coverage |
 | `tests/test_retrieval.py` | 27 | Day 8 retrieval: stale detection, RRF fusion, Voyage client offline (3 need the stack) |
-| `tests/test_tracing.py` | 8 | Day 9 tracing seam: null-object degradation, the Langfuse adapter against a stub client, the `.env` path regression |
+| `tests/test_tracing.py` | 10 | Day 9 tracing seam: null-object degradation, the Langfuse adapter against a stub client, the `.env` path regression |
+| `tests/test_github_agent.py` | 20 | Day 11 GitHub agent: the two-phase tool loop, fact stamping, grounding rejections, error-class recording |
+| `tests/test_github_tool.py` | 41 | Day 11 GitHub tools against an httpx `MockTransport`: all four error classes, keys-only redaction, output bounds, the template |
+| `tests/test_mcp_toolset.py` | 9 | Days 11-12 MCP client seam over the real stdio wire (server subprocesses with blanked credentials, so no network) |
+| `tests/test_deployment_agent.py` | 24 | Day 12 Deployment agent: fact stamping, grounding rejections, the not-looked-is-a-gap rules, `requires_approval` stamped |
+| `tests/test_deployment_tool.py` | 73 | Day 12 deployment tools against a fake two-ref repository and a scripted Prometheus: the structural keys-only diff, every sec 7.3/7.4 code, the status rule, null-never-zero |
 
 The house rule from `.claude/rules/tests.md`: every validated invariant gets a negative test asserting the violation is rejected.
 A test that only proves the happy path does not prove the invariant is enforced.
@@ -86,6 +91,8 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `check_day8_docs.py` | 1 (+1 Voyage query embed with a key) | The Docs agent answers from the seeded corpus with verbatim citations |
 | `check_day9_trace.py` | ~3, or **0** with `--fake-agents` | One Langfuse trace shows two agents running concurrently (needs the Langfuse keys; `--fake-agents` proves executor concurrency with scripted agents for free) |
 | `demo_day10.py` | ~3 per run | The whole system, live: inject chaos, build the situation from Prometheus, `respond()` end to end with tracing; records a timed transcript that `render_demo_gif.py` (free) turns into the demo GIF |
+| `check_day11_github.py` | ~3-5 | The GitHub agent reads a real PR over the MCP wire; every PR, commit, and excerpt traces back to a tool reply |
+| `check_day12_deployment.py` | ~3-5 | The Deployment agent diffs two real refs of this repository and reads the live rollout over the wire; `--deploy` recreates the demo containers at the release under test first (needs the stack) |
 
 ```bash
 # One call per model. Validates diagnose() against the frozen contract.
