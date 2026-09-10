@@ -3,11 +3,19 @@
 Days 3-4: the Incident agent - prose (``investigate``) and schema-validated output
 (``diagnose``). Day 8: the Docs agent - retrieval-grounded, schema-validated ``answer``.
 Day 11: the GitHub agent - tool-driven over the `aioc-github` MCP server, schema-validated
-``analyze``. The Deployment agent lands on Day 12.
+``analyze``. Day 12: the Deployment agent - tool-driven over the `aioc-deployment` MCP
+server, schema-validated ``assess``. All four agents now exist.
 """
 
 from __future__ import annotations
 
+from .deployment import (
+    DEPLOYMENT_SYSTEM_PROMPT,
+    DeploymentAgent,
+    DeploymentAgentError,
+    DeploymentReport,
+)
+from .deployment import EMIT_TOOL_NAME as DEPLOYMENT_EMIT_TOOL_NAME
 from .docs import (
     DOCS_STRUCTURED_SYSTEM_PROMPT,
     DocsAgent,
@@ -33,6 +41,8 @@ from .incident import (
 )
 
 __all__ = [
+    "DEPLOYMENT_EMIT_TOOL_NAME",
+    "DEPLOYMENT_SYSTEM_PROMPT",
     "DOCS_EMIT_TOOL_NAME",
     "DOCS_STRUCTURED_SYSTEM_PROMPT",
     "EMIT_TOOL_NAME",
@@ -40,6 +50,9 @@ __all__ = [
     "GITHUB_SYSTEM_PROMPT",
     "INCIDENT_STRUCTURED_SYSTEM_PROMPT",
     "INCIDENT_SYSTEM_PROMPT",
+    "DeploymentAgent",
+    "DeploymentAgentError",
+    "DeploymentReport",
     "DocsAgent",
     "DocsAgentError",
     "DocsReport",

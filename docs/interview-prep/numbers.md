@@ -139,11 +139,11 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **323** (313 offline + 10 `integration`-marked) |
-| Runtime | ~80s offline (the Day 11 MCP-wire tests launch a real server subprocess, ~20s of it) |
+| Total tests | **422** (412 offline + 10 `integration`-marked) |
+| Runtime | ~80s offline (the Day 11-12 MCP-wire tests launch real server subprocesses, ~20s of it) |
 | Live API calls needed | **0** |
 
-Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 8 tracing, 23 github agent, 38 github tool, 7 MCP toolset (real stdio wire, token blanked so no network).
+Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 10 tracing, 20 github agent, 41 github tool, 9 MCP toolset (real stdio wire, credentials blanked so no network), 24 deployment agent, 73 deployment tool.
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
 
@@ -211,6 +211,35 @@ The input-token number is dominated by the PR's patch (~7.1k tokens by `meta.tok
 
 ---
 
+## The Day 12 Deployment agent, live
+
+`scripts/check_day12_deployment.py --deploy`, this repository, Sonnet, 2026-09-09. **Passed on the first attempt** - the Day 11 harness lessons (emit tool offered in the loop, grounding against decoded text and raw wire text, no-nesting rule on the schema object) carried over, and the two new rules the agent enforces (a service or release no tool returned is refused; a tool not run needs a gap against its fields) were both satisfied by the model with no guidance beyond the schema.
+
+The setup is part of the measurement: the demo services report whatever `DEMO_GIT_SHA` they were started with, so the script recreated the containers at `origin/main` (`1522000`) and confirmed the deployed version through the server itself (zero Claude calls) before the agent ran.
+
+| | Value |
+|---|---|
+| Releases compared | `7e5c94f` (16 first-parent commits back) -> `1522000` (`origin/main`) |
+| Claude calls | 4 (three investigation rounds + forced emit) |
+| Wire calls | 2: `diff_release` 3,577 ms (~7,398 tokens), `check_rollout_health` 250 ms (~90 tokens) |
+| Input / output tokens | 62,655 / 5,212 |
+| Wall clock | 51.9 s |
+| Stamped from the diff | 7 config keys (`DEMO_GIT_SHA`, `DOWNSTREAM_URLS`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `SELF_TRAFFIC_SECONDS`, `SERVICE_NAME`, `VOYAGE_API_KEY`), 1 image change (`checkout-api`: none -> `aioc-demo-service:day3`) |
+| Stamped from health | ready 1/1, error rate 0.0, p99 19.1 ms, 1 restart, 1 failed scrape, over 1,800 s |
+| Verdict | rollout **degraded @ 0.90**, regression suspected **true @ 0.55**, recommend **hold_and_monitor @ 0.60**, risk low, blast radius "checkout-api in development, single replica" |
+| Evidence / gaps | 8 (4 config, 2 deployment, 2 metric - every one stamped with the tool call that returned it) / 1 |
+| Status / overall confidence | `complete` / 0.68 |
+
+Three things worth saying about the verdict rather than just the pass:
+
+- **The `degraded` is correct and its cause is the measurement itself.** Recreating the containers at the release under test is one restart and one failed scrape inside the 30-minute window, and the tool's deterministic rule says any restart or failed probe is `degraded`. The model read it that way, cited `"status": "degraded"` and the replica block verbatim, and put the regression at 0.55 with the reasoning that the release rewrote `services.checkout-api.healthcheck` and the probe failure is temporally correlated - a plausible hypothesis, scored as one.
+- **The one gap is honest.** `compared_to_baseline` was `null` (the previous identity, `baseline`, had been replaced 20 seconds earlier, inside the two-scrape settling margin, so it was not yet a baseline), and the model recorded that as a resolvable gap against `findings.regression_suspected.value` with a wider-lookback query suggested - which is exactly what the Day 14 refinement loop will consume.
+- **Every excerpt was a fact.** Four quoted the diff reply (a key list, an image-change object, two manifest paths), four quoted the health reply (the status, the replica block, the signal line with its numbers, and `"compared_to_baseline": null`). Nothing was paraphrased and nothing came from outside the two replies and the context.
+
+The input-token number is the same story as Day 11: the diff reply (~7.4k tokens, mostly the 16 commit messages at up to 1000 characters each) is re-sent every round. It is the Day 21 trimming target and is carried in `HANDOFF.md` sec 7.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
@@ -219,4 +248,5 @@ Say this plainly rather than letting it be discovered:
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No cost/latency aggregate.** Langfuse now traces every request (Day 9), and each response carries measured cost - but nothing aggregates across requests yet.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
+- **The sequential path has not run live.** Both agents on it (GitHub, Deployment) pass their own live checks; the handoff between them is Day 13.
 - **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.

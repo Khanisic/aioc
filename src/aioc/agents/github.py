@@ -33,13 +33,10 @@ Enforced in code, not just prompted:
 
 from __future__ import annotations
 
-import json
 import re
-from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from typing import Any, Protocol
-from uuid import uuid4
+from typing import Any
 
 from anthropic.types import ToolUseBlock
 from pydantic import Field
@@ -47,7 +44,6 @@ from pydantic import Field
 from aioc.contracts import (
     Assessment,
     CommitRef,
-    ErrorClass,
     Evidence,
     Gap,
     GitHubAgentResponse,
@@ -59,14 +55,16 @@ from aioc.contracts import (
     SourceType,
     StrictModel,
     SuspectChange,
-    ToolCallRef,
 )
 from aioc.llm import LLMClient, ToolCallRecord, ToolResult, ToolSpec, Usage
 from aioc.llm.mcp import McpStdioToolset
 from aioc.tools.github.api import GitHubSettings
 
 from ._annotate import ROOT, apply_guidance
+from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
 from .incident import _CONFIDENCE_BANDS
+
+__all__ = ["GitHubAgent", "GitHubAgentError", "GitHubReport", "Toolset", "ToolsetFactory"]
 
 AGENT_NAME = "github"
 
@@ -356,20 +354,9 @@ _EMIT_TOOL = ToolSpec(
 
 
 # ------------------------------------------------------------------------- the toolset
-
-
-class Toolset(Protocol):
-    """What the agent needs from an open MCP toolset. `McpStdioToolset` satisfies it and
-    tests inject in-process fakes through the same seam."""
-
-    @property
-    def server_name(self) -> str: ...
-
-    @property
-    def tools(self) -> list[ToolSpec]: ...
-
-
-ToolsetFactory = Callable[[], AbstractContextManager[Toolset]]
+#
+# The `Toolset` protocol and `ToolsetFactory` live in `_toolset.py` since Day 12, shared
+# with the Deployment agent; they are re-exported here so the seam keeps its Day 11 name.
 
 
 def default_toolset() -> AbstractContextManager[Toolset]:
@@ -379,70 +366,21 @@ def default_toolset() -> AbstractContextManager[Toolset]:
 
 # ---------------------------------------------------------------------------- the ledger
 
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid4().hex[:8]}"
-
-
-def _normalise(text: str) -> str:
-    return " ".join(text.split())
-
-
 _PR_REF = re.compile(r"^#?(\d+)$")
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
 
 
-class _Ledger:
-    """Everything the tools returned, indexed for stamping and grounding.
-
-    Built from the loop's `ToolCallRecord`s after the fact - the envelope text is the
-    record's ``output``, so no handler wrapping is needed and a fake toolset in tests goes
-    through exactly the same path as the wire."""
+class _Ledger(ToolLedger):
+    """The shared ledger (`_toolset.ToolLedger`: refs, grounding text, `any_ok`) plus the
+    GitHub facts it stamps from: pull requests by number and commits by SHA."""
 
     def __init__(self, records: list[ToolCallRecord], server: str) -> None:
-        self.refs: list[ToolCallRef] = []
-        self.ref_for_record: dict[str, str] = {}  # record.id -> ToolCallRef.id
         self.prs: dict[int, tuple[dict[str, Any], str]] = {}  # number -> (facts, tc id)
         self.commits: dict[str, tuple[dict[str, Any], str]] = {}  # sha -> (facts, tc id)
-        self.outputs: list[tuple[str, str]] = []  # (tc id, normalised text)
         self.repository: str | None = None
-        self.any_ok = False
-        for record in records:
-            envelope = _parse_envelope(record.output)
-            tc_id = _new_id("tc")
-            ok = record.ok and bool(envelope and envelope.get("ok"))
-            error_class: ErrorClass | None = None
-            meta: dict[str, Any] = {}
-            if ok:
-                self.any_ok = True
-                meta = dict((envelope or {}).get("meta") or {})
-                self._index(dict((envelope or {}).get("data") or {}), tc_id)
-            else:
-                error_class = _error_class_of(envelope)
-            self.refs.append(
-                ToolCallRef(
-                    id=tc_id,
-                    tool_name=record.name,
-                    server=server,
-                    started_at=record.started_at,
-                    duration_ms=record.duration_ms,
-                    ok=ok,
-                    error_class=error_class,
-                    tokens_returned=meta.get("token_estimate") if ok else None,
-                    truncated=bool(meta.get("truncated")) if ok else False,
-                )
-            )
-            self.ref_for_record[record.id] = tc_id
-            # Ground against the DECODED strings, not the wire text: on the wire a commit
-            # message's quotes, newlines, and non-ASCII are JSON-escaped, so a faithful
-            # excerpt would never match the raw output (the first live run failed on this).
-            leaves = list(_string_leaves(envelope)) if envelope is not None else []
-            # The raw wire text stays too: a model that quotes `"touched_paths": [...]` as
-            # it saw it is being faithful, not sloppy.
-            texts = [record.output, *leaves, *(_unmarked(leaf) for leaf in leaves)]
-            self.outputs.append((tc_id, " | ".join(_normalise(t) for t in texts if t)))
+        super().__init__(records, server)
 
-    def _index(self, data: dict[str, Any], tc_id: str) -> None:
+    def index(self, data: dict[str, Any], tc_id: str, record: ToolCallRecord) -> None:
         if isinstance(data.get("repository"), str):
             self.repository = data["repository"]
         pr = data.get("pull_request")
@@ -473,64 +411,6 @@ class _Ledger:
             return self.prs[int(match.group(1))][1]
         found = self.commit(ref)
         return found[1] if found else None
-
-    def quoted_in(self, excerpt: str) -> str | None:
-        """The tool call id whose output contains ``excerpt`` verbatim, or None."""
-        needle = _normalise(excerpt)
-        if not needle:
-            return None
-        for tc_id, text in self.outputs:
-            if needle in text:
-                return tc_id
-        return None
-
-
-def _string_leaves(value: Any) -> Iterator[str]:
-    """Every string in a decoded JSON value, depth first, in document order."""
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from _string_leaves(item)
-    elif isinstance(value, list):
-        if value and all(isinstance(item, str) for item in value):
-            # A list of strings (touched paths, say) is quoted naturally as "a, b, c";
-            # accept that join as well as each element on its own.
-            yield ", ".join(value)
-        for item in value:
-            yield from _string_leaves(item)
-
-
-_DIFF_MARKER = re.compile(r"^[+\- ]", re.MULTILINE)
-
-
-def _unmarked(text: str) -> str:
-    """A multi-line patch hunk with its per-line `+`/`-`/space markers removed. Quoting a
-    hunk that way is still verbatim content; quoting it with the markers is too."""
-    if "\n" not in text:
-        return ""
-    stripped = _DIFF_MARKER.sub("", text)
-    return stripped if stripped != text else ""
-
-
-def _parse_envelope(text: str) -> dict[str, Any] | None:
-    try:
-        payload = json.loads(text)
-    except (TypeError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _error_class_of(envelope: dict[str, Any] | None) -> ErrorClass:
-    """The envelope's class when it has one; a transport failure (the server died, the call
-    timed out, the text was not JSON) is transient by the taxonomy's own definition."""
-    error = (envelope or {}).get("error")
-    if isinstance(error, dict):
-        try:
-            return ErrorClass(str(error.get("class")))
-        except ValueError:
-            pass
-    return ErrorClass.TRANSIENT
 
 
 # ------------------------------------------------------------------------------ the agent
@@ -687,8 +567,8 @@ class GitHubAgent:
             diff_summary=report.findings.diff_summary,
         )
         return GitHubAgentResponse(
-            request_id=request_id or _new_id("req"),
-            invocation_id=invocation_id or _new_id("inv"),
+            request_id=request_id or new_id("req"),
+            invocation_id=invocation_id or new_id("inv"),
             status=report.status,
             status_detail=report.status_detail,
             summary=report.summary,

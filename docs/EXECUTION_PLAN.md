@@ -270,6 +270,23 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 ### Day 12 — Deployment agent
 - **A:** Deployment agent — compare releases, check rollout health.
 - **B:** `diff_release` and `check_rollout_health` custom tools.
+- **Done (2026-09-09):** `src/aioc/tools/deployment/` is the `aioc-deployment` stdio server for the two
+  contract-named tools. `diff_release` reads compose, `.env`-style, and Kubernetes manifests at both
+  refs and diffs them structurally with every value hashed as it is parsed (keys, images, manifest
+  paths, commits; values cannot leave the parser). `check_rollout_health` reads Prometheus - the demo
+  app now exports `service_build_info` - and applies a deterministic status rule with every unmeasured
+  signal `null`. Both carry the sec 7.3/7.4 error codes from real paths. `src/aioc/agents/deployment.py`
+  drives them over the wire; keys, images, and health signals are stamped from the replies, a tool not
+  run needs a gap against its fields, excerpts are grounded against replies and context, and
+  `requires_approval` is stamped true. The `Toolset` seam and ledger moved to `agents/_toolset.py`.
+  Registered in `default_runners()`: all four agents exist.
+- **Verified:** the server answered `check_rollout_health` over stdio against the live stack with zero
+  Claude calls; 99 new offline tests (73 tool, 24 agent, 2 wire).
+- **Checkpoint produced (2026-09-09):** `scripts/check_day12_deployment.py --deploy` **passed on the
+  first attempt** - two wire calls (`diff_release` 3.6 s, `check_rollout_health` 0.25 s), four Claude
+  calls, 51.9 s, seven config keys and one image change stamped, health stamped, rollout `degraded`
+  @ 0.90 (the redeploy's own restart and failed scrape, correctly attributed), `hold_and_monitor`
+  @ 0.60, eight grounded excerpts, one honest gap. Numbers in `docs/interview-prep/numbers.md`.
 
 ### Day 13 — Sequential paths + routing experiment (part 1)
 - **A:** **Sequential dependency path**: GitHub reads the PR → Deployment diffs the release.
