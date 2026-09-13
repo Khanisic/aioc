@@ -72,15 +72,40 @@ make test          # unit tests only (skips those needing the stack)
 make chaos-downstream-latency   # inject a failure mode (four exist; see the Makefile)
 make chaos-reset                # return the demo app to a healthy baseline
 
-# live checks (need ANTHROPIC_API_KEY; these cost real tokens, one call each)
-uv run python scripts/check_structured_output.py    # does diagnose() hold the contract, per model?
-uv run python scripts/check_day5_checkpoint.py      # chaos injected -> valid JSON, scored vs truth
+# live checks (need ANTHROPIC_API_KEY in .env; these cost real tokens - the call count is
+# in each script's docstring and in docs/guides/running-tests.md)
+uv run python scripts/check_structured_output.py    # does diagnose() hold the contract, per model? (1/model)
+uv run python scripts/check_day5_checkpoint.py      # chaos injected -> valid JSON, scored vs truth (1)
 uv run python scripts/check_agent_selection.py      # coordinator routing (2 of 5 cases by default)
 
-# the custom MCP tools, over stdio
-uv run python -m aioc.tools.incident.timeline_server
-uv run python -m aioc.tools.incident.correlate_server
+# see the whole system run: inject chaos, read Prometheus, respond() end to end (~3 calls)
+PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
+uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free; the GIF
+
+# one agent at a time over the real MCP wire (each ~3-5 calls; GitHub ones need GITHUB_TOKEN)
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py            # reads a real PR
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy   # diffs two refs, reads the live rollout
+
+# the sequential path: GitHub reads the PR, then Deployment gets GitHub's digest (~6-9 calls)
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
+
+# the routing case study: 20 queries per set, --dry-run is free
+uv run python scripts/check_tool_routing.py --dry-run
+
+# the custom MCP tools, over stdio (free; each is a real server an MCP client can attach to)
+uv run python -m aioc.tools.incident.timeline_server     # get_incident_timeline
+uv run python -m aioc.tools.incident.correlate_server    # correlate_events
+uv run python -m aioc.tools.incident.analyze_server      # analyze_logs, analyze_events
+uv run python -m aioc.tools.github.server                # get_pull_request, list_commits, diff_refs
+uv run python -m aioc.tools.deployment.server            # diff_release, check_rollout_health
 ```
+
+`PYTHONIOENCODING=utf-8` matters on Windows: the console is cp1252 and a model's summary can
+carry a character it cannot print. `--deploy` recreates the demo containers at the release
+under test (the health tool reports whatever `DEMO_GIT_SHA` they were started with); a plain
+`docker compose up -d --wait` afterwards puts them back on `baseline`. Every script records
+its run under `test-results/`, so the response, the plan, and the tool replies are readable
+after the fact.
 
 ### Test results
 

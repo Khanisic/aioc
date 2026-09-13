@@ -122,7 +122,31 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents
 
 # Prints a full validated response. One call.
 uv run python examples/incident_structured_demo.py
+
+# The whole system: inject chaos, read Prometheus, respond() end to end, traced. ~3 calls.
+# Needs the stack. --skip-inject reuses active chaos; --query overrides the canonical query.
+PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
+uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
+
+# The GitHub agent reads a real PR over the MCP wire. ~3-5 calls. Needs GITHUB_TOKEN + GITHUB_REPO.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py --pr 12
+
+# The Deployment agent diffs two real refs and reads the live rollout. ~3-5 calls.
+# --deploy recreates the demo containers at --to first; needs the stack and the token.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy
+
+# The sequential path through respond(): GitHub, then Deployment with GitHub's digest in its
+# context. ~6-9 calls. Needs the stack and the token; --deploy recreates the demo at the PR head.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
+
+# The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
+uv run python scripts/check_tool_routing.py --dry-run
+uv run python scripts/check_tool_routing.py --set hard
 ```
+
+After a `--deploy` run the demo services report the release under test; put them back with
+`docker compose up -d --wait`. After a demo, `make chaos-reset` (or
+`uv run python demo-app/chaos/inject.py --reset`) - injected chaos persists.
 
 Default with no arguments for the model matrix is three models, one call each.
 `--repeat N` multiplies by N per model, so `--models a b c --repeat 3` is nine calls.
