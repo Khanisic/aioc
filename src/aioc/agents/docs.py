@@ -59,6 +59,7 @@ from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
 from aioc.retrieval import CorpusSearcher, RetrievalResult, default_embedder
 
 from ._annotate import ROOT, apply_guidance
+from ._status import settle_status
 from .incident import _CONFIDENCE_BANDS
 
 AGENT_NAME = "docs"
@@ -415,7 +416,8 @@ class DocsAgent:
         return DocsAgentResponse(
             request_id=request_id or _new_id("req"),
             invocation_id=invocation_id or _new_id("inv"),
-            status=report.status,
+            # `complete` over a null answer settles to `partial` (sec 3; agents/_status).
+            status=settle_status(report.status, findings),
             status_detail=report.status_detail,
             summary=report.summary,
             findings=findings,

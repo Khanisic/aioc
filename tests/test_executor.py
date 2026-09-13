@@ -13,6 +13,11 @@ network, no cost. The two done-when facts of the day each have a direct test her
   ``resolvable: false`` and a weakened status, never a plausible placeholder
   `AgentResponse` - a placeholder is exactly the failure the null-vs-[] rule exists to
   prevent.
+
+Day 13 added the sequential handoff section: a dependent's context is the planner's block
+plus a structured digest of its dependency's response, composed by the executor at the
+moment the dependency returns and recorded verbatim in the response's `context_passed` -
+so the explicit-passing assertion above holds for the composed block too.
 """
 
 from __future__ import annotations
@@ -25,11 +30,13 @@ from aioc.contracts import (
     AgentName,
     CoordinatorResponse,
     GapKind,
+    GitHubAgentResponse,
     IncidentAgentResponse,
     ResponseStatus,
 )
 from aioc.coordinator import Executor, SelectionPlan
 from aioc.coordinator.executor import respond
+from aioc.coordinator.handoff import HANDOFF_HEADER
 from aioc.llm import Usage
 
 # ------------------------------------------------------------------------- plan fixtures
@@ -231,6 +238,128 @@ class _FailingRunner:
         raise RuntimeError("scripted agent failure")
 
 
+def _github_response(
+    request_id: str, invocation_id: str, *, commits: int = 1
+) -> GitHubAgentResponse:
+    """A minimal contract-valid GitHub report: one merged PR with its facts, ``commits``
+    commits behind it, one suspect change, and evidence the judgements cite."""
+    return GitHubAgentResponse.model_validate(
+        {
+            "agent": "github",
+            "request_id": request_id,
+            "invocation_id": invocation_id,
+            "status": "complete",
+            "status_detail": None,
+            "summary": "PR #412 rewrote the payments-api retry budget; merged yesterday.",
+            "findings": {
+                "repository": "acme/shop",
+                "ref": "main",
+                "pull_requests": [
+                    {
+                        "number": 412,
+                        "title": "Tighten payments-api retry budget",
+                        "state": "merged",
+                        "state_detail": None,
+                        "merged_at": "2026-08-07T16:40:00Z",
+                        "head_sha": "9f3c2a1d4e5b6c7a8b9c0d1e2f3a4b5c6d7e8f90",
+                        "files_changed": 3,
+                        "additions": 41,
+                        "deletions": 12,
+                        "touched_paths": [
+                            "services/payments/retry.py",
+                            "deploy/payments-api.env",
+                            "docker-compose.yml",
+                        ],
+                        "risk": {
+                            "value": "medium",
+                            "confidence": 0.7,
+                            "evidence": ["ev_pr"],
+                            "reasoning": "changes a production timeout",
+                            "detail": None,
+                        },
+                        "summary": {
+                            "value": "Halves the retry budget and lowers the timeout.",
+                            "confidence": 0.8,
+                            "evidence": ["ev_pr"],
+                            "reasoning": "read from the patch",
+                            "detail": None,
+                        },
+                    }
+                ],
+                "commits": [
+                    {
+                        "sha": f"{i:040x}",
+                        "short_sha": f"{i:07x}",
+                        "message": f"commit {i}\n\nlonger body that must not be digested",
+                        "authored_at": "2026-08-07T15:00:00Z",
+                        "touched_paths": ["services/payments/retry.py"],
+                        "pull_request_number": 412,
+                    }
+                    for i in range(1, commits + 1)
+                ],
+                "suspect_changes": [
+                    {
+                        "change_ref": "#412",
+                        "change_type": "config",
+                        "change_type_detail": None,
+                        "symptom_link": {
+                            "value": "A shorter timeout would surface as 502s under load.",
+                            "confidence": 0.55,
+                            "evidence": ["ev_pr"],
+                            "reasoning": "timeout lowered in the same PR",
+                            "detail": None,
+                        },
+                    }
+                ],
+                "diff_summary": {
+                    "value": "Retry budget and timeout tightened in payments-api config.",
+                    "confidence": 0.8,
+                    "evidence": ["ev_pr"],
+                    "reasoning": "the diff is small and readable",
+                    "detail": None,
+                },
+            },
+            "evidence": [
+                {
+                    "id": "ev_pr",
+                    "source_type": "pull_request",
+                    "source_type_detail": None,
+                    "source_ref": "#412",
+                    "excerpt": "-RETRY_BUDGET=6\n+RETRY_BUDGET=3",
+                    "observed_at": "2026-08-07T16:40:00Z",
+                    "uri": None,
+                    "tool_call_id": "tc_1",
+                }
+            ],
+            "gaps": [
+                {
+                    "id": "gap_base",
+                    "description": "The base ref the PR was cut from was not fetched.",
+                    "kind": "missing_data",
+                    "kind_detail": None,
+                    "blocks_field": None,
+                    "suggested_agent": None,
+                    "suggested_query": None,
+                    "resolvable": True,
+                }
+            ],
+            "overall_confidence": 0.78,
+            "tool_calls": [],
+            "generated_at": "2026-08-08T14:20:00Z",
+        }
+    )
+
+
+class _GitHubRunner:
+    def __init__(self, *, commits: int = 1) -> None:
+        self._commits = commits
+
+    def run(
+        self, query: str, *, context: str, request_id: str, invocation_id: str, usage: Usage
+    ) -> GitHubAgentResponse:
+        return _github_response(request_id, invocation_id, commits=self._commits)
+
+
 # -------------------------------------------------- explicit context passing, the done-when
 
 
@@ -325,6 +454,31 @@ def test_a_failing_agent_becomes_a_retryable_gap():
     assert resp.status is ResponseStatus.ERROR
 
 
+def test_a_failed_invocation_gap_keeps_the_whole_error_not_its_first_line():
+    """A pydantic ValidationError says "1 validation error for X" on line one and puts the
+    rule that failed on line two. The first live sequential run lost line two to a
+    first-line cut, so the response could not say what went wrong. The gap keeps the whole
+    message, whitespace-collapsed and capped."""
+    from pydantic import ValidationError
+
+    class _InvalidRunner:
+        def run(self, query: str, **_: Any) -> IncidentAgentResponse:
+            payload = _incident_response("req", "inv_incident").model_dump()
+            payload["findings"]["root_cause"]["value"] = None  # null under status complete
+            return IncidentAgentResponse.model_validate(payload)
+
+    plan = _plan([_invocation("incident")])
+    resp = Executor({AgentName.INCIDENT: _InvalidRunner()}).execute(plan, "q?")
+    gap = next(g for g in resp.unresolved_gaps if g.kind_detail == "agent_invocation_failed")
+    assert "ValidationError" in gap.description
+    assert "status 'complete' is invalid when a findings Assessment.value is null" in (
+        gap.description
+    )
+    assert "\n" not in gap.description and len(gap.description) < 800
+    with pytest.raises(ValidationError):
+        _InvalidRunner().run("q?")
+
+
 def test_one_failure_does_not_kill_the_other_agents():
     runner = _RecordingRunner()
     plan = _plan(
@@ -388,6 +542,156 @@ def test_dependent_of_a_failed_dependency_is_not_run():
     unmet = next(g for g in resp.unresolved_gaps if g.kind is GapKind.MISSING_DATA)
     assert "inv_gh" in unmet.description
     assert unmet.resolvable is False
+
+
+# ------------------------------------------------- Day 13: the sequential handoff itself
+
+
+_DEP_CONTEXT = (
+    "Diff the release containing the PR github reports for payments-api in production; "
+    "the suspect window is 14:00-14:15 UTC. Report changed keys, images, and rollout health."
+)
+
+
+def _sequential_plan() -> SelectionPlan:
+    return _plan(
+        [
+            _invocation("github", invocation_id="inv_gh"),
+            _invocation(
+                "deployment",
+                invocation_id="inv_dep",
+                mode="sequential",
+                depends_on=["inv_gh"],
+                context_passed=_DEP_CONTEXT,
+            ),
+        ]
+    )
+
+
+def test_dependent_receives_the_planner_block_plus_the_dependency_digest():
+    """The done-when: Deployment is told what GitHub found, explicitly, and the response
+    records the block it was told verbatim. Nothing is inherited - the digest is in the
+    context because the executor wrote it there, and the response shows it."""
+    deployment = _RecordingRunner()
+    resp = Executor({AgentName.GITHUB: _GitHubRunner(), AgentName.DEPLOYMENT: deployment}).execute(
+        _sequential_plan(), "Did PR 412 break the payments rollout?"
+    )
+
+    (call,) = deployment.calls
+    ctx = call["context"]
+    # The planner's block is kept, first and unchanged; the handoff is appended after it.
+    assert ctx.startswith(_DEP_CONTEXT)
+    assert HANDOFF_HEADER in ctx
+    assert ctx.index(_DEP_CONTEXT) < ctx.index(HANDOFF_HEADER) < ctx.index("<handoff")
+    # The facts a Deployment agent acts on are in it, from GitHub's report.
+    assert '<handoff from="github" invocation_id="inv_gh"' in ctx
+    assert "#412" in ctx and "9f3c2a1d4e5b6c7a8b9c0d1e2f3a4b5c6d7e8f90" in ctx
+    assert "deploy/payments-api.env" in ctx
+    assert "risk: medium @0.70" in ctx
+    assert "gap_base [resolvable]" in ctx
+    # ...and it is a digest, not the serialised response.
+    assert '"schema_version"' not in ctx and "generated_at" not in ctx
+    assert "longer body that must not be digested" not in ctx
+    # Recorded verbatim on the executed invocation - the contract's sec 5 promise that
+    # context_passed IS the block embedded in the prompt, character for character.
+    dep_inv = next(i for i in resp.selected_agents if i.invocation_id == "inv_dep")
+    assert dep_inv.context_passed == ctx
+    assert dep_inv.mode.value == "sequential" and dep_inv.depends_on == ["inv_gh"]
+    # The parallel invocation is untouched - it had nothing handed to it.
+    gh_inv = next(i for i in resp.selected_agents if i.invocation_id == "inv_gh")
+    assert gh_inv.context_passed == _CONTEXT
+    assert [i.invocation_id for i in resp.selected_agents] == ["inv_gh", "inv_dep"]
+    assert resp.status is ResponseStatus.PARTIAL  # GitHub reported an honest gap
+    # Round-trips the wire with the composed block in place.
+    assert CoordinatorResponse.model_validate_json(resp.model_dump_json()) == resp
+
+
+def test_the_handoff_is_bounded_not_a_raw_dump():
+    # Sixty commits behind the PR: the digest lists ten, says how many it left out, and
+    # stays under its ceiling. A raw dump of the same response is many times larger.
+    from aioc.coordinator.handoff import MAX_DIGEST_CHARS
+
+    deployment = _RecordingRunner()
+    github = _GitHubRunner(commits=60)
+    Executor({AgentName.GITHUB: github, AgentName.DEPLOYMENT: deployment}).execute(
+        _sequential_plan(), "q?"
+    )
+    (call,) = deployment.calls
+    handoff = call["context"][call["context"].index("<handoff") :]
+    assert "commits (60):" in handoff
+    assert "(+50 more)" in handoff
+    assert handoff.rstrip().endswith("</handoff>")
+    assert len(handoff) <= MAX_DIGEST_CHARS + len("\n</handoff>")
+    raw = _github_response("req", "inv_gh", commits=60).model_dump_json()
+    assert len(handoff) < len(raw) / 3
+
+
+def test_a_two_hop_chain_hands_each_link_its_direct_dependency_only():
+    # incident (parallel) -> github (sequential on incident) -> deployment (sequential on
+    # github). Deployment sees GitHub's digest; it does not see Incident's digest nor
+    # GitHub's composed context - a handoff is a digest of the response, not a snowball.
+    github = _RecordingRunner()  # records what it was handed; answers as incident
+    deployment = _RecordingRunner()
+    plan = _plan(
+        [
+            _invocation("incident"),
+            _invocation(
+                "github",
+                invocation_id="inv_gh",
+                mode="sequential",
+                depends_on=["inv_incident"],
+                context_passed="Find the change that explains the failure incident reports; "
+                "repository acme/shop, window 14:00-14:15 UTC.",
+            ),
+            _invocation(
+                "deployment",
+                invocation_id="inv_dep",
+                mode="sequential",
+                depends_on=["inv_gh"],
+                context_passed=_DEP_CONTEXT,
+            ),
+        ]
+    )
+    Executor(
+        {
+            AgentName.INCIDENT: _RecordingRunner(),
+            AgentName.GITHUB: github,
+            AgentName.DEPLOYMENT: deployment,
+        }
+    ).execute(plan, "q?")
+
+    (gh_call,) = github.calls
+    assert '<handoff from="incident" invocation_id="inv_incident"' in gh_call["context"]
+    assert "failure_mode: downstream_latency @0.70" in gh_call["context"]
+    (dep_call,) = deployment.calls
+    assert 'invocation_id="inv_gh"' in dep_call["context"]
+    assert 'invocation_id="inv_incident"' not in dep_call["context"]
+    # One handoff block, one header: GitHub's composed context did not ride along.
+    assert dep_call["context"].count("<handoff ") == 1
+    assert dep_call["context"].count(HANDOFF_HEADER) == 1
+
+
+def test_the_dependent_span_carries_the_composed_context():
+    # What the trace shows as the agent's input must be what the agent actually saw.
+    tracer = _FakeTracer()
+    deployment = _RecordingRunner()
+    Executor(
+        {AgentName.GITHUB: _GitHubRunner(), AgentName.DEPLOYMENT: deployment}, tracer=tracer
+    ).execute(_sequential_plan(), "q?")
+    (call,) = deployment.calls
+    span = next(s for s in tracer.traces[0].spans if s.name == "agent:deployment")
+    assert span.input_text == call["context"]
+    assert "<handoff" in span.input_text
+
+
+def test_a_dependent_of_a_failed_dependency_records_the_planner_block_unchanged():
+    # No handoff happened, so nothing is composed: the response must not claim a context
+    # the agent never received.
+    resp = Executor(
+        {AgentName.GITHUB: _FailingRunner(), AgentName.DEPLOYMENT: _RecordingRunner()}
+    ).execute(_sequential_plan(), "q?")
+    dep_inv = next(i for i in resp.selected_agents if i.invocation_id == "inv_dep")
+    assert dep_inv.context_passed == _DEP_CONTEXT
 
 
 # ------------------------------------------------------------------------- honest numbers

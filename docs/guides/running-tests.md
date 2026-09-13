@@ -93,6 +93,8 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `demo_day10.py` | ~3 per run | The whole system, live: inject chaos, build the situation from Prometheus, `respond()` end to end with tracing; records a timed transcript that `render_demo_gif.py` (free) turns into the demo GIF |
 | `check_day11_github.py` | ~3-5 | The GitHub agent reads a real PR over the MCP wire; every PR, commit, and excerpt traces back to a tool reply |
 | `check_day12_deployment.py` | ~3-5 | The Deployment agent diffs two real refs of this repository and reads the live rollout over the wire; `--deploy` recreates the demo containers at the release under test first (needs the stack) |
+| `check_day13_sequential.py` | ~6-9 | The sequential path end to end through `respond()`: the coordinator plans Deployment after GitHub on its own, the executor hands GitHub's digest to Deployment, and the recorded `context_passed` shows it; `--deploy` recreates the demo at the PR's head commit first (needs the stack and the GitHub token) |
+| `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between `analyze_logs` and `analyze_events` over 20 plain and 20 adversarially worded queries; prints and records the misrouting rate per set with the query-set hash, so the Day 14 re-run compares like with like |
 
 ```bash
 # One call per model. Validates diagnose() against the frozen contract.

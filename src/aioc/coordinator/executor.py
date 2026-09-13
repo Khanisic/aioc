@@ -53,6 +53,16 @@ network-free even on a machine whose `.env` carries real Langfuse keys. One trac
 request; one span per agent invocation, opened and closed in the worker thread that runs
 it, so span timing is the real wall clock and a Langfuse trace of a parallel plan visibly
 overlaps - which is the Day 9 checkpoint artifact.
+
+**The sequential chain is a handoff, not just an ordering (Day 13).** A dependent's
+context is composed here, at the moment its dependencies have returned: the planner's
+block for that invocation, then a structured digest of each dependency's response
+(`aioc.coordinator.handoff`). The composed block is what the runner receives and what the
+response records in that invocation's ``context_passed``, so the explicit-passing test
+still holds argument for argument - the block is longer than the planner wrote, and every
+extra character is visible in the response. Nothing is inherited: GitHub's report reaches
+Deployment only because the executor wrote it into Deployment's context, and the response
+shows exactly what was written.
 """
 
 from __future__ import annotations
@@ -79,6 +89,7 @@ from aioc.contracts import (
 from aioc.llm import Usage
 from aioc.observability.tracing import NullTracer, RequestTrace, Tracer
 
+from .handoff import compose_dependent_context
 from .planner import Coordinator, SelectionPlan, utcnow
 
 
@@ -187,8 +198,9 @@ class GitHubRunner:
 class DeploymentRunner:
     """Adapts `DeploymentAgent.assess` to the `AgentRunner` protocol - the same straight
     pass-through as the other three. The Day 13 sequential path (GitHub reads the PR, then
-    Deployment diffs the release) arrives here as ``context_passed`` written by the
-    coordinator, not as anything this runner adds."""
+    Deployment diffs the release) arrives here as ``context_passed`` composed by the
+    executor from the planner's block and GitHub's digest, not as anything this runner
+    adds."""
 
     def __init__(self, agent: DeploymentAgent | None = None) -> None:
         self._agent = agent or DeploymentAgent()
@@ -281,8 +293,15 @@ class Executor:
             )
 
         responses: list[AgentResponse] = []
+        by_invocation: dict[str, AgentResponse] = {}
         execution_gaps: list[Gap] = []
-        succeeded: set[str] = set()
+        # The invocations as actually executed, keyed by id. Parallel ones are the plan's
+        # verbatim; a sequential one carries the context composed at handoff time, which
+        # is what the response must record (CONTRACTS.md sec 5: context_passed is the
+        # literal block embedded in the subagent's prompt - not the block as first planned).
+        executed: dict[str, AgentInvocation] = {
+            inv.invocation_id: inv for inv in plan.selected_agents
+        }
         any_failure = False
 
         def settle(outcome: _Outcome) -> None:
@@ -290,9 +309,10 @@ class Executor:
             # plan order, so the shared accumulator and the result lists never race.
             nonlocal any_failure
             usage.add(outcome.usage)
+            executed[outcome.invocation.invocation_id] = outcome.invocation
             if outcome.response is not None:
                 responses.append(outcome.response)
-                succeeded.add(outcome.invocation.invocation_id)
+                by_invocation[outcome.invocation.invocation_id] = outcome.response
             elif outcome.error is not None:
                 any_failure = True
                 execution_gaps.append(
@@ -325,16 +345,31 @@ class Executor:
                     settle(future.result())
 
         # -- the sequential chain, one at a time in dependency order.
+        #
+        # Why this chain cannot be parallel: a dependent's context is composed FROM ITS
+        # DEPENDENCY'S RESPONSE. Deployment learns which PR shipped, its head SHA, and the
+        # paths it touched from GitHub's report, and diffs the release those facts
+        # identify; until GitHub has returned, that context does not exist and there is
+        # nothing to hand over. Starting Deployment early would mean starting it with the
+        # planner's block alone and letting it guess or assume the rest - exactly the
+        # inherited/assumed context this project exists to demonstrate the absence of.
+        # It is a data dependency, not a scheduling preference: the parallel group above
+        # runs together because nothing any member needs is produced by another member.
         for inv in _sequential_order(plan):
             runner = self._runners.get(inv.agent)
             if runner is None:
                 execution_gaps.append(_agent_missing_gap(inv))
                 continue
-            unmet = [dep for dep in inv.depends_on if dep not in succeeded]
+            unmet = [dep for dep in inv.depends_on if dep not in by_invocation]
             if unmet:
                 execution_gaps.append(_dependency_unmet_gap(inv, unmet))
                 continue
-            settle(self._run_invocation(inv, runner, query, request_id, trace))
+            handed_off = compose_dependent_context(
+                inv.context_passed,
+                [(executed[dep], by_invocation[dep]) for dep in inv.depends_on],
+            )
+            composed = inv.model_copy(update={"context_passed": handed_off})
+            settle(self._run_invocation(composed, runner, query, request_id, trace))
 
         answer, synthesis = _synthesise(plan, responses, execution_gaps)
         unresolved = [*plan.gaps, *execution_gaps, *(g for r in responses for g in r.gaps)]
@@ -345,7 +380,8 @@ class Executor:
             query=query,
             received_at=received,
             intent=plan.intent,
-            selected_agents=plan.selected_agents,
+            # Plan order, as executed: a sequential invocation records the composed block.
+            selected_agents=[executed[inv.invocation_id] for inv in plan.selected_agents],
             skipped_agents=plan.skipped_agents,
             agent_responses=responses,  # type: ignore[arg-type]
             synthesis=synthesis,
@@ -561,6 +597,15 @@ def _dependency_unmet_gap(inv: AgentInvocation, unmet: list[str]) -> Gap:
     )
 
 
+def _error_summary(exc: Exception, limit: int = 600) -> str:
+    """The exception's text, whitespace-collapsed and capped. The whole message, not its
+    first line: a pydantic `ValidationError` puts the one fact that matters (which field,
+    which rule) on the second line, and the first live sequential run lost it to a
+    first-line-only cut - the response said "1 validation error" and nothing else."""
+    text = " ".join(str(exc).split())
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
 def _invocation_failed_gap(inv: AgentInvocation, query: str, exc: Exception) -> Gap:
     # A failed invocation is genuinely worth one more attempt - model nondeterminism and
     # transient upstreams both clear on retry - so this gap is machine-consumable by the
@@ -569,7 +614,7 @@ def _invocation_failed_gap(inv: AgentInvocation, query: str, exc: Exception) -> 
         id=_new_id("gap"),
         description=(
             f"Invocation {inv.invocation_id} ({inv.agent.value}) failed with "
-            f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}"
+            f"{type(exc).__name__}: {_error_summary(exc)}"
         ),
         kind=GapKind.OTHER,
         kind_detail="agent_invocation_failed",

@@ -293,6 +293,37 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   Note in code comments why this one *can't* be parallel.
 - **B:** Build two deliberately overlapping tools (e.g. `analyze_logs` vs `analyze_events`).
   Run 20 queries, **record the misrouting rate**.
+- **Done (2026-09-13):** the sequential chain is a real handoff. `src/aioc/coordinator/handoff.py`
+  digests a dependency's response (facts, judgements with confidence, gaps, evidence refs; lists capped,
+  a hard ceiling, plain text so the dependent can quote it); the executor composes each dependent's
+  context as the planner's block plus the digest of each direct dependency at the moment they return,
+  records the composed block verbatim in that invocation's `context_passed`, and says in a code comment
+  why the chain cannot be parallel (the dependent's context does not exist until the dependency
+  returns). `src/aioc/tools/incident/analyze_server.py` is the `aioc-analyze` stdio server carrying
+  `analyze_logs` (over `docker compose logs`, the only log source the stack has) and `analyze_events`
+  (over the seeded timeline), both with the contract's deliberately weak v1.0.0 part 4 verbatim and
+  pinned by a test. `scripts/check_tool_routing.py` is the measurement: the tools listed over the wire,
+  forced single-tool choice, ground truth by data kind, query sets hashed into every record.
+  Two side fixes from the live run: a failed invocation's gap now keeps the whole error text (a first-line
+  cut had reduced a pydantic error to "1 validation error"), and every agent settles `complete` over a
+  null judgement to `partial` in the runtime (`agents/_status.py`) instead of being refused for a
+  field the code could derive.
+- **Verified:** 514 offline tests (92 new: 5 executor handoff, 14 digest, 69 analyze tools + reader +
+  patterns, 2 wire, 1 status settling, 1 gap text); both analyze tools answered from the live stack and
+  the seeded corpus with zero Claude calls.
+- **Checkpoint produced (2026-09-13):** `scripts/check_day13_sequential.py --deploy` **passed on the second
+  attempt**. The first attempt failed for a correct reason: the situation block handed the coordinator
+  both release SHAs, so it planned GitHub and Deployment in *parallel* - dynamic selection working, the
+  scenario wrong. With the release identity reachable only through the PR, the coordinator planned
+  `sequential` with a `depends_on` edge on its own; GitHub ran 0.0-56.8 s, Deployment 56.8-134.8 s;
+  Deployment's recorded context was 3,706 chars (642 planner + the digest), it diffed the merge commit
+  it read from the digest, and reported three added config keys, no image change, rollout `degraded`
+  @ 0.85 from the redeploy's own restart. 8 Claude calls, 263.8k input tokens (PR #15's patch re-sent
+  each round - the Day 21 target), 143.8 s. **Routing baseline: 0/20 misrouted on the plain set and
+  0/20 on a second, adversarially worded set** (Sonnet, v1 descriptions) - with parts 1 and 3 of the
+  template stating what each tool reads, the weak part 4 cost nothing on 40 queries. Recorded as the
+  honest "before"; the Day 14 write-up owns what that means. Numbers in
+  `docs/interview-prep/numbers.md`.
 
 ### Day 14 — Refinement loop + routing experiment (part 2)
 - **A:** Coordinator **refinement loop** — detect gaps in synthesis, re-delegate targeted queries.

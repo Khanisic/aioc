@@ -25,7 +25,13 @@ from aioc.agents import (
     DeploymentAgentError,
 )
 from aioc.agents.deployment import _EMIT_SCHEMA, DeploymentReport, _apply_guidance
-from aioc.contracts import AgentName, DeploymentAgentResponse, ErrorClass
+from aioc.contracts import (
+    AgentName,
+    DeploymentAgentResponse,
+    ErrorClass,
+    ResponseStatus,
+    RolloutStatus,
+)
 from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage
 
 # --------------------------------------------------------------------------- fakes
@@ -607,6 +613,24 @@ def test_a_failed_tool_call_is_recorded_with_its_error_class():
     assert health.ok is False and health.error_class is ErrorClass.TRANSIENT
     assert health.tokens_returned is None and health.truncated is False
     assert resp.findings.health_signals.error_rate is None
+
+
+def test_complete_over_a_null_judgement_settles_to_partial_not_a_refusal():
+    """The first live sequential run: one judgement honestly null with its gap, and
+    `status: complete` on the envelope - refused by the contract for a field the runtime
+    could have settled. Now it is settled: the report is accepted as `partial`. The other
+    direction is never taken - a reported `partial` stays `partial` (Day 13)."""
+    report = _report(gaps=[_null_gap("regression_suspected")])
+    report["findings"]["regression_suspected"] = _assessment(None, 0.2, [])
+    agent, _, _ = _agent([*_SCRIPT, _emit_message(report)])
+    resp = agent.assess(_QUERY, context=_CONTEXT)
+    assert resp.status is ResponseStatus.PARTIAL
+    assert resp.findings.regression_suspected.value is None
+    assert resp.findings.rollout_status.value is RolloutStatus.DEGRADED  # the rest intact
+
+    stays = _report(status="partial")
+    agent, _, _ = _agent([*_SCRIPT, _emit_message(stays)])
+    assert agent.assess(_QUERY, context=_CONTEXT).status is ResponseStatus.PARTIAL
 
 
 def test_complete_status_with_no_successful_tool_call_is_rejected():

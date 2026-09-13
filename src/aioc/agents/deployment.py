@@ -60,6 +60,7 @@ from aioc.llm import LLMClient, ToolCallRecord, ToolResult, ToolSpec, Usage
 from aioc.llm.mcp import McpStdioToolset
 
 from ._annotate import ROOT, apply_guidance
+from ._status import settle_status
 from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
 from .incident import _CONFIDENCE_BANDS
 
@@ -632,7 +633,10 @@ def _assemble(
     return DeploymentAgentResponse(
         request_id=request_id or new_id("req"),
         invocation_id=invocation_id or new_id("inv"),
-        status=report.status,
+        # Settled, not copied: `complete` over a null judgement is `partial` (sec 3), and
+        # the runtime can see the judgements. The first live sequential run was refused
+        # for exactly this - one honest null with its gap, and `complete` on the envelope.
+        status=settle_status(report.status, findings),
         status_detail=report.status_detail,
         summary=report.summary,
         findings=findings,

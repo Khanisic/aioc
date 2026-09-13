@@ -61,6 +61,7 @@ from aioc.llm.mcp import McpStdioToolset
 from aioc.tools.github.api import GitHubSettings
 
 from ._annotate import ROOT, apply_guidance
+from ._status import settle_status
 from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
 from .incident import _CONFIDENCE_BANDS
 
@@ -569,7 +570,8 @@ class GitHubAgent:
         return GitHubAgentResponse(
             request_id=request_id or new_id("req"),
             invocation_id=invocation_id or new_id("inv"),
-            status=report.status,
+            # `complete` over a null judgement settles to `partial` (sec 3; agents/_status).
+            status=settle_status(report.status, findings),
             status_detail=report.status_detail,
             summary=report.summary,
             findings=findings,
