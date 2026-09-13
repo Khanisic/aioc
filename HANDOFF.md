@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 12** of 30, after the Deployment agent landed and all four agents
-exist.
+Written at the end of **Day 13** of 30, after the sequential handoff landed, the two
+overlapping tools shipped, and the routing baseline was recorded.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 13.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 14.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 422-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 514-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
@@ -83,7 +83,10 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
 | `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. |
-| `coordinator/executor.py` | Day 7, **parallel + traced Day 9.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. The parallel group runs on a thread pool: every runner gets its own `Usage` accumulator, folded into the total after the join (the shared-`+=` race from the Day 8 handoff is closed by construction); results merge in plan order; a barrier test proves overlap offline. `respond()` = plan + execute in one call, and owns the request trace (`plan` span + agent spans). |
+| `coordinator/executor.py` | Day 7, **parallel + traced Day 9, handoff Day 13.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. The parallel group runs on a thread pool: every runner gets its own `Usage` accumulator, folded into the total after the join; results merge in plan order; a barrier test proves overlap offline. The sequential chain composes each dependent's context at the moment its dependencies return - the planner's block, then `handoff.digest` of each direct dependency - and records the composed block verbatim on the executed invocation, so `selected_agents` in the response shows what Deployment actually saw. A failed invocation's gap now keeps the whole error text. `respond()` = plan + execute in one call, and owns the request trace. |
+| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. |
+| `agents/_status.py` | **Day 13.** `settle_status`: `complete` over a null findings judgement becomes `partial` in every agent's runtime, that direction only. The first live sequential run was refused for exactly this. |
+| `tools/incident/analyze_server.py` (+ `logs.py`, `patterns.py`) | **Day 13.** The `aioc-analyze` stdio server for the case study's two deliberately overlapping tools. `analyze_logs` reads what a container printed through `docker compose logs` (the only log source the stack has; a recreated container starts empty, stated in part 3); `analyze_events` reads the seeded timeline. Parts 1-3 of each description are complete; **part 4 is the contract's v1.0.0 sentence verbatim, names no alternative, and is pinned by `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative`** - do not sharpen it outside the Day 14 `1.1.0` split. Codes: `INVALID_PATTERN`, `UNKNOWN_SERVICE`, `LOG_STORE_UNAVAILABLE`, `EVENT_STORE_UNAVAILABLE` (all contract-named), plus the shared ones. Verified live against the stack and the corpus with zero Claude calls. |
 | `observability/tracing.py` | **Day 9.** The `Tracer`/`RequestTrace`/`AgentSpan` seam. `NullTracer` is the default everywhere; `default_tracer()` returns the `LangfuseTracer` adapter only when both keys are set (SDK client built lazily, injectable stub in tests). One trace per request; `agent:<name>` spans open/close in the worker thread that runs them, so a parallel plan shows overlapping spans; `ToolCallRef`s ride as child events carrying their measured timing; `CoordinatorResponse.trace_id` comes from the trace. Tracing activates **only** when an entry point passes a tracer - keys in `.env` alone cannot make tests emit spans. |
 | `tools/envelope.py` + `tools/policy.py` | The contract wire envelope (sec 6) + the chaos ground-truth permission gate shared by all servers. |
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
@@ -154,13 +157,14 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 422 passed
+uv run pytest -q                                                   # expect 514 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **422 passed** with the stack up (412 passed, 10 skipped without
-it), lint and mypy clean, at the end of Day 12. The suite takes ~80s offline: the
-`test_mcp_toolset.py` tests launch the real GitHub and deployment server subprocesses.
+Costs nothing. Last run: **514 passed** with the stack up (501 passed, 13 skipped without
+it), lint and mypy clean, at the end of Day 13. The suite took ~20s on this machine with the
+stack up; the `test_mcp_toolset.py` tests launch the real GitHub, deployment, and analyze
+server subprocesses and are most of it.
 
 The whole system has now been proven live end to end - the Day 10 demo (**~3 Claude
 calls** per run, needs the stack; `--skip-inject` reuses active chaos, `--query` overrides
@@ -171,6 +175,15 @@ PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
 ```
 
+`check_day13_sequential.py --deploy` (~6-9 calls; 2026-09-13: 8 calls, 263.8k input tokens,
+143.8s) is the Day 13 regression: `respond()` on a scenario where the release identity is only
+reachable through the PR. It asserts the coordinator planned Deployment `sequential` after
+GitHub on its own, that Deployment's recorded `context_passed` carries GitHub's digest after
+the planner's block, and that Deployment started after GitHub ended. It recreates the demo at
+the PR's head commit; a plain `docker compose up -d --wait` afterwards puts it back on
+`baseline` (done at the end of Day 13). `check_tool_routing.py` (20 calls per query set, 40
+for both; `--dry-run` free) is the routing case study's measurement and the Day 14 re-run
+target - §7 item 15 says what the baseline came back as.
 `check_day12_deployment.py --deploy` (~3-5 calls) is the Day 12 regression: it recreates the
 demo containers at `origin/main`, then the Deployment agent diffs two real refs and reads the
 live rollout over the wire. `check_day9_trace.py --fake-agents` remains the zero-cost tracing smoke test, and Day 7's
@@ -178,17 +191,61 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 13 - the sequential path, and the routing experiment (part 1)
+## 6. Next work: Day 14 - the refinement loop, and the routing experiment (part 2)
 
-**From the plan:** A: the sequential dependency path - GitHub reads the PR, then Deployment
-diffs the release - with a code comment on why this one *cannot* be parallel. B: build the
-two deliberately overlapping tools (`analyze_logs` vs `analyze_events`, CONTRACTS.md sec
-7.5 / 7.6), run 20 queries, and **record the misrouting rate**. Day 14 splits and renames
-them and re-runs the same 20; the v1.0.0 definitions must stay in the contract verbatim
-(struck through, not deleted) - they are the case-study baseline, and this is the one
-pre-authorised `1.1.0` change.
+**From the plan:** A: the coordinator **refinement loop** - detect gaps in synthesis,
+re-delegate targeted queries. B: split/rename the overlapping tools, re-run the same 20 (now
+40) queries, record the new rate, and draft `docs/case-study-tool-routing.md` with the
+before/after numbers.
 
-What already exists for the sequential path:
+What already exists for the refinement loop:
+
+- The gaps are machine-consumable already. `Gap.suggested_agent` + `Gap.suggested_query`
+  are set by the agents and by the executor's own `_invocation_failed_gap`; the loop
+  consumes them directly and stops on `resolvable: false` (the coordinator rule in
+  `.claude/rules/coordinator.md`). `Coordinator.plan` takes `round_number` and stamps
+  `round` on every invocation; `CoordinatorResponse.refinement_rounds` is hard-coded `0`
+  in the executor and is the field to bump.
+- The live Day 13 run produced exactly the input the loop needs: Deployment's gap
+  "compared_to_baseline was null" with `suggested_agent: deployment` and a wider-lookback
+  `suggested_query`, and GitHub's two out-of-scope gaps pointing at the Deployment agent's
+  tools. Re-delegating those is the loop's first real test - re-run
+  `check_day13_sequential.py` once it exists and count rounds.
+- A re-delegated invocation is a new `AgentInvocation` with `round: 1+` and its own
+  `context_passed`; the handoff module (`compose_dependent_context` / `digest`) is the
+  natural way to give it the previous round's findings without re-sending the raw
+  responses. Model-written synthesis (the executor's docstring says Day 14 is its first
+  consumer) is the other half; the deterministic `_synthesise` is the fallback to keep.
+- Cost matters here more than anywhere: every round is another full agent run, and the
+  Day 13 sequential run was 263.8k input tokens *before* any refinement. Cap rounds (the
+  plan says "until coverage is sufficient"; two is plenty for the demo) and measure.
+
+What already exists for the routing experiment's second half:
+
+- **The baseline is 0/20 on the plain set and 0/20 on the hard set** (Sonnet, v1
+  descriptions listed over the wire). Read §7 item 15 before deciding what "after" means:
+  the weak part 4 caused no misrouting because parts 1 and 3 already state what each tool
+  reads. The split still happens (it is the pre-authorised `1.1.0` change and the
+  case-study deliverable), the same 40 queries are re-run through `check_tool_routing.py
+  --variant v1_1`, and the write-up reports 0 -> 0 honestly if that is the result, with
+  the levers that would have produced a non-zero baseline named (a cheaper router model;
+  parts 1-3 written as loosely as part 4). Do not edit the query sets - their hashes are
+  in the run records (`plain` `b0da5960...`, `hard` `9e31bedb...`).
+- The `1.1.0` bump is the §0 process minus the second engineer: the v1.0.0 definitions in
+  CONTRACTS.md sec 7.5 / 7.6 stay verbatim (struck through, not deleted), new names and a
+  usable part 4 for each, a `schema_version` bump, a sec 9 row, and the entry in
+  `docs/design-notes/contract-changes.md` written before the code. `VARIANTS` in
+  `check_tool_routing.py` is the one place to register the new server module, and
+  `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative` must keep passing
+  against the v1 module (keep it; add the "after" assertion against the new one).
+
+<!-- superseded Day 13 notes follow, kept for the record -->
+**Day 13 as planned:** A: the sequential dependency path with a code comment on why it cannot
+be parallel. B: the two overlapping tools, 20 queries, the misrouting rate. Done; see §3, the
+live check passed on the second attempt on 2026-09-13 (war story #9 is the first attempt),
+and the baseline is recorded in `docs/interview-prep/numbers.md`.
+
+What already existed for the sequential path:
 
 - The planner already emits `mode: sequential` with a non-empty `depends_on` for the
   `sequential_dependency` case (measured 5/5), and the executor already runs the chain in
@@ -395,6 +452,28 @@ for github queries.
 9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
    adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
    actually starts a request, so offline cost is import weight only.
+15. **The routing baseline is 0/40, and that is the finding (Day 13).** With parts 1 and 3
+   of the sec 6.5 template stating what each tool reads, Sonnet never needed the weak
+   part 4: 0/20 misrouted on twenty plainly worded queries and 0/20 on twenty written
+   afterwards with the surface vocabulary pulling the wrong way ("the deploy log", "the
+   operational output", "analyze its activity"). The case study's premise did not
+   materialise under these conditions. Two levers would likely change it, neither run
+   unasked because the standing rule says no model matrix without a request: a cheaper
+   router model (Haiku, ~20 calls per set at a fraction of Sonnet's price, and the same
+   model the Day 23 experiment measures), and parts 1-3 written as loosely as part 4.
+   Both are a `--model` flag or a second server module away; `check_tool_routing.py`
+   records the model and the query-set hashes on every run.
+16. **The sequential run costs ~264k input tokens, and it is not the handoff's fault.**
+   PR #15 is 27 files and +4.6k lines; `get_pull_request` returned ~22k tokens that were
+   re-sent on every GitHub round, and Deployment's ~7k-token diff reply on every
+   Deployment round. The handoff itself was ~3k characters. Day 21 owns the trimming
+   (first-line-only commit messages, `include` filters by default, a `max_patch_chars`
+   on the PR read); until then, pick a smaller PR for demos, or pass `--pr`.
+17. **`status` is now settled by the runtime in one direction** (`agents/_status.py`):
+   `complete` over a null judgement becomes `partial`. This is a behaviour change in all
+   four agents, covered by a Deployment test and the existing envelope tests. A reported
+   `partial` / `insufficient_evidence` / `error` is never raised. The general fix for a
+   report the contract refuses is still the Day 17 validation-retry loop.
 
 ## 8. Where things are written down
 

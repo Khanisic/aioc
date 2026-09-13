@@ -208,6 +208,31 @@ And any failure path that lives on a background thread needs one synchronous che
 
 ---
 
+## 9. The coordinator refused to run my sequential demo sequentially, and it was right
+
+**Symptom.** The first live run of the Day 13 sequential path - GitHub reads the PR, then Deployment diffs the release with GitHub's digest in its context - came back with both agents planned `parallel`, no `depends_on` edge, no handoff, and the Deployment invocation failed with a validation error whose text was "1 validation error for DeploymentAgentResponse" and nothing more.
+Every offline test of the handoff was green.
+
+**The hunt.** The plan the coordinator returned was in the run record, and its reasons were plain: Deployment's context said "currently deployed release a921f4c, previous release 9de137a".
+I had put both SHAs in the situation block so Deployment would have something to diff.
+Given the SHAs, Deployment needed nothing from GitHub, and the coordinator - whose graded job is to serialise only when one agent genuinely needs another's output - did not serialise.
+Dynamic selection had beaten the demo author for the second time in this project (the Day 10 demo was the first).
+
+The Deployment failure was a separate defect, and the response could not say which.
+The executor's failed-invocation gap kept only the first line of the exception, and pydantic puts the rule on the second line.
+The full text was on the Langfuse span: `status 'complete' is invalid when a findings Assessment.value is null`.
+The model had left one judgement honestly null with a gap against it and then written `complete` on the envelope - a value the runtime could have settled itself.
+
+**Fix.** Three, in three places.
+The scenario now tells the coordinator the last recorded release and that a PR shipped since, but not the new release's identity - that is only reachable through the PR, so the dependency is real, and the coordinator planned `sequential` with a `depends_on` edge on the next run without a prompt change.
+The gap keeps the whole exception text, whitespace-collapsed and capped, so the next refusal names its rule in the response.
+And every agent settles `complete` over a null judgement to `partial` in the runtime, in that direction only.
+
+**Transferable lesson.** A test of an orchestration behaviour has to present the orchestrator with a problem that actually has that shape; hand it the answer and it will, correctly, skip the work.
+And when a failure message is truncated by your own code, the first thing to fix is the truncation - the second bug was diagnosable in one read once the message was whole.
+
+---
+
 ## How to tell these in an interview
 
 Lead with the symptom, not the answer.
@@ -215,5 +240,5 @@ Lead with the symptom, not the answer.
 Opening with "I had a max_tokens misconfiguration" throws the story away.
 
 Have one sentence ready for what you changed *besides* the fix.
-Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check.
+Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error.
 Fixing the bug is table stakes. Making the failure legible next time is the part that reads as seniority.

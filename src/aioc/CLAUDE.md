@@ -24,14 +24,23 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   rejected in code. Deployment is live (Day 12): the same shape over `aioc-deployment`, with keys,
   images, and health signals stamped from the replies and a gap required for any tool not run.
   `_toolset.py` is the shared `Toolset` seam and grounding ledger for the tool-driven agents.
+  `_status.py` (Day 13) settles `complete` over a null judgement to `partial` for every agent - a
+  value the runtime can derive is never asked of the model.
 - `retrieval/` - Day 8 ingestion and hybrid search over the incident corpus (pg_trgm + pgvector,
   RRF fusion, Voyage embeddings behind the `Embedder` protocol, lexical-only without a key).
   Consumed by the Docs agent through the `CorpusRetriever` seam.
 - `coordinator/` - intent classification, dynamic agent selection, and the refinement loop. Phase 1.
+  `handoff.py` (Day 13) is the sequential handoff: a bounded, plain-text digest of a dependency's
+  response that the executor appends to the dependent's planner block at the moment the dependency
+  returns, and records verbatim in that invocation's `context_passed`. Direct dependencies only.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `github/`, `docs/`, `deployment/` (Phase 2).
   `deployment/` (Day 12) is the two contract-named tools: `release.py` diffs release manifests
   structurally with values hashed at parse time (keys and paths only, by construction), `health.py`
   reads Prometheus and applies the deterministic rollout-status rule, `server.py` is the wire.
+  `incident/analyze_server.py` (Day 13) is the `aioc-analyze` server for `analyze_logs` (over
+  `docker compose logs`, `logs.py`) and `analyze_events` (over the seeded timeline). Their part-4
+  lines are the contract's deliberately weak v1.0.0 text, pinned by a test - do not sharpen them
+  outside the Day 14 `1.1.0` split, or the routing case study loses its baseline.
 - `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and
   the human-in-the-loop approval gate (later phases).
 

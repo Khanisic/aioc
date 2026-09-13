@@ -18,6 +18,7 @@ import pytest
 from aioc.llm import McpStdioToolset, McpToolsetError, ToolResult
 from aioc.tools.deployment import server as ds
 from aioc.tools.github import server as gs
+from aioc.tools.incident import analyze_server as an
 
 _OFFLINE_ENV = {
     **os.environ,
@@ -119,6 +120,47 @@ def test_deployment_errors_arrive_structured_over_the_wire(deployment_toolset: M
     # And validation is structured too.
     bad = deployment_toolset.call("check_rollout_health", {"service": "s"})
     assert json.loads(bad.content)["error"]["details"]["field"] == "environment"
+
+
+# ------------------------------------------------- Day 13: the analyze server, same wire
+
+
+@pytest.fixture(scope="module")
+def analyze_toolset():
+    env = {
+        **_OFFLINE_ENV,
+        "DOCKER_BIN": "/definitely/not/docker",  # the log store reports unavailable, honestly
+        "DATABASE_URL": "postgresql://aioc:x@127.0.0.1:9/aioc?connect_timeout=1",
+    }
+    with McpStdioToolset.for_module(an.__name__, env=env) as ts:
+        yield ts
+
+
+def test_the_analyze_server_lists_both_overlapping_tools_over_stdio(
+    analyze_toolset: McpStdioToolset,
+):
+    assert analyze_toolset.server_name == an.SERVER_NAME
+    by_name = {t.name: t for t in analyze_toolset.tools}
+    assert list(by_name) == list(an.TOOL_NAMES)
+    # The deliberately weak v1 part 4 travels the wire verbatim - it is what the routing
+    # experiment measures, so the wire must not sharpen it either.
+    for name in an.TOOL_NAMES:
+        assert by_name[name].description == an.DESCRIPTIONS[name]
+        assert by_name[name].description.rstrip().endswith(an.V1_PART_FOUR[name])
+
+
+def test_analyze_errors_arrive_structured_over_the_wire(analyze_toolset: McpStdioToolset):
+    window = {"start": "2026-01-22T15:00:00Z", "end": "2026-01-22T16:00:00Z"}
+    logs = analyze_toolset.call("analyze_logs", {"service": "checkout-api", **window})
+    assert logs.is_error is True
+    error = json.loads(logs.content)["error"]
+    assert error["code"] == "LOG_STORE_UNAVAILABLE" and error["retry_after_ms"] is not None
+    events = analyze_toolset.call("analyze_events", {"service": "checkout-api", **window})
+    assert json.loads(events.content)["error"]["code"] == "EVENT_STORE_UNAVAILABLE"
+    bad = analyze_toolset.call(
+        "analyze_events", {"service": "checkout-api", **window, "pattern": "("}
+    )
+    assert json.loads(bad.content)["error"]["code"] == "INVALID_PATTERN"
 
 
 def test_a_server_that_cannot_start_raises_clearly():

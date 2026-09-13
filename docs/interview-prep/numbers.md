@@ -139,11 +139,11 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **422** (412 offline + 10 `integration`-marked) |
-| Runtime | ~80s offline (the Day 11-12 MCP-wire tests launch real server subprocesses, ~20s of it) |
+| Total tests | **514** (501 offline + 13 `integration`-marked) |
+| Runtime | ~20s with the stack up on the Day 13 machine (the Day 11-13 MCP-wire tests launch real server subprocesses, most of it) |
 | Live API calls needed | **0** |
 
-Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 23 executor, 28 timeline tool, 30 correlate tool, 18 docs agent, 27 retrieval, 10 tracing, 20 github agent, 41 github tool, 9 MCP toolset (real stdio wire, credentials blanked so no network), 24 deployment agent, 73 deployment tool.
+Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 29 executor, 14 handoff digest, 28 timeline tool, 30 correlate tool, 69 analyze tools (logs, events, the compose reader, pattern maths), 18 docs agent, 27 retrieval, 10 tracing, 20 github agent, 41 github tool, 11 MCP toolset (real stdio wire, credentials blanked so no network), 25 deployment agent, 73 deployment tool.
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
 
@@ -240,6 +240,53 @@ The input-token number is the same story as Day 11: the diff reply (~7.4k tokens
 
 ---
 
+## The Day 13 sequential path, live
+
+`scripts/check_day13_sequential.py --deploy`, PR #15 of this repository, Sonnet, 2026-09-13. Two attempts; the first failed for a reason worth keeping.
+
+| Attempt | Outcome | Cause |
+|---|---|---|
+| 1 | FAIL: both agents planned `parallel`, Deployment refused with a validation error | the situation block told the coordinator both release SHAs, so Deployment needed nothing from GitHub and the coordinator (correctly) did not serialise them; separately, Deployment wrote `status: complete` over one honestly null judgement |
+| 2 | **PASS** | the release identity is reachable only through the PR; `status` is settled by the runtime |
+
+Attempt 1 is the graded behaviour working against the demo author: dynamic selection will not invent a dependency the data does not require. The scenario was changed, not the coordinator.
+
+| | Attempt 2 |
+|---|---|
+| Plan | `mixed` @ 0.95; github `parallel`, deployment `sequential` after `inv_github`; incident and docs skipped with reasons |
+| Claude calls | 8 (plan 1, GitHub 2 rounds + emit, Deployment 3 rounds + emit) |
+| Wire calls | GitHub: `get_pull_request` 1,375 ms (~22.3k tokens), `list_commits` 358 ms. Deployment: `diff_release` 2,391 ms (~7.2k tokens), `check_rollout_health` x2 (264 ms, 327 ms) |
+| Timing | GitHub 0.0 -> 56.8 s, Deployment 56.8 -> 134.8 s; 143.8 s wall |
+| Deployment's context | 3,706 chars: 642 of planner block, then the GitHub digest (24 lines) |
+| What crossed the handoff | PR #15 merged, head `d22eba1`, merge commit `a921f4c` (in GitHub's summary line), 27 files +4,619/-177, touched paths, risk medium @ 0.60, two gaps |
+| What Deployment did with it | diffed `9de137a` -> `a921f4c` (the merge commit it read from the digest), checked health for the running `d22eba1` and for `a921f4c` |
+| Deployment verdict | 3 config keys added (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `VOYAGE_API_KEY`), no image change; rollout `degraded` @ 0.85 (2 restarts, 1 probe failure - the redeploy itself), regression `true` @ 0.40, `hold_and_monitor` @ 0.55, risk medium; 9 evidence, 2 gaps |
+| Cost | 263,758 in / 13,644 out tokens |
+| Status | `partial` (GitHub's two honest gaps carry through), 4 unresolved gaps |
+| Trace | `62281faa39eebea2b509191da7838917` - the two agent spans do not overlap |
+
+Two things to say plainly:
+
+- **The digest was consumed, not cited.** Deployment used the merge commit from GitHub's summary as its `to_version`, which it could not have known otherwise, but all nine of its evidence entries quote tool replies; none quotes the context block. The grounding path for context quotes exists and is tested; this model preferred the wire.
+- **The input-token number is the Day 21 target, twice over.** PR #15 is a 27-file, +4.6k-line PR, and `get_pull_request` returned ~22k tokens that were re-sent on every GitHub round; Deployment's diff reply was ~7k tokens re-sent on every Deployment round. Attempt 1 alone was 176.6k input tokens for the GitHub half.
+
+---
+
+## The Day 13 routing baseline (the case study's "before")
+
+`scripts/check_tool_routing.py`, v1 descriptions listed from the `aioc-analyze` server over the wire, Sonnet, `tool_choice: any`, 2026-09-13.
+
+| Query set | Misrouted | Input / output tokens | `queries_sha256` |
+|---|---|---|---|
+| `plain` (20: ten need process output, ten need the recorded history; phrased as an operator would) | **0 / 20** | 57,305 / 2,478 | `b0da5960...` |
+| `hard` (20: same ground truths, surface vocabulary pulling the wrong way - "the deploy log", "the operational output", "analyze its activity") | **0 / 20** | 57,334 / 2,474 | `9e31bedb...` |
+
+The `hard` set was written after the `plain` set came back clean and before it was run, because a set that cannot produce a misroute cannot measure an intervention. It did not produce one either.
+
+What this says, honestly: with parts 1 and 3 of the sec 6.5 template stating what each tool reads (what the process printed versus what was recorded as happening to it), the contract's deliberately weak part 4 cost nothing on 40 queries with this model. The premise of the case study - that overlapping tools misroute - did not materialise under these conditions. Day 14 still splits and renames under the pre-authorised `1.1.0` bump and re-runs both sets, and the write-up reports 0 -> 0 if that is what it measures. The levers that would produce a non-zero baseline, in the order I would pull them: a cheaper router model (Haiku, which is also the Day 23 question), and parts 1 and 3 written as loosely as part 4 (what a hastily written real tool looks like). Neither was run unasked.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
@@ -248,5 +295,5 @@ Say this plainly rather than letting it be discovered:
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No cost/latency aggregate.** Langfuse now traces every request (Day 9), and each response carries measured cost - but nothing aggregates across requests yet.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
-- **The sequential path has not run live.** Both agents on it (GitHub, Deployment) pass their own live checks; the handoff between them is Day 13.
+- **The routing case study has no "after" yet, and its "before" is 0/40.** Day 14 splits the tools and re-runs both sets; a 0 -> 0 result is a result, and the write-up says what would have produced misrouting.
 - **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.

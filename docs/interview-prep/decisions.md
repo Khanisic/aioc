@@ -317,3 +317,37 @@ Each agent's subclass overrides one hook, `index`, to pick out what it stamps fr
 **What I would watch.** The gap requirement is a rule the model has to satisfy, and rules the model has to satisfy are where live runs fail first (Day 11 took seven).
 It is stated on the schema object and in the system prompt, and the first live run satisfied it without a retry - but a model that runs both tools and then reports a release neither returned will still be refused, correctly, and that is the case the Day 17 retry loop should feed back with the exact reason.
 
+
+## 20. The sequential handoff is a digest composed at execution time, appended to the planner's block, and recorded verbatim
+
+**Context.** The planner writes every invocation's `context_passed` before anything runs.
+For the sequential path (GitHub reads the PR, then Deployment diffs the release) that means Deployment's context could only ever say "diff the release containing the PR GitHub reports" - the one fact it needs, the PR's commit, does not exist when the plan is written.
+The contract's sec 5 promise is that `context_passed` is the literal block embedded in the subagent's prompt.
+
+**Decision.** The executor composes a dependent's context at the moment its dependencies have returned: the planner's block first and unchanged, then a structured digest of each *direct* dependency's response, and the composed block is what the runner receives and what the response records.
+The digest (`coordinator/handoff.py`) keeps the facts a downstream agent acts on - PR numbers, SHAs, touched paths, judgements with their confidence and evidence ids, gaps with their `suggested_query`, evidence references - and drops the envelope.
+Lists are capped with an honest `(+N more)`, values are clipped, and the block has a hard ceiling that cuts on a line boundary and says so; a two-hop chain sees the middle agent's digest, never its composed context, which is what keeps a handoff from snowballing.
+It is plain text rather than JSON so a tool-driven agent can quote a line of it as evidence through the same substring grounding it applies to tool replies.
+
+**Why not the raw response.** It was the easy alternative and the one `BUILD_PLAN.md` Phase 4 names as wrong ("pass Incident's digest to Deployment, not the raw dump").
+Measured on the fixtures, a sixty-commit GitHub response digests to under a third of its serialised size; on the live run the whole handoff was about 3,000 characters against a Deployment tool loop that re-sends its context every round.
+
+**Why the chain cannot be parallel, in one sentence.** The dependent's context is composed from the dependency's response, so until the dependency returns there is nothing to hand over; starting early would mean starting with the planner's block alone and letting the agent assume the rest, which is the inherited-context failure the project exists to demonstrate the absence of.
+The comment lives at the sequential loop in `executor.py`, where a future reader tempted to widen the thread pool will see it.
+
+**What I would watch.** The first live run proved the coordinator will *not* plan a dependency the data does not require: told both SHAs up front, it ran the two agents in parallel, correctly.
+A sequential scenario has to carry a real data dependency, and a demo that hands the coordinator the answer is testing the executor against a plan it will never produce.
+
+## 21. A value the runtime can derive is settled by the runtime, not asked of the model - `status` included
+
+**Context.** CONTRACTS.md sec 3: `status` must be `partial` or weaker whenever any findings `Assessment.value` is null.
+The first live sequential run's Deployment report left one judgement honestly null with a gap against it and wrote `status: complete`; the envelope validator refused the whole response, and the executor's gap said "1 validation error" because a first-line cut had dropped the line that named the rule.
+
+**Decision.** Every agent now settles `complete` over a null judgement to `partial` in the runtime (`agents/_status.py`), in that direction only - a reported `partial` or `insufficient_evidence` is a judgement and is believed.
+The executor's failed-invocation gap keeps the whole exception text, whitespace-collapsed and capped, so the next such refusal names its rule in the response.
+
+**Why this is the same decision as #7 and #17.** `round`, SHAs, file counts, `requires_approval`, and now this half of `status` are values the code already knows; asking a model for one adds a way to be wrong and no way to be right.
+The other half of `status` - whether the question was answered - is a judgement and stays the model's.
+
+**What I would watch.** This closes one specific refusal, not the class.
+The Day 17 validation-retry loop is still the general answer for a report the contract rejects; the settled `status` just means it will be re-requested for a real defect rather than for bookkeeping.

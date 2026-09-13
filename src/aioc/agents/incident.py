@@ -32,7 +32,7 @@ from typing import Any
 from uuid import uuid4
 
 from anthropic.types import Message, TextBlock, ToolUseBlock
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from aioc.contracts import (
     Evidence,
@@ -45,6 +45,7 @@ from aioc.contracts import (
 from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
 
 from ._annotate import ROOT, apply_guidance
+from ._status import settle_status
 
 AGENT_NAME = "incident"
 
@@ -393,6 +394,18 @@ class IncidentAgent:
         data["request_id"] = request_id or _new_id("req")
         data["invocation_id"] = invocation_id or _new_id("inv")
         data["generated_at"] = datetime.now(UTC)
+        # `complete` over a null judgement settles to `partial` (sec 3; agents/_status).
+        # The findings are validated on their own first so the rule reads real
+        # Assessments; if they do not validate, the full model below says why.
+        if data.get("status") == ResponseStatus.COMPLETE.value and isinstance(
+            data.get("findings"), dict
+        ):
+            try:
+                findings = IncidentFindings.model_validate(data["findings"])
+            except ValidationError:
+                findings = None
+            if findings is not None:
+                data["status"] = settle_status(ResponseStatus.COMPLETE, findings).value
         return IncidentAgentResponse.model_validate(data)
 
     @staticmethod
