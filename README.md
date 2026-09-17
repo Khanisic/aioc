@@ -86,16 +86,19 @@ uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # f
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py            # reads a real PR
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy   # diffs two refs, reads the live rollout
 
-# the sequential path: GitHub reads the PR, then Deployment gets GitHub's digest (~6-9 calls)
+# the sequential path: GitHub reads the PR, then Deployment gets GitHub's digest; since Day 14
+# also the refinement loop and the model-written synthesis (~8-15 calls)
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
 
-# the routing case study: 20 queries per set, --dry-run is free
+# the routing case study: 20 queries per set, --dry-run is free; --variant v1_1 is the split
 uv run python scripts/check_tool_routing.py --dry-run
+uv run python scripts/check_tool_routing.py --variant v1_1 --dry-run
 
 # the custom MCP tools, over stdio (free; each is a real server an MCP client can attach to)
 uv run python -m aioc.tools.incident.timeline_server     # get_incident_timeline
 uv run python -m aioc.tools.incident.correlate_server    # correlate_events
-uv run python -m aioc.tools.incident.analyze_server      # analyze_logs, analyze_events
+uv run python -m aioc.tools.incident.analyze_server      # analyze_logs, analyze_events (v1.0.0 baseline)
+uv run python -m aioc.tools.incident.search_server       # search_container_logs, search_recorded_events (v1.1.0)
 uv run python -m aioc.tools.github.server                # get_pull_request, list_commits, diff_refs
 uv run python -m aioc.tools.deployment.server            # diff_release, check_rollout_health
 ```
@@ -129,7 +132,7 @@ out. See that directory's README for the record schema.
 src/aioc/
   contracts/       jointly owned — the executable form of docs/CONTRACTS.md
   llm/             Claude API harness - messages, streaming, the tool_use loop
-  coordinator/     planner (selection) + executor (delegation), refinement loop later
+  coordinator/     planner (selection) + executor (delegation, handoff, refinement loop) + synthesis
   agents/          incident · docs · github · deployment
   tools/           custom MCP servers — envelope, chaos policy gate, incident/ servers
   memory/          redis (working) · postgres (episodic) · pgvector (semantic)

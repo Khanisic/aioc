@@ -11,7 +11,9 @@ time window" versus "Use this to analyze service activity over a time window". N
 either description names the other tool or states the discriminator. Day 13 records how
 often a model given both picks the wrong one across twenty queries
 (`scripts/check_tool_routing.py`); Day 14 splits and renames them under the pre-authorized
-`1.1.0` bump and re-runs the same twenty. **Do not sharpen these descriptions here** - the
+`1.1.0` bump and re-runs the same twenty (`aioc.tools.incident.search_server`, which
+shares this module's implementation under the new names and is the shipped server; this
+one stays runnable as the baseline). **Do not sharpen these descriptions here** - the
 `.claude/rules/tools.md` rule says so, and `tests/test_analyze_tools.py` pins the weak
 part 4 so a helpful edit fails the suite instead of silently destroying the baseline.
 
@@ -323,8 +325,17 @@ def _validation_error(exc: _Invalid) -> types.CallToolResult:
 # ---------------------------------------------------------------------------- analyze_logs
 
 
-def analyze_logs(params: dict[str, Any], *, store: LogStore | None = None) -> types.CallToolResult:
-    """Read the window from the log store, filter, cap, and detect patterns."""
+def analyze_logs(
+    params: dict[str, Any],
+    *,
+    store: LogStore | None = None,
+    events_tool: str = "analyze_events",
+) -> types.CallToolResult:
+    """Read the window from the log store, filter, cap, and detect patterns.
+
+    ``events_tool`` is the name the `UNKNOWN_SERVICE` remediation points at - this tool's
+    sibling on the same server. The Day 14 `1.1.0` server (`search_server`) shares this
+    implementation under new names and passes its own."""
     store = store if store is not None else ComposeLogStore.from_settings()
     service = params["service"]
     try:
@@ -339,7 +350,7 @@ def analyze_logs(params: dict[str, Any], *, store: LogStore | None = None) -> ty
                 remediation=(
                     "Check the service name against the compose file. The demo app's "
                     "services are checkout-api, payments-api, and inventory-api; the "
-                    "datastores are postgres and redis. Use `analyze_events` for recorded "
+                    f"datastores are postgres and redis. Use `{events_tool}` for recorded "
                     "operational events if the service has no container here."
                 ),
                 details={"service": service},

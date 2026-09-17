@@ -329,6 +329,37 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** Coordinator **refinement loop** — detect gaps in synthesis, re-delegate targeted queries.
 - **B:** Split/rename the overlapping tools, re-run the same 20 queries, record the new rate.
   Draft `docs/case-study-tool-routing.md` with before/after numbers.
+- **Done (2026-09-17):** the executor runs the **refinement loop** after the plan: every open `Gap` that
+  is `resolvable` and names a `suggested_agent` is re-delegated as a new `round: 1+` invocation, its
+  query the gaps' `suggested_query` verbatim, its context the planner's block plus a refinement block
+  naming the gaps plus the digest of each response that raised one (the Day 13 composition), one
+  invocation per agent per round, rounds capped (default 2), an identical gap never asked twice,
+  `resolvable: false` and unregistered agents never retried; a re-delegation that answers closes its
+  gaps, `refinement_rounds` counts the rounds. **Synthesis is a seam** (`coordinator/synthesis.py`):
+  deterministic by default, `ModelSynthesiser` opt-in at the entry point over the agents' digests
+  through a flat forced-output tool, grounded in code (an evidence id no agent carries, or a confident
+  uncited answer, rejects it) with a deterministic fallback recorded in `answer.reasoning`. The
+  **`1.1.0` split** landed under the §0 pre-authorization, rationale written first in
+  `docs/design-notes/contract-changes.md`: `analyze_logs` / `analyze_events` → `search_container_logs` /
+  `search_recorded_events` (`tools/incident/search_server.py`, `aioc-search`), parts 1-3 byte-identical
+  to v1, only the name and part 4 changed, v1 definitions struck through in CONTRACTS.md, v1 server kept
+  runnable, `schema_version` `1.1.0`. `check_tool_routing.py --variant v1_1` re-ran the same forty
+  queries; the write-up is `docs/case-study-tool-routing.md`.
+- **Verified:** 565 offline tests (51 new: 18 refinement, 15 synthesis, 15 search server, 2 wire,
+  1 retry span); lint and mypy clean; the flattened synthesiser grounded a live answer over a recorded
+  run in one call (six real evidence ids, 0.55).
+- **Checkpoint produced (2026-09-17):** `scripts/check_day13_sequential.py --deploy` with the loop and the
+  model synthesis on **passed on the third attempt**. Attempt 1 exercised the loop end to end (a failed
+  GitHub retried and answering; its gap re-delegated to Deployment with GitHub's digest) and failed the
+  check because the demo was deployed at the PR head while GitHub correctly named the merge commit as
+  the release, and the synthesis fell back on a nested argument the model wrote as XML text. Attempt 2
+  failed on the fix itself (a `merge_commit_sha` field in the PR reply made the model report an
+  unfetched commit). Attempt 3: GitHub `partial` @ 0.75 then Deployment `complete` @ 0.62 with the
+  digest in context; two refinement rounds re-delegated Deployment's null-baseline gap and both were
+  refused by the agent's own rules; the model synthesis grounded a 0.65 answer on nine evidence ids and
+  named the open gap. 344.0k input tokens, 191.9 s. The routing re-run: **0/20 plain, 0/20 hard** with
+  the `1.1.0` tools (125.9k input tokens). Numbers in `docs/interview-prep/numbers.md`, the case study
+  in `docs/case-study-tool-routing.md`, the story in war story #10.
 
 ### Day 15 — Integration: four agents live
 - **Checkpoint:** A multi-agent query exercising parallel *and* sequential paths.

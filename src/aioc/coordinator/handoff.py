@@ -1,4 +1,5 @@
-"""The sequential handoff: what a dependent invocation is told about its dependency (Day 13).
+"""The sequential handoff: what a dependent invocation is told about its dependency (Day 13),
+and what a re-delegated invocation is told about the gaps it is closing (Day 14).
 
 The planner writes every invocation's ``context_passed`` before anything runs, so on its own
 it cannot tell Deployment what GitHub found - it can only say "diff the release containing
@@ -32,11 +33,19 @@ not its composed context. That is what keeps a handoff a digest rather than a sn
 The digest is plain text with a fixed shape rather than JSON, so the tool-driven agents
 can quote a line of it verbatim as evidence (their grounding check accepts the context
 block as a source; see `aioc.agents._toolset.ToolLedger.in_context`).
+
+**The refinement loop reuses the same composition (Day 14).** A re-delegated invocation's
+context is the planner's block for that agent (when the agent was in the plan), then a
+`refinement_block` naming each gap it is asked to close - id, the field it blocks, the
+agent that raised it, and the ``suggested_query`` verbatim - then the digest of every
+response that raised one of those gaps, through `compose_dependent_context` exactly as a
+sequential dependent gets its dependency's digest. The re-delegated agent therefore sees
+what the earlier round found and what it could not establish, and nothing is inherited.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -46,6 +55,7 @@ from aioc.contracts import (
     Assessment,
     DeploymentFindings,
     DocsFindings,
+    Gap,
     GitHubFindings,
     IncidentFindings,
     walk_assessments,
@@ -66,6 +76,12 @@ HANDOFF_HEADER = (
     "evidence from your context, and do not re-derive what they already established."
 )
 
+REFINEMENT_HEADER = (
+    "Refinement round {round}. The coordinator is re-delegating to you because an earlier "
+    "round could not establish the following. Close exactly these gaps; the handed-off "
+    "results below are what that round found and must not be re-derived."
+)
+
 
 def compose_dependent_context(
     planner_block: str,
@@ -84,6 +100,41 @@ def compose_dependent_context(
         parts.append(digest(response))
         parts.append("")
     return "\n".join(parts).rstrip()
+
+
+def refinement_block(
+    round_number: int,
+    gaps: Sequence[Gap],
+    raised_by: Mapping[str, str],
+) -> str:
+    """What a re-delegated invocation is told about the gaps it is closing.
+
+    ``raised_by`` maps a gap id to a one-line origin (agent and invocation) for the gaps
+    that came from an agent response; a gap the executor itself raised (a failed
+    invocation) or the planner raised has no entry and is shown as the coordinator's.
+    The ``suggested_query`` is shown verbatim: the loop consumes it, it does not rewrite it.
+    """
+    lines = [REFINEMENT_HEADER.format(round=round_number)]
+    for g in gaps:
+        blocks = f" [blocks {g.blocks_field}]" if g.blocks_field else ""
+        origin = raised_by.get(g.id, "the coordinator")
+        lines.append(f"- {g.id}{blocks} (raised by {origin}): {_text(g.description)}")
+        if g.suggested_query:
+            lines.append(f'  asked: "{_text(g.suggested_query)}"')
+    return "\n".join(lines)
+
+
+def refinement_query(gaps: Sequence[Gap]) -> str:
+    """The query a re-delegated invocation runs: one gap's ``suggested_query`` verbatim,
+    or several listed verbatim when one agent is asked to close more than one gap."""
+    queries: list[str] = []
+    for g in gaps:
+        if g.suggested_query and g.suggested_query not in queries:
+            queries.append(g.suggested_query)
+    if len(queries) == 1:
+        return queries[0]
+    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(queries, start=1))
+    return f"Resolve each of the following:\n{numbered}"
 
 
 def digest(response: AgentResponse) -> str:

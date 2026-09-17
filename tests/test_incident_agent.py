@@ -16,6 +16,7 @@ import pytest
 from anthropic.types import TextBlock, ToolUseBlock
 from pydantic import ValidationError
 
+from aioc import SCHEMA_VERSION
 from aioc.agents import (
     EMIT_TOOL_NAME,
     INCIDENT_STRUCTURED_SYSTEM_PROMPT,
@@ -283,7 +284,7 @@ def test_diagnose_returns_a_validated_incident_response():
     assert isinstance(resp, IncidentAgentResponse)
     assert resp.agent is AgentName.INCIDENT
     assert resp.status is ResponseStatus.PARTIAL
-    assert resp.schema_version == "1.0.0"  # contract default, not model-supplied
+    assert resp.schema_version == SCHEMA_VERSION  # contract default, not model-supplied
     assert resp.findings.severity.value is Severity.SEV2
     assert resp.findings.failure_mode.value is FailureMode.RESOURCE_EXHAUSTION
     # The null analytic value survived round-trip and its Gap is present.

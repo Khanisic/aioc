@@ -1,14 +1,20 @@
 """Day 13 done-when, live: the sequential path end to end - the coordinator plans GitHub
 then Deployment, GitHub reads the PR, the executor hands GitHub's digest to Deployment,
-and Deployment diffs the release with that digest in its context.
+and Deployment diffs the release with that digest in its context. Since Day 14 it is also
+the refinement loop's live test: the gaps the Day 13 run left (Deployment's null baseline
+with a wider-lookback query, GitHub's out-of-scope gaps pointing at Deployment) are exactly
+what the loop consumes, and the model-written synthesis closes the request.
 
-    uv run python scripts/check_day13_sequential.py                  # ~6-9 live Claude calls
+    uv run python scripts/check_day13_sequential.py                  # ~8-15 live Claude calls
     uv run python scripts/check_day13_sequential.py --deploy         # recreate the demo
                                                                      # containers at --to first
     uv run python scripts/check_day13_sequential.py --pr 15 --from <ref> --to <ref>
+    uv run python scripts/check_day13_sequential.py --max-rounds 0   # the Day 13 form
 
 Cost: one planning call, then the GitHub agent's tool loop (typically 2-3 calls) followed
-by the Deployment agent's (typically 3-5). Needs `GITHUB_TOKEN` + `GITHUB_REPO` in `.env`,
+by the Deployment agent's (typically 3-5); then each refinement round is another agent run
+per re-delegated agent (cap `--max-rounds`, default 2), and one synthesis call
+(`--deterministic-synthesis` skips it). Needs `GITHUB_TOKEN` + `GITHUB_REPO` in `.env`,
 the Docker stack up, and the demo services running the `--to` release (see
 `check_day12_deployment.py` for why; `--deploy` does it). `--to` defaults to the PR's head
 commit, read from the GitHub server over the wire before any Claude call, and `--from` to
@@ -33,6 +39,12 @@ at every step: the coordinator choosing `sequential` with a `depends_on` edge on
 GitHub producing a report the digest is built from, and Deployment producing a grounded
 report *with GitHub's findings in its context* - which is visible in the response, because
 `context_passed` on the Deployment invocation is the block Deployment actually saw.
+
+**And, since Day 14, what the loop did with the gaps.** Every invocation with `round >= 1`
+is a re-delegation the executor built from a gap's `suggested_agent` + `suggested_query`;
+the check asserts each one carries the refinement block after the planner's block, that
+`refinement_rounds` matches, and it records which gaps were closed and which are still
+open, plus whether the synthesis came from the model or fell back.
 """
 
 from __future__ import annotations
@@ -50,13 +62,20 @@ from check_day12_deployment import (  # noqa: E402 - needs the sys.path insert a
     _default_from,
     _deploy,
     _deployed_version,
+    _git,
 )
 from runlog import RunRecorder  # noqa: E402
 
 from aioc.agents.github import GITHUB_SERVER_MODULE  # noqa: E402
 from aioc.contracts import AgentName, AgentResponse, InvocationMode  # noqa: E402
-from aioc.coordinator import Executor, default_runners, respond  # noqa: E402
-from aioc.coordinator.handoff import HANDOFF_HEADER  # noqa: E402
+from aioc.coordinator import (  # noqa: E402
+    DEFAULT_MAX_REFINEMENT_ROUNDS,
+    Executor,
+    ModelSynthesiser,
+    default_runners,
+    respond,
+)
+from aioc.coordinator.handoff import HANDOFF_HEADER, REFINEMENT_HEADER  # noqa: E402
 from aioc.llm import LLMSettings, McpStdioToolset, Usage  # noqa: E402
 from aioc.observability.tracing import LangfuseTracer, default_tracer  # noqa: E402
 from aioc.tools.deployment.server import DeploymentSettings  # noqa: E402
@@ -73,9 +92,10 @@ DEFAULT_SERVICE = "checkout-api"
 SITUATION_TEMPLATE = (
     "Repository: {repo}. Environment: {env} (the only monitored environment). Service under "
     "review: {service}. The last release operations has a record of is {from_version}. Pull "
-    "request #{pr} was merged into main since then and its build has been rolled out to "
-    "{service}, but the identity of that release (its commit) is not known to operations - "
-    "it has to be read from the pull request. Releases are git refs of the repository."
+    "request #{pr} was merged into main since then and main as it stood after that merge "
+    "has been rolled out to {service}, but the identity of that release (the commit on main "
+    "that the merge produced) is not known to operations - it has to be read from the pull "
+    "request. Releases are git refs of the repository."
 )
 
 
@@ -105,31 +125,68 @@ class _TimedRunner:
         return response
 
 
-def _pull_request_head(pr: int) -> tuple[str | None, dict[str, Any]]:
-    """The PR's head commit, from the GitHub server itself (zero Claude calls). It is the
-    release under test: the demo is deployed at it, and GitHub's report will name it."""
+def _pull_request_release(pr: int) -> tuple[str | None, dict[str, Any]]:
+    """The commit that shipped the PR (zero Claude calls): the merge commit on main when
+    the PR was merged that way (found in the local clone's history), else the head from
+    the GitHub server. It is the release under test - the demo is deployed at it, and
+    GitHub's report will name it.
+
+    The merge commit, not the head, since the Day 14 run: GitHub's digest (correctly)
+    named the merge commit as "the identity of the release now running", the demo had been
+    deployed at the head, and Deployment's health reply therefore never covered the version
+    it diffed - its own grounding rule refused the report. The scenario was wrong, again,
+    in the same way as war story #9: the agents reasoned correctly about a world the demo
+    author had set up inconsistently.
+
+    Resolved from git rather than by adding `merge_commit_sha` to the GitHub tool's reply:
+    that was tried, and the model then reported the merge commit as a commit it had never
+    fetched with `list_commits`, which the agent's grounding rule refuses. The tool reply
+    stays as it was; the agent finds the merge commit the way it did on Day 13."""
     with McpStdioToolset.for_module(GITHUB_SERVER_MODULE) as toolset:
         result = toolset.call("get_pull_request", {"number": pr})
     payload = json.loads(result.content)
     if not payload.get("ok"):
         return None, payload
-    return payload["data"]["pull_request"].get("head_sha"), payload
+    pull = payload["data"]["pull_request"]
+    if pull.get("merged_at"):
+        merge = _git(
+            "log",
+            "--merges",
+            "--first-parent",
+            f"--grep=Merge pull request #{pr} ",
+            "--format=%H",
+            "-1",
+            "origin/main",
+        )
+        if merge:
+            return merge, payload
+    return pull.get("head_sha"), payload
 
 
 def _evaluate(resp: Any, timings: list[dict[str, Any]], pr: int) -> list[str]:
     complaints: list[str] = []
-    by_agent = {inv.agent: inv for inv in resp.selected_agents}
-    if AgentName.GITHUB not in by_agent:
+    planned = {inv.agent for inv in resp.selected_agents if inv.round == 0}
+    if AgentName.GITHUB not in planned:
         complaints.append("the plan did not select github")
-    if AgentName.DEPLOYMENT not in by_agent:
+    if AgentName.DEPLOYMENT not in planned:
         complaints.append("the plan did not select deployment")
     if complaints:
         return complaints
 
-    gh, dep = by_agent[AgentName.GITHUB], by_agent[AgentName.DEPLOYMENT]
+    # The invocation that stands for each agent: the last one that produced a response,
+    # else the last one attempted. A refinement round may have replaced the plan's.
+    responded = {r.invocation_id for r in resp.agent_responses}
+    by_agent: dict[AgentName, Any] = {}
+    for inv in resp.selected_agents:
+        if inv.agent not in by_agent or inv.invocation_id in responded:
+            by_agent[inv.agent] = inv
+    github_ids = {
+        inv.invocation_id for inv in resp.selected_agents if inv.agent is AgentName.GITHUB
+    }
+    dep = by_agent[AgentName.DEPLOYMENT]
     if dep.mode is not InvocationMode.SEQUENTIAL:
         complaints.append(f"deployment mode is {dep.mode.value}, expected sequential")
-    if gh.invocation_id not in dep.depends_on:
+    if not github_ids & set(dep.depends_on):
         complaints.append(f"deployment.depends_on {dep.depends_on} does not name github")
 
     responded = {r.agent for r in resp.agent_responses}
@@ -149,15 +206,43 @@ def _evaluate(resp: Any, timings: list[dict[str, Any]], pr: int) -> list[str]:
             complaints.append(f"the handoff does not mention PR #{pr}")
 
     started = {t["invocation_id"]: t for t in timings}
-    if gh.invocation_id in started and dep.invocation_id in started:
-        if started[dep.invocation_id]["start"] < started[gh.invocation_id].get("end", 0):
+    upstream = [d for d in dep.depends_on if d in github_ids and d in started]
+    if upstream and dep.invocation_id in started:
+        if any(started[dep.invocation_id]["start"] < started[d].get("end", 0) for d in upstream):
             complaints.append("deployment started before github finished")
     else:
         complaints.append("timings are missing for one of the two invocations")
 
     if resp.cost.input_tokens <= 0:
         complaints.append("cost is zero - the Usage accumulator did not thread through")
+
+    refined = [inv for inv in resp.selected_agents if inv.round >= 1]
+    rounds = max((inv.round for inv in resp.selected_agents), default=0)
+    if resp.refinement_rounds != rounds:
+        complaints.append(
+            f"refinement_rounds is {resp.refinement_rounds} but the deepest round is {rounds}"
+        )
+    for inv in refined:
+        header = REFINEMENT_HEADER.format(round=inv.round)
+        if header not in inv.context_passed:
+            complaints.append(f"{inv.invocation_id} (round {inv.round}) has no refinement block")
+        elif inv.agent in by_agent:
+            planner_block = by_agent[inv.agent].context_passed.split(HANDOFF_HEADER)[0].strip()
+            if not inv.context_passed.startswith(planner_block):
+                complaints.append(
+                    f"{inv.invocation_id} does not start with the planner's block for "
+                    f"{inv.agent.value}"
+                )
+        if inv.depends_on and HANDOFF_HEADER not in inv.context_passed:
+            complaints.append(f"{inv.invocation_id} depends on a response but carries no digest")
     return complaints
+
+
+def _synthesis_source(resp: Any) -> str:
+    reasoning = resp.answer.reasoning or ""
+    return (
+        "deterministic_fallback" if "deterministic form is used instead" in reasoning else "model"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -170,6 +255,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--query", default=None, help="override the query")
     parser.add_argument("--deploy", action="store_true", help="recreate the demo at --to")
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=DEFAULT_MAX_REFINEMENT_ROUNDS,
+        help="refinement round cap (0 reproduces the Day 13 run)",
+    )
+    parser.add_argument(
+        "--deterministic-synthesis",
+        action="store_true",
+        help="skip the model-written synthesis call",
+    )
     args = parser.parse_args(argv)
 
     if LLMSettings().anthropic_api_key is None:
@@ -182,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
 
     to_version = args.to_version
     if to_version is None:
-        to_version, probe = _pull_request_head(args.pr)
+        to_version, probe = _pull_request_release(args.pr)
         if to_version is None:
             error = probe.get("error", {})
             code, message = error.get("code"), error.get("message")
@@ -195,8 +291,10 @@ def main(argv: list[str] | None = None) -> int:
     environment = DeploymentSettings().monitored_environment()
 
     print(
-        f"Day 13 sequential check - ~6-9 live Claude calls; PR #{args.pr}, {args.service} in "
-        f"{environment}, {from_version[:10]} -> {to_version[:10]}\n"
+        f"Day 13 sequential check - ~8-15 live Claude calls; PR #{args.pr}, {args.service} in "
+        f"{environment}, {from_version[:10]} -> {to_version[:10]}; refinement cap "
+        f"{args.max_rounds}, synthesis "
+        f"{'deterministic' if args.deterministic_synthesis else 'model-written'}\n"
     )
 
     deployed, probe = _deployed_version(args.service, environment)
@@ -236,7 +334,12 @@ def main(argv: list[str] | None = None) -> int:
     traced = isinstance(tracer, LangfuseTracer)
     timings: list[dict[str, Any]] = []
     runners = {name: _TimedRunner(runner, timings) for name, runner in default_runners().items()}
-    executor = Executor(runners, tracer=tracer)  # type: ignore[arg-type]
+    executor = Executor(
+        runners,  # type: ignore[arg-type]
+        tracer=tracer,
+        synthesiser=None if args.deterministic_synthesis else ModelSynthesiser(),
+        max_refinement_rounds=args.max_rounds,
+    )
     start = time.monotonic()
 
     with RunRecorder(
@@ -252,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
             "from_version": from_version,
             "to_version": to_version,
             "traced": traced,
+            "max_rounds": args.max_rounds,
+            "model_synthesis": not args.deterministic_synthesis,
         },
     ) as run:
         try:
@@ -286,9 +391,33 @@ def main(argv: list[str] | None = None) -> int:
             }
             for t in timings
         }
-        dep_inv = next((i for i in resp.selected_agents if i.agent is AgentName.DEPLOYMENT), None)
+        dep_inv = next(
+            (i for i in resp.selected_agents if i.agent is AgentName.DEPLOYMENT and i.round == 0),
+            None,
+        )
         if dep_inv is not None:
             run.artifact("deployment_context.txt", dep_inv.context_passed)
+        refined = [i for i in resp.selected_agents if i.round >= 1]
+        if refined:
+            run.artifact(
+                "refinement.json",
+                json.dumps(
+                    [
+                        {
+                            "invocation_id": i.invocation_id,
+                            "agent": i.agent.value,
+                            "round": i.round,
+                            "mode": i.mode.value,
+                            "depends_on": i.depends_on,
+                            "reason": i.reason,
+                            "context_passed": i.context_passed,
+                            "span": spans.get(i.invocation_id),
+                        }
+                        for i in refined
+                    ],
+                    indent=2,
+                ),
+            )
         run.artifact("response.json", resp.model_dump_json(indent=2))
         run.event(
             "sequential",
@@ -305,10 +434,28 @@ def main(argv: list[str] | None = None) -> int:
                         "invocation_id": i.invocation_id,
                         "mode": i.mode.value,
                         "depends_on": i.depends_on,
+                        "round": i.round,
                         "context_chars": len(i.context_passed),
                     }
                     for i in resp.selected_agents
                 ],
+                "refinement_rounds": resp.refinement_rounds,
+                "gaps_by_response": {
+                    r.invocation_id: [
+                        {
+                            "id": g.id,
+                            "resolvable": g.resolvable,
+                            "suggested_agent": (
+                                g.suggested_agent.value if g.suggested_agent else None
+                            ),
+                            "blocks_field": g.blocks_field,
+                        }
+                        for g in r.gaps
+                    ]
+                    for r in resp.agent_responses
+                },
+                "unresolved_gaps": [g.id for g in resp.unresolved_gaps],
+                "synthesis_source": _synthesis_source(resp),
                 "skipped": [s.agent.value for s in resp.skipped_agents],
                 "spans": spans,
                 "agents_responded": [r.agent.value for r in resp.agent_responses],
@@ -333,8 +480,9 @@ def main(argv: list[str] | None = None) -> int:
             deps = f" after {', '.join(inv.depends_on)}" if inv.depends_on else ""
             span = spans.get(inv.invocation_id, {})
             when = f"  [{span['start_s']:>5.1f}s -> {span['end_s']:>5.1f}s]" if span else ""
+            rnd = f" round {inv.round}" if inv.round else ""
             print(
-                f"  selected   {inv.agent.value:<11} {inv.mode.value}{deps}{when}  "
+                f"  selected   {inv.agent.value:<11} {inv.mode.value}{deps}{rnd}{when}  "
                 f"context {len(inv.context_passed)} chars"
             )
         for skipped in resp.skipped_agents:
@@ -342,20 +490,27 @@ def main(argv: list[str] | None = None) -> int:
         for r in resp.agent_responses:
             tools = ", ".join(f"{tc.tool_name}[{'ok' if tc.ok else 'err'}]" for tc in r.tool_calls)
             print(
-                f"  -- {r.agent.value} ({r.status.value}, {r.overall_confidence:.2f}) "
-                f"tools: {tools or 'none'}"
+                f"  -- {r.agent.value} {r.invocation_id} ({r.status.value}, "
+                f"{r.overall_confidence:.2f}) tools: {tools or 'none'}"
             )
             print(f"     {r.summary}")
+            for g in r.gaps:
+                target = f" -> {g.suggested_agent.value}" if g.suggested_agent else ""
+                flag = "resolvable" if g.resolvable else "unresolvable"
+                print(f"     gap {g.id} [{flag}]{target}: {g.description[:100]}")
         if dep_inv is not None and HANDOFF_HEADER in dep_inv.context_passed:
             handoff = dep_inv.context_passed.split(HANDOFF_HEADER, 1)[1].strip()
             print("  handoff seen by deployment (first lines):")
             for line in handoff.splitlines()[:6]:
                 print(f"     {line[:110]}")
+        print(f"  synthesis  ({_synthesis_source(resp)})")
+        for line in resp.synthesis.splitlines():
+            print(f"     {line[:160]}")
         print(f"  answer     ({resp.answer.confidence:.2f}) {resp.answer.value}")
         print(
             f"  status     {resp.status.value} | cost {resp.cost.input_tokens} in / "
-            f"{resp.cost.output_tokens} out | {wall_seconds:.1f}s | gaps "
-            f"{len(resp.unresolved_gaps)}"
+            f"{resp.cost.output_tokens} out | {wall_seconds:.1f}s | refinement rounds "
+            f"{resp.refinement_rounds} | unresolved gaps {len(resp.unresolved_gaps)}"
         )
         print(f"  trace      {trace_url or resp.trace_id or 'not traced'}")
         for complaint in complaints:

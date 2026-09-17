@@ -1,11 +1,12 @@
 # War stories
 
-Eight things that went wrong, what the symptom looked like, and what it actually was.
+Ten things that went wrong, what the symptom looked like, and what it actually was.
 These are the answers to "tell me about a time when..." questions.
 Every one is traceable to a recorded run under `test-results/` or to a commit.
 
-The through-line worth naming out loud: **six of the eight looked like the model being unreliable and were not** - five were engineering defects on my side and one was my own test being wrong.
+The through-line worth naming out loud: **eight of the ten looked like the model or the orchestration being unreliable and were not** - five were engineering defects on my side, and three were my own test or scenario being wrong.
 The other two looked like bad credentials and were the environment naming the wrong cause.
+The one genuine model failure in the set (the nested synthesis argument in #10) was fixed by changing the schema's shape, not by arguing with the prompt.
 That is the most useful thing I learned building this, and it is a better interview answer than any architecture description.
 
 ---
@@ -230,6 +231,38 @@ And every agent settles `complete` over a null judgement to `partial` in the run
 
 **Transferable lesson.** A test of an orchestration behaviour has to present the orchestrator with a problem that actually has that shape; hand it the answer and it will, correctly, skip the work.
 And when a failure message is truncated by your own code, the first thing to fix is the truncation - the second bug was diagnosable in one read once the message was whole.
+
+## 10. The refinement loop's first live run retried the right agent, then failed on my scenario again - and the synthesis came back as XML
+
+**Symptom.** The first live run of the Day 14 refinement loop (`check_day13_sequential.py --deploy`, the same sequential scenario as war story #9) came back `partial` after two rounds with three unresolved gaps, Deployment had produced no response, and the model-written synthesis had fallen back to the deterministic form.
+Every offline test of the loop and the synthesiser was green.
+
+**The hunt.** The run record laid the rounds out in order.
+Round 0: GitHub failed its own grounding rule - the model had paraphrased an evidence excerpt, and the agent refuses a paraphrase - so Deployment, which depended on it, was not run.
+Round 1: the loop consumed the executor's own failure gap (`suggested_agent: github`, the original query) and retried GitHub with the planner's block plus a refinement block naming the failure; GitHub returned a report, `partial`, with one gap pointing at Deployment: "whether the release changed configuration or images, and whether the rollout is healthy, requires `diff_release` and `check_rollout_health`."
+Round 2: the loop consumed that gap and ran Deployment with GitHub's digest in its context - 4,303 characters, the planner's block first - and Deployment failed its own grounding rule: "no `check_rollout_health` reply covers `to_version`, so `health_signals` are unknown; the report must carry a gap."
+The cap is two, so the run ended there.
+
+So the loop had done exactly what it was built to do, twice, and both agents had refused their own reports for honest reasons.
+The second refusal was mine.
+GitHub's digest said the merge commit on main was "the identity of the release now running on checkout-api", which is what shipping a merged PR means.
+The check had deployed the demo at the PR's *head* commit, because that is what the Day 13 version of the script resolved.
+Deployment diffed and health-checked the merge commit GitHub named, the health tool honestly reported that version was not what was running, and the agent's stamping rule refused a report whose health signals nothing covered.
+The agents reasoned correctly about a world the demo author had set up inconsistently - war story #9 with the roles reversed.
+
+The synthesis fallback was a third thing.
+The executor's reasoning field carried the reason: the model had written the nested `answer: Assessment[str]` argument as XML-style parameter text inside a string, and pydantic refused a string where an object was required.
+The prompt is full of `<handoff>` blocks and `<query>` tags; the model, primed by them, wrote the one nested tool argument the way it writes tool calls.
+
+**Fix.** Three, and only one of them touched the loop, which did not need fixing.
+The check now resolves the release under test to the PR's merge commit, found in the local clone's history, and the situation block says "main as it stood after that merge has been rolled out".
+Not from a new `merge_commit_sha` field on `get_pull_request` - that was the second attempt, and it failed in a third way: handed the SHA in the PR reply, the model reported the merge commit as a commit it had never fetched with `list_commits`, and the agent's own grounding rule refused it twice (232.7k input tokens to learn that a convenience field is a trap when the consumer must ground every fact in a fetch).
+The tool reply stays as it was; the agent finds the merge commit the way it did on Day 13.
+The synthesis tool's schema is flat - `synthesis`, `answer`, `confidence`, `evidence`, `reasoning` as top-level scalars, the `Assessment` assembled by the runtime - so there is no nested object to mis-serialise; a one-call re-run over the recorded responses came back grounded, six real evidence ids, 0.55.
+And the check evaluates the invocation that stands for each agent - the last one that produced a response - rather than the plan's, since a refinement round may have replaced it.
+
+**Transferable lesson.** When a loop's first live run ends badly, read the rounds before touching the loop: here every re-delegation was the right one, and both failures were the agents being honest about inputs the scenario had made inconsistent.
+And a structured-output schema should be as flat as the data allows; a model that has just read a page of XML-shaped context is one nesting level away from answering in it.
 
 ---
 

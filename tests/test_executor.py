@@ -391,7 +391,7 @@ def test_response_assembles_the_contract_envelope():
     assert resp.selected_agents == plan.selected_agents
     assert resp.skipped_agents == plan.skipped_agents
     assert [r.agent for r in resp.agent_responses] == [AgentName.INCIDENT]
-    assert resp.refinement_rounds == 0  # the loop is Day 14
+    assert resp.refinement_rounds == 0  # a clean run needs no re-delegation
     assert resp.trace_id is None  # no tracer was configured, so the field is honestly null
     assert resp.status is ResponseStatus.COMPLETE
     assert resp.completed_at >= resp.received_at
@@ -443,15 +443,17 @@ def test_a_failing_agent_becomes_a_retryable_gap():
     failing = _FailingRunner()
     plan = _plan([_invocation("incident")])
     query = "Why is checkout failing?"
-    resp = Executor({AgentName.INCIDENT: failing}).execute(plan, query)
+    # No refinement here: this test is about the gap's shape, the loop has its own section.
+    resp = Executor({AgentName.INCIDENT: failing}, max_refinement_rounds=0).execute(plan, query)
 
     gap = next(g for g in resp.unresolved_gaps if g.kind_detail == "agent_invocation_failed")
-    # Machine-consumable by the Day 14 loop: the retry target is spelled out, not implied.
+    # Machine-consumable by the refinement loop: the retry target is spelled out, not implied.
     assert gap.resolvable is True
     assert gap.suggested_agent is AgentName.INCIDENT
     assert gap.suggested_query == query
     assert resp.agent_responses == []
     assert resp.status is ResponseStatus.ERROR
+    assert failing.calls == 1
 
 
 def test_a_failed_invocation_gap_keeps_the_whole_error_not_its_first_line():
@@ -1060,10 +1062,15 @@ def test_a_failed_agent_span_ends_with_the_error():
     Executor({AgentName.INCIDENT: _FailingRunner()}, tracer=tracer).execute(plan, "q?")
 
     (trace,) = tracer.traces
-    (span,) = trace.spans
-    assert span.ended is not None
-    assert span.ended["status"] == "error"
-    assert "scripted agent failure" in span.ended["error"]
+    # Day 14: the failure is retried once by the refinement loop (round 1), and the retry
+    # fails identically - so two error spans, and no third, because an identical gap
+    # coming back is not asked again.
+    first, retry = trace.spans
+    for span in (first, retry):
+        assert span.ended is not None
+        assert span.ended["status"] == "error"
+        assert "scripted agent failure" in span.ended["error"]
+    assert (first.metadata["round"], retry.metadata["round"]) == (0, 1)
 
 
 def test_tool_call_refs_are_recorded_on_the_agent_span():

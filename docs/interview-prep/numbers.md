@@ -287,6 +287,70 @@ What this says, honestly: with parts 1 and 3 of the sec 6.5 template stating wha
 
 ---
 
+## The Day 14 routing re-run (the case study's "after")
+
+`scripts/check_tool_routing.py --variant v1_1`, the `1.1.0` descriptions listed from the `aioc-search` server over the wire, Sonnet, `tool_choice: any`, 2026-09-17.
+Same forty queries, same hashes.
+
+| Query set | Misrouted | Input / output tokens | `queries_sha256` |
+|---|---|---|---|
+| `plain` | **0 / 20** | 62,925 / 2,475 | `b0da5960...` |
+| `hard` | **0 / 20** | 62,954 / 2,522 | `9e31bedb...` |
+
+Before and after side by side:
+
+| | `v1` (before) | `v1_1` (after) |
+|---|---|---|
+| Names | `analyze_logs` / `analyze_events` | `search_container_logs` / `search_recorded_events` |
+| Part 4 | the contract's v1 sentence, no alternative named | names the other tool, states the discriminator both ways |
+| Parts 1-3 | complete | byte-identical to v1 (pinned by a test) |
+| `plain` misrouted | 0 / 20 | 0 / 20 |
+| `hard` misrouted | 0 / 20 | 0 / 20 |
+| Input tokens per call | ~2,866 | ~3,147 (+10%, the longer part 4) |
+| Mean latency per call | - | 1.8 s |
+
+**0 -> 0.** The intervention did not move a number that was already at the floor.
+What that means, and the two levers that would produce a non-zero baseline (a cheaper router via `--model`, or parts 1-3 written as loosely as part 4 in a second `v1` module), are in `docs/case-study-tool-routing.md`.
+Neither lever was pulled unasked.
+
+---
+
+## The Day 14 refinement loop and synthesis, live
+
+`scripts/check_day13_sequential.py --deploy` with the loop (cap 2) and the model-written synthesis on, PR #15, Sonnet, 2026-09-17. Three attempts; each taught something and the record keeps all three.
+
+| Attempt | Outcome | Cause | Cost |
+|---|---|---|---|
+| 1 | FAIL: Deployment produced no response; synthesis fell back | round 0 GitHub refused its own report (paraphrased excerpt); the loop retried it (round 1) and it answered with a gap pointing at Deployment; the loop ran Deployment (round 2) with GitHub's digest, and Deployment refused its own report because the demo was deployed at the PR *head* while GitHub had correctly named the merge commit as the release. The synthesis model wrote the nested `answer` object as XML-style text | 373.7k in / 16.8k out, 175.0 s |
+| 2 | FAIL: GitHub refused twice | the fix added `merge_commit_sha` to the PR reply, and the model then reported the merge commit as a commit it had never fetched with `list_commits` | 232.7k in / 12.8k out, 132.5 s |
+| 3 | **PASS** | merge commit resolved from the local clone, synthesis schema flat, the check evaluates the invocation that stands for each agent | 344.0k in / 18.6k out, 191.9 s |
+
+Attempt 3, round by round:
+
+| Round | Invocation | Mode | Context | Result |
+|---|---|---|---|---|
+| 0 | GitHub | parallel | 352 chars (planner) | `partial` @ 0.75, `get_pull_request` + `list_commits`, 6 evidence, 1 gap -> Deployment |
+| 0 | Deployment | sequential after GitHub | 3,399 chars (planner + GitHub digest) | `complete` @ 0.62, `diff_release` + `check_rollout_health`, 7 evidence; 3 config keys added, no image change, rollout `degraded`; 1 gap (`compared_to_baseline` null, wider lookback suggested) -> Deployment |
+| 1 | Deployment | sequential after both round-0 invocations | 7,246 chars (planner + refinement block + two digests) | refused by the agent's grounding: `from_version` not returned by a tool |
+| 2 | Deployment | parallel (retry of the round-1 failure) | 1,313 chars (planner + refinement block) | refused by report validation: a gap with `suggested_agent` and no `suggested_query` |
+
+| | |
+|---|---|
+| Plan | `mixed` @ 0.90; incident and docs skipped with reasons |
+| Refinement rounds | 2 (the cap) |
+| Synthesis | model-written, 2,505 chars; answer @ 0.65 citing 9 evidence ids across both agents; says two follow-up attempts to close the baseline gap failed |
+| Status | `partial`, 4 unresolved gaps (GitHub's out-of-scope gap, Deployment's null baseline, the two failed re-delegations) |
+| Timing | GitHub 0.0 -> 39.5 s, Deployment 39.5 -> 93.5 s, round 1 93.5 -> 133.5 s, round 2 133.5 -> 168.1 s; 191.9 s wall |
+| Trace | `f89929cd56da402d6b94dc1f84286617` |
+
+Things to say plainly:
+
+- **The loop did the right thing every time and closed nothing.** Both re-delegations targeted the right agent with the right query and the right context (the round-1 context carried both round-0 digests), and both were refused by the Deployment agent's own honesty rules. The general fix is the Day 17 validation-retry loop - re-request *with the error attached* - not a looser refinement loop.
+- **The synthesis is the first model-written coordinator answer, and it is grounded.** Nine evidence ids, all real, both agents cited, the open gap named. The flat schema (five scalars) is what made it parse; the nested form did not.
+- **Cost.** Three attempts were 950k input tokens. Each Deployment round re-sends the ~7k-token diff reply and each GitHub round the ~22k-token PR read (the Day 21 target); the synthesis call itself was ~3.5k input tokens.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
@@ -295,5 +359,5 @@ Say this plainly rather than letting it be discovered:
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No cost/latency aggregate.** Langfuse now traces every request (Day 9), and each response carries measured cost - but nothing aggregates across requests yet.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
-- **The routing case study has no "after" yet, and its "before" is 0/40.** Day 14 splits the tools and re-runs both sets; a 0 -> 0 result is a result, and the write-up says what would have produced misrouting.
+- **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
 - **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.

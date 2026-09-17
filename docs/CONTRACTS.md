@@ -1,6 +1,6 @@
 # AIOC — Frozen Contracts
 
-**Schema version: `1.0.0` · Frozen Day 1 · Owner: sole maintainer (both layers)**
+**Schema version: `1.1.0` · Frozen Day 1 · `1.1.0` on Day 14 (the pre-authorized split, §7.5 / §7.6) · Owner: sole maintainer (both layers)**
 
 This document is the integration surface between the Reasoning Layer and the Platform
 Layer. It was written when those layers had separate owners; since Day 6 one maintainer
@@ -70,6 +70,12 @@ v1.0.0 definitions must remain in this file verbatim — struck through, not del
 the before/after numbers in `docs/case-study-tool-routing.md` lose their baseline.
 
 No other pre-authorized exceptions exist.
+
+**Made on Day 14 (2026-09-17).** The split landed as `search_container_logs` /
+`search_recorded_events` (§7.5, §7.6), with the v1.0.0 definitions preserved struck
+through in place; the rationale is the dated entry in
+`docs/design-notes/contract-changes.md` and the numbers are in
+`docs/case-study-tool-routing.md`.
 
 ---
 
@@ -739,40 +745,87 @@ Any signal that could not be measured is `null`, never `0`.
 **Part 4:** Use this for *is the current rollout healthy right now*. Use `diff_release`
 when health is already known to be bad and you need the candidate cause.
 
-### 7.5 `analyze_logs` — v1.0.0, deliberately overlapping
+### 7.5 `search_container_logs` - v1.1.0 (was `analyze_logs`)
 
-> **Case-study variable.** This tool and §7.6 overlap on purpose. Their descriptions
-> deliberately omit a usable part 4. Day 13 records the misrouting rate across 20 queries;
-> Day 14 splits and renames them and re-runs the same 20. Preserve these v1 definitions
-> verbatim when that happens — they are the baseline.
+> **Case-study variable, after.** Renamed and given a usable part 4 on Day 14 under the
+> §0 pre-authorized `1.1.0` bump. Rationale: the 2026-09-17 entry in
+> `docs/design-notes/contract-changes.md`. Numbers: `docs/case-study-tool-routing.md`.
+> The v1.0.0 definition is preserved below, struck through, because it is the baseline.
 
-**Input**: `service` (str, required) · `start` (ts, required) · `end` (ts, optional) ·
-`pattern` (str, optional — regex) · `level` (enum `debug` · `info` · `warn` · `error` ·
-`fatal` · `other`, optional) · `max_matches` (int, default `100`)
+**Input**: unchanged from v1.0.0 - `service` (str, required) · `start` (ts, required) ·
+`end` (ts, optional) · `pattern` (str, optional - regex) · `level` (enum `debug` · `info` ·
+`warn` · `error` · `fatal` · `other`, optional) · `max_matches` (int, default `100`)
 
-**`data`**: `{ matches: [{at, service, level, message, source_ref}], total_matched: int, patterns_detected: [{pattern, count, first_at, last_at}] }`
+**`data`**: unchanged - `{ matches: [{at, service, level, message, source_ref}], total_matched: int, patterns_detected: [{pattern, count, first_at, last_at}] }`
 
-**Errors**: `INVALID_PATTERN` (validation) · `LOG_STORE_UNAVAILABLE` (transient) ·
-`UNKNOWN_SERVICE` (business)
+**Errors**: unchanged - `INVALID_PATTERN` (validation) · `LOG_STORE_UNAVAILABLE`
+(transient) · `UNKNOWN_SERVICE` (business)
 
-**Part 4 (v1, intentionally weak):** "Use this to analyze service output over a time
-window."
+**Part 4 (v1.1.0):** "When to use this vs `search_recorded_events`: use this tool when the
+question needs what the service's process itself wrote - lines, messages, tracebacks,
+request entries, anything on stdout or stderr. A deploy, a rollback, a restart, a scale
+action, a config change, or an alert is something recorded *about* the service, not
+something it printed; for those use `search_recorded_events`. The kind of data the
+question needs decides, not the word it uses: 'the deploy log' is a question about deploys."
 
-### 7.6 `analyze_events` — v1.0.0, deliberately overlapping
+### 7.6 `search_recorded_events` - v1.1.0 (was `analyze_events`)
 
 > Same case-study note as §7.5.
 
-**Input**: `service` (str, required) · `start` (ts, required) · `end` (ts, optional) ·
-`pattern` (str, optional) · `kind` (enum — `TimelineEvent.kind` members, optional) ·
-`max_matches` (int, default `100`)
+**Input**: unchanged from v1.0.0 - `service` (str, required) · `start` (ts, required) ·
+`end` (ts, optional) · `pattern` (str, optional) · `kind` (enum - `TimelineEvent.kind`
+members, optional) · `max_matches` (int, default `100`)
 
-**`data`**: `{ matches: [{at, service, kind, description, source_ref}], total_matched: int, patterns_detected: [{pattern, count, first_at, last_at}] }`
+**`data`**: unchanged - `{ matches: [{at, service, kind, description, source_ref}], total_matched: int, patterns_detected: [{pattern, count, first_at, last_at}] }`
 
-**Errors**: `INVALID_PATTERN` (validation) · `EVENT_STORE_UNAVAILABLE` (transient) ·
-`UNKNOWN_SERVICE` (business)
+**Errors**: unchanged - `INVALID_PATTERN` (validation) · `EVENT_STORE_UNAVAILABLE`
+(transient) · `UNKNOWN_SERVICE` (business)
 
-**Part 4 (v1, intentionally weak):** "Use this to analyze service activity over a time
-window."
+**Part 4 (v1.1.0):** "When to use this vs `search_container_logs`: use this tool when the
+question needs what was recorded as happening *to* the service - deploys, rollbacks,
+restarts, scale actions, config changes, alerts, threshold crossings - whether the question
+calls that a log, an output, a history, or a record. The text a process printed, its
+tracebacks, and its request lines are not events unless someone recorded them; for those
+use `search_container_logs`. The kind of data the question needs decides, not the word it
+uses: 'what it printed after the deploy' is a question about printed lines."
+
+#### v1.0.0 definitions — superseded 2026-09-17, kept verbatim as the case-study baseline
+
+~~### 7.5 `analyze_logs` — v1.0.0, deliberately overlapping~~
+
+> ~~**Case-study variable.** This tool and §7.6 overlap on purpose. Their descriptions~~
+> ~~deliberately omit a usable part 4. Day 13 records the misrouting rate across 20 queries;~~
+> ~~Day 14 splits and renames them and re-runs the same 20. Preserve these v1 definitions~~
+> ~~verbatim when that happens — they are the baseline.~~
+
+~~**Input**: `service` (str, required) · `start` (ts, required) · `end` (ts, optional) ·~~
+~~`pattern` (str, optional — regex) · `level` (enum `debug` · `info` · `warn` · `error` ·~~
+~~`fatal` · `other`, optional) · `max_matches` (int, default `100`)~~
+
+~~**`data`**: `{ matches: [{at, service, level, message, source_ref}], total_matched: int, patterns_detected: [{pattern, count, first_at, last_at}] }`~~
+
+~~**Errors**: `INVALID_PATTERN` (validation) · `LOG_STORE_UNAVAILABLE` (transient) ·~~
+~~`UNKNOWN_SERVICE` (business)~~
+
+~~**Part 4 (v1, intentionally weak):** "Use this to analyze service output over a time~~
+~~window."~~
+
+~~### 7.6 `analyze_events` — v1.0.0, deliberately overlapping~~
+
+> ~~Same case-study note as §7.5.~~
+
+~~**Input**: `service` (str, required) · `start` (ts, required) · `end` (ts, optional) ·~~
+~~`pattern` (str, optional) · `kind` (enum — `TimelineEvent.kind` members, optional) ·~~
+~~`max_matches` (int, default `100`)~~
+
+~~**`data`**: `{ matches: [{at, service, kind, description, source_ref}], total_matched: int, patterns_detected: [{pattern, count, first_at, last_at}] }`~~
+
+~~**Errors**: `INVALID_PATTERN` (validation) · `EVENT_STORE_UNAVAILABLE` (transient) ·~~
+~~`UNKNOWN_SERVICE` (business)~~
+
+~~**Part 4 (v1, intentionally weak):** "Use this to analyze service activity over a time~~
+~~window."~~
+
 
 ---
 
@@ -1140,3 +1193,4 @@ would instead have become a `Gap` with `resolvable: false`. `tc_1` returned
 | Version | Day | Change | Agreed by |
 |---|---|---|---|
 | `1.0.0` | 1 | Initial freeze — shared primitives, agent envelope, four findings payloads, coordinator response, tool envelope and error taxonomy, six tool schemas, description template. | A + B |
+| `1.1.0` | 14 | The §0 pre-authorized split: `analyze_logs` → `search_container_logs` and `analyze_events` → `search_recorded_events` (§7.5, §7.6), same inputs, data, and errors, part 4 now names the alternative and states the discriminator; v1.0.0 definitions kept struck through. Rationale: `docs/design-notes/contract-changes.md` (2026-09-17). | sole maintainer, by the written record |

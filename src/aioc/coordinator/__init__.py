@@ -6,10 +6,15 @@ Day 7 shipped the execution half - `Executor.execute` consumes a plan into a con
 `CoordinatorResponse` with explicit context passing and honest gaps for what could not run,
 and `respond` glues the two together for one-call use. Day 13 made the sequential chain a
 real handoff - `handoff.digest` is what a dependent is told about its dependency, appended
-to the planner's block and recorded in `context_passed`. The refinement loop is Day 14.
+to the planner's block and recorded in `context_passed`. Day 14 added the refinement loop
+(the executor re-delegates open gaps off `suggested_agent` + `suggested_query`, round by
+round, up to a cap) and the synthesis seam (`synthesis.deterministic` by default,
+`ModelSynthesiser` opt-in at the entry point, grounded in code with a deterministic
+fallback).
 """
 
 from .executor import (
+    DEFAULT_MAX_REFINEMENT_ROUNDS,
     AgentRunner,
     DocsRunner,
     Executor,
@@ -17,7 +22,7 @@ from .executor import (
     default_runners,
     respond,
 )
-from .handoff import compose_dependent_context, digest
+from .handoff import compose_dependent_context, digest, refinement_block, refinement_query
 from .planner import (
     ALL_AGENTS,
     SELECT_TOOL_NAME,
@@ -29,9 +34,18 @@ from .planner import (
     SelectionPlan,
     utcnow,
 )
+from .synthesis import (
+    ModelSynthesiser,
+    Synthesis,
+    Synthesiser,
+    SynthesisError,
+    SynthesisRequest,
+    deterministic,
+)
 
 __all__ = [
     "ALL_AGENTS",
+    "DEFAULT_MAX_REFINEMENT_ROUNDS",
     "SELECTION_SYSTEM_PROMPT",
     "SELECT_TOOL_NAME",
     "AgentRunner",
@@ -41,11 +55,19 @@ __all__ = [
     "Executor",
     "IncidentRunner",
     "ModelSelectionPlan",
+    "ModelSynthesiser",
     "PlannedInvocation",
     "SelectionPlan",
+    "Synthesis",
+    "SynthesisError",
+    "SynthesisRequest",
+    "Synthesiser",
     "compose_dependent_context",
     "default_runners",
+    "deterministic",
     "digest",
+    "refinement_block",
+    "refinement_query",
     "respond",
     "utcnow",
 ]

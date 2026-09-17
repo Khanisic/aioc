@@ -351,3 +351,59 @@ The other half of `status` - whether the question was answered - is a judgement 
 
 **What I would watch.** This closes one specific refusal, not the class.
 The Day 17 validation-retry loop is still the general answer for a report the contract rejects; the settled `status` just means it will be re-requested for a real defect rather than for bookkeeping.
+
+## 22. The refinement loop consumes gaps as data and stops on four rules, none of them a judgement call
+
+**Context.** BUILD_PLAN Phase 1: "coordinator checks synthesis for gaps and re-delegates with targeted queries until coverage is sufficient."
+The contract had already decided what a gap is for: `Gap.suggested_agent` and `Gap.suggested_query` "exist for a machine, not a reader", and `resolvable: false` "is what stops the refinement loop from spinning".
+Every agent and the executor's own failure path had been setting them honestly since Day 7.
+
+**Decision.** The loop lives in the executor, after the plan has run, and it reads gaps, not prose.
+Every open gap that is `resolvable` and names an agent is grouped by that agent; each agent gets one new `AgentInvocation` per round with `round: 1+`, the gaps' `suggested_query` verbatim as its query, and a context composed the Day 13 way - the planner's block for that agent, a refinement block naming the gaps, then the digest of each response that raised one - recorded verbatim.
+A re-delegation that answers closes the gaps it was asked about; its own gaps take their place.
+It stops when there is nothing left to ask, when the round cap is reached (default 2), when a gap names an agent that is not registered, or when the same agent would be asked the same query again.
+`refinement_rounds` counts the rounds that ran.
+
+**Why "the same query twice" is a stopping rule.** `resolvable: false` is the agent's honesty; the identical-gap rule is the executor's, for the case where an agent is honest but wrong about resolvability.
+A gap that comes back with the same suggested query after a round was spent on it is not progress, and the cap alone would spend the second round finding that out.
+
+**Why one invocation per agent per round.** Every round is a full agent run, and the Day 13 sequential run was 264k input tokens before any refinement.
+Two gaps that point at the same agent share one invocation with both queries listed verbatim; the cost is one run, not two, and the agent sees both questions together.
+
+**What I would watch.** A closed gap is closed because the re-delegation *answered*, not because it answered well; the new report's own gaps are the only signal that it did not.
+That is honest but coarse, and the Day 19 eval is where "did the round actually improve the answer" gets measured.
+
+## 23. Synthesis is a seam with a deterministic fallback, and the model form is grounded in code
+
+**Context.** The Day 7 synthesis adopted the highest-confidence report's summary as the answer and cited that report's evidence ids, so the coordinator never minted an id.
+The Day 10 demo showed its limit: with Incident and Docs both reporting, it picked one summary as the headline and dropped the other half of the answer.
+
+**Decision.** `coordinator/synthesis.py` holds both forms behind one `Synthesiser` protocol.
+The deterministic form is the default and the one every offline test runs.
+`ModelSynthesiser` is opt-in at the entry point, exactly as tracing is: it reads the query, the intent, one bounded digest per response (the same block a dependent agent is handed), and the open gaps, and is forced through one `emit_synthesis` tool.
+`check_grounding` then rejects an evidence id no agent carries and a confident answer that cites nothing; on any rejection, truncation, or missing tool call the executor falls back to the deterministic form and says why in `answer.reasoning`.
+
+**Why fall back rather than raise.** By the time synthesis runs, every agent has been paid for.
+Throwing the request away for one ungrounded sentence at the end would be the expensive kind of honesty; carrying the sentence would be the dishonest kind.
+The fallback keeps the agents' work and loses only the prose, and the reasoning field records that it happened.
+
+**Why the digests and not the raw responses.** The same argument as #20: the digest is what the agents said, bounded, with the evidence ids visible; the raw envelopes are thousands of tokens of plumbing the model would have to re-parse.
+It also means the synthesis reads exactly what a downstream agent would have read, so the two consumers of an agent's report cannot drift apart.
+
+**What I would watch.** The grounding check proves the answer cites real ids, not that the prose is faithful to the reports.
+A claim-level check (the Docs agent's verbatim-quote rule, applied to the synthesis) is the next step if the Day 19 eval finds the prose drifting.
+
+## 24. The `1.1.0` split changed the name and part 4, and nothing else
+
+**Context.** The routing case study needed an "after".
+The baseline had come back 0/40 misrouted, so the split was made because the method requires it, not because the tools had misrouted.
+
+**Decision.** `analyze_logs` / `analyze_events` became `search_container_logs` / `search_recorded_events` in a new server module that imports the v1 implementation and input schemas, composes parts 1-3 from the v1 descriptions at import, and adds a part 4 that names the other tool and states the discriminator in both directions.
+A test asserts parts 1-3 are byte-identical to v1; the v1 test that pins its part 4 weak still passes; the v1 server stays runnable, and its definitions stay in CONTRACTS.md struck through.
+The rationale was written in `docs/design-notes/contract-changes.md` before the code, per sec 0, and the entry records the tension with sec 0 step 3 (a rename is a removal by the letter, and the pre-authorization fixes the version at `1.1.0` anyway) rather than resolving it silently.
+
+**Why not just rewrite part 4.** A name is the first routing signal a model reads, and the plan said "split and rename"; measuring part 4 alone would understate the intervention the case study was designed around.
+
+**Why keep the v1 module shipped.** The before must be re-runnable over the same wire as the after, or the numbers in `docs/case-study-tool-routing.md` are a memory rather than a measurement.
+
+**What I would watch.** The after came back 0/40 too, and the write-up says so; the levers that would produce a non-zero baseline (a cheaper router model, parts 1-3 written loosely) are named there and are one flag or one module away.

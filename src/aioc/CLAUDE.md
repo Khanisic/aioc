@@ -33,14 +33,21 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   `handoff.py` (Day 13) is the sequential handoff: a bounded, plain-text digest of a dependency's
   response that the executor appends to the dependent's planner block at the moment the dependency
   returns, and records verbatim in that invocation's `context_passed`. Direct dependencies only.
+  The refinement loop (Day 14) lives in `executor.py` and reuses that composition: an open gap with
+  a `suggested_agent` becomes a `round: 1+` invocation whose query is the `suggested_query`
+  verbatim and whose context is the planner's block, the refinement block, and the raising
+  response's digest. `synthesis.py` (Day 14) is the synthesis seam - deterministic by default,
+  `ModelSynthesiser` opt-in at the entry point, grounded in code with a deterministic fallback.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `github/`, `docs/`, `deployment/` (Phase 2).
   `deployment/` (Day 12) is the two contract-named tools: `release.py` diffs release manifests
   structurally with values hashed at parse time (keys and paths only, by construction), `health.py`
   reads Prometheus and applies the deterministic rollout-status rule, `server.py` is the wire.
   `incident/analyze_server.py` (Day 13) is the `aioc-analyze` server for `analyze_logs` (over
   `docker compose logs`, `logs.py`) and `analyze_events` (over the seeded timeline). Their part-4
-  lines are the contract's deliberately weak v1.0.0 text, pinned by a test - do not sharpen them
-  outside the Day 14 `1.1.0` split, or the routing case study loses its baseline.
+  lines are the contract's deliberately weak v1.0.0 text, pinned by a test - do not sharpen them;
+  the module is the routing case study's baseline. `incident/search_server.py` (Day 14) is the
+  `1.1.0` split: the same tools as `search_container_logs` / `search_recorded_events`, the v1
+  implementation under new names, and a part 4 that names the alternative.
 - `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and
   the human-in-the-loop approval gate (later phases).
 

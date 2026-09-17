@@ -19,6 +19,7 @@ from aioc.llm import McpStdioToolset, McpToolsetError, ToolResult
 from aioc.tools.deployment import server as ds
 from aioc.tools.github import server as gs
 from aioc.tools.incident import analyze_server as an
+from aioc.tools.incident import search_server as ss
 
 _OFFLINE_ENV = {
     **os.environ,
@@ -161,6 +162,45 @@ def test_analyze_errors_arrive_structured_over_the_wire(analyze_toolset: McpStdi
         "analyze_events", {"service": "checkout-api", **window, "pattern": "("}
     )
     assert json.loads(bad.content)["error"]["code"] == "INVALID_PATTERN"
+
+
+# ---------------------------------------- Day 14: the 1.1.0 search server, same wire
+
+
+@pytest.fixture(scope="module")
+def search_toolset():
+    env = {
+        **_OFFLINE_ENV,
+        "DOCKER_BIN": "/definitely/not/docker",
+        "DATABASE_URL": "postgresql://aioc:x@127.0.0.1:9/aioc?connect_timeout=1",
+    }
+    with McpStdioToolset.for_module(ss.__name__, env=env) as ts:
+        yield ts
+
+
+def test_the_search_server_lists_the_split_tools_with_part_four_naming_the_alternative(
+    search_toolset: McpStdioToolset,
+):
+    assert search_toolset.server_name == ss.SERVER_NAME
+    by_name = {t.name: t for t in search_toolset.tools}
+    assert list(by_name) == list(ss.TOOL_NAMES)
+    for name in ss.TOOL_NAMES:
+        assert by_name[name].description == ss.DESCRIPTIONS[name]
+        other = next(n for n in ss.TOOL_NAMES if n != name)
+        assert f"`{other}`" in by_name[name].description.split("When to use this vs")[1]
+        # The v1 sentence does not travel this wire.
+        assert an.V1_PART_FOUR[ss.V1_NAMES[name]] not in by_name[name].description
+
+
+def test_search_errors_arrive_structured_over_the_wire(search_toolset: McpStdioToolset):
+    window = {"start": "2026-01-22T15:00:00Z", "end": "2026-01-22T16:00:00Z"}
+    logs = search_toolset.call("search_container_logs", {"service": "checkout-api", **window})
+    assert logs.is_error is True
+    assert json.loads(logs.content)["error"]["code"] == "LOG_STORE_UNAVAILABLE"
+    events = search_toolset.call("search_recorded_events", {"service": "checkout-api", **window})
+    assert json.loads(events.content)["error"]["code"] == "EVENT_STORE_UNAVAILABLE"
+    old_name = search_toolset.call("analyze_logs", {"service": "checkout-api", **window})
+    assert json.loads(old_name.content)["error"]["code"] == "UNKNOWN_TOOL"
 
 
 def test_a_server_that_cannot_start_raises_clearly():
