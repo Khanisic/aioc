@@ -5,7 +5,7 @@ paths:
 ---
 # Frozen contract - contracts layer
 
-You are in the Pydantic implementation of `docs/CONTRACTS.md` (schema `1.0.0`), which is **frozen**.
+You are in the Pydantic implementation of `docs/CONTRACTS.md` (schema `1.1.0`), which is **frozen**.
 `src/aioc/contracts/` is the one package both layers import, so it is the one place where a
 convenient local change is a breaking change somewhere else.
 

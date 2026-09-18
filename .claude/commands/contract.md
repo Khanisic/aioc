@@ -11,7 +11,8 @@ The user is about to work on: **$ARGUMENTS**
    a dated rationale in `docs/design-notes/contract-changes.md` written before the code changes,
    the superseded text struck through rather than deleted, a `schema_version` bump, and a changelog
    row in sec 9.
-3. Mention the one pre-authorized exception (`analyze_logs` / `analyze_events`, `1.1.0`) if relevant.
+3. Mention the one pre-authorized exception (`analyze_logs` / `analyze_events`, made as `1.1.0` on Day 14:
+   `search_container_logs` / `search_recorded_events`, v1 text kept struck through) if relevant.
 4. Point to the implementing module under `src/aioc/contracts/` and any covering test in
    `tests/test_contract.py`.
 

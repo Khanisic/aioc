@@ -2,11 +2,12 @@
 overlapping tools? (Day 13 records the baseline; Day 14 re-runs the same queries after
 the split.)
 
-    uv run python scripts/check_tool_routing.py                 # 40 live calls, both sets
+    uv run python scripts/check_tool_routing.py                 # 40 live calls, both sets, v1
+    uv run python scripts/check_tool_routing.py --variant v1_1  # the same 40 after the split
     uv run python scripts/check_tool_routing.py --set plain     # 20 calls
     uv run python scripts/check_tool_routing.py --dry-run       # zero calls: print the sets
     uv run python scripts/check_tool_routing.py --case logs_traceback --case hard_events_log_word
-    uv run python scripts/check_tool_routing.py --variant v1_1  # Day 14, once it exists
+    uv run python scripts/check_tool_routing.py --model claude-haiku-4-5-20251001  # cheaper router
 
 Cost: one Claude call per query - twenty per set, forty for both - each a short prompt (the
 two tool descriptions plus one sentence), about 2.9k input tokens a call. The tool is never
@@ -40,7 +41,10 @@ edit a set after its baseline is recorded - add a new set under a new name inste
 
 **The descriptions come off the wire.** The tool specs are listed from the real stdio
 server of the chosen variant, not copied into this script, so what the model sees is
-exactly what an agent would see. The variant registry is the one place Day 14 adds to.
+exactly what an agent would see. A variant is a server module plus the mapping from the
+query sets' ground-truth names (always the v1 names, so the hashes never move) to that
+server's tool names: `v1` is the `aioc-analyze` baseline, `v1_1` is the `aioc-search`
+server the contract's `1.1.0` split produced (Day 14).
 """
 
 from __future__ import annotations
@@ -62,9 +66,29 @@ from aioc.llm import LLMClient, LLMSettings, McpStdioToolset, ToolSpec  # noqa: 
 
 ToolName = Literal["analyze_logs", "analyze_events"]
 
-# variant key -> the stdio server module whose tool descriptions are under test.
-VARIANTS: dict[str, str] = {
-    "v1": "aioc.tools.incident.analyze_server",
+
+@dataclass(frozen=True)
+class Variant:
+    """A server module under test, plus how the query sets' ground truth maps onto its
+    tool names. The ground truth is always expressed in the v1 names."""
+
+    module: str
+    names: dict[ToolName, str]
+
+    def expected(self, ground_truth: ToolName) -> str:
+        return self.names[ground_truth]
+
+
+# variant key -> the stdio server whose tool names and descriptions are under test.
+VARIANTS: dict[str, Variant] = {
+    "v1": Variant(
+        "aioc.tools.incident.analyze_server",
+        {"analyze_logs": "analyze_logs", "analyze_events": "analyze_events"},
+    ),
+    "v1_1": Variant(
+        "aioc.tools.incident.search_server",
+        {"analyze_logs": "search_container_logs", "analyze_events": "search_recorded_events"},
+    ),
 }
 
 ROUTER_SYSTEM_PROMPT = """\
@@ -424,11 +448,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         chosen = list(all_cases.values())
 
-    module = VARIANTS[args.variant]
+    variant = VARIANTS[args.variant]
+    module = variant.module
     specs = _tools_over_the_wire(module)
     by_name = {s.name: s for s in specs}
-    if set(by_name) != {"analyze_logs", "analyze_events"}:
-        print(f"{module} lists {sorted(by_name)}, expected analyze_logs and analyze_events")
+    if set(by_name) != set(variant.names.values()):
+        print(f"{module} lists {sorted(by_name)}, expected {sorted(variant.names.values())}")
         return 2
     hashes = {name: queries_sha256(SETS[name]) for name in set_names}
 
@@ -441,7 +466,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         for set_name, case in chosen:
-            print(f"  {set_name:<6} {case.key:<28} -> {case.expected:<15} {case.query}")
+            expected = variant.expected(case.expected)
+            print(f"  {set_name:<6} {case.key:<28} -> {expected:<22} {case.query}")
         print("\n(dry run: no calls made)")
         return 0
 
@@ -464,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         metadata={
             "variant": args.variant,
             "server_module": module,
+            "tool_names": dict(variant.names),
             "model": settings.model,
             "sets": set_names,
             "cases": [c.key for _, c in chosen],
@@ -497,7 +524,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  ERROR {case.key}: {type(exc).__name__}: {exc}")
                 continue
             duration_ms = (time.monotonic() - start) * 1000
-            wrong = picked != case.expected
+            expected = variant.expected(case.expected)
+            wrong = picked != expected
             total_in += usage.input_tokens
             total_out += usage.output_tokens
             tally = per_set[set_name]
@@ -511,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
                 "key": case.key,
                 "query": case.query,
                 "expected": case.expected,
+                "expected_tool": expected,
                 "picked": picked,
                 "misrouted": wrong,
                 "arguments": arguments,
@@ -525,13 +554,15 @@ def main(argv: list[str] | None = None) -> int:
                 duration_ms=duration_ms,
                 type="llm_call",
                 data=record,
-                message=f"picked {picked}, expected {case.expected}",
+                message=f"picked {picked}, expected {expected}",
             )
             mark = "MISROUTED" if wrong else "ok       "
-            print(f"  {mark} {set_name:<6} {case.key:<28} picked {picked:<15} exp {case.expected}")
+            print(f"  {mark} {set_name:<6} {case.key:<28} picked {picked:<22} exp {expected}")
 
         summary = {
             "variant": args.variant,
+            "server_module": module,
+            "tool_names": dict(variant.names),
             "model": settings.model,
             "sets": {
                 name: {

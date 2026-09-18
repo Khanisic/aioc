@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 13** of 30, after the sequential handoff landed, the two
-overlapping tools shipped, and the routing baseline was recorded.
+Written at the end of **Day 14** of 30, after the refinement loop and the synthesis seam
+landed, the `1.1.0` split was made, and the routing case study got its "after".
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 14.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 15.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 514-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 565-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
@@ -77,16 +77,18 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 
 | Area | State |
 |---|---|
-| `contracts/` | Frozen at `1.0.0`, executable as Pydantic v2. Do not change a frozen shape. |
+| `contracts/` | Frozen at **`1.1.0`** since Day 14 (the pre-authorized split, §7.5/7.6; rationale in `docs/design-notes/contract-changes.md`), executable as Pydantic v2. Do not change a frozen shape. |
 | `llm/` | Harness: `complete`, `stream_text`, `run_tool_loop`. Defaults `claude-sonnet-5`, 8192 tokens - both from measurement. |
 | `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated), with a `usage` accumulator (the Day 7 cost seam). The schema-annotation helper it pioneered now lives in `agents/_annotate.py`, shared with the Docs agent. |
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
 | `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. |
-| `coordinator/executor.py` | Day 7, **parallel + traced Day 9, handoff Day 13.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; synthesis deterministic until Day 14; cost measured, not estimated. The parallel group runs on a thread pool: every runner gets its own `Usage` accumulator, folded into the total after the join; results merge in plan order; a barrier test proves overlap offline. The sequential chain composes each dependent's context at the moment its dependencies return - the planner's block, then `handoff.digest` of each direct dependency - and records the composed block verbatim on the executed invocation, so `selected_agents` in the response shows what Deployment actually saw. A failed invocation's gap now keeps the whole error text. `respond()` = plan + execute in one call, and owns the request trace. |
-| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. |
+| `coordinator/executor.py` | Day 7, **parallel + traced Day 9, handoff Day 13, refinement loop + synthesis seam Day 14.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; cost measured, not estimated. The parallel group runs on a thread pool with per-runner `Usage` accumulators; the sequential chain composes each dependent's context from the planner's block plus `handoff.digest` of each direct dependency and records it verbatim. **The refinement loop** runs after the plan: every open gap that is `resolvable` and names a `suggested_agent` is re-delegated as a `round: 1+` invocation (query = `suggested_query` verbatim; context = planner's block + refinement block + the raising responses' digests; one invocation per agent per round; `max_refinement_rounds` default 2; an identical gap never asked twice; `resolvable: false` and unregistered agents never retried); a re-delegation that answers closes its gaps. **Synthesis is a seam**: `synthesiser=None` (default) is the deterministic Day 7 form; `ModelSynthesiser()` is opt-in at the entry point (like tracing), with a deterministic fallback recorded in `answer.reasoning`. `status` is `complete` only when nothing is open and each agent's latest report is complete. `respond()` = plan + execute in one call, and owns the request trace. |
+| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. **Day 14** added `refinement_block` (the gaps a re-delegated invocation is closing, with the `suggested_query` verbatim) and `refinement_query`. |
+| `coordinator/synthesis.py` | **Day 14.** `SynthesisRequest` (query, intent, each response with its invocation, execution gaps, open gaps, rounds), `deterministic` (the Day 7 form), and `ModelSynthesiser`: one forced `emit_synthesis` call over the responses' digests, **flat schema** (`synthesis`, `answer`, `confidence`, `evidence`, `reasoning` - the nested `Assessment` form came back as XML-style text on the first live run, war story #10), `check_grounding` rejects an evidence id no agent carries or a confident uncited answer with `SynthesisError`. Verified live in one call over a recorded run. |
 | `agents/_status.py` | **Day 13.** `settle_status`: `complete` over a null findings judgement becomes `partial` in every agent's runtime, that direction only. The first live sequential run was refused for exactly this. |
-| `tools/incident/analyze_server.py` (+ `logs.py`, `patterns.py`) | **Day 13.** The `aioc-analyze` stdio server for the case study's two deliberately overlapping tools. `analyze_logs` reads what a container printed through `docker compose logs` (the only log source the stack has; a recreated container starts empty, stated in part 3); `analyze_events` reads the seeded timeline. Parts 1-3 of each description are complete; **part 4 is the contract's v1.0.0 sentence verbatim, names no alternative, and is pinned by `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative`** - do not sharpen it outside the Day 14 `1.1.0` split. Codes: `INVALID_PATTERN`, `UNKNOWN_SERVICE`, `LOG_STORE_UNAVAILABLE`, `EVENT_STORE_UNAVAILABLE` (all contract-named), plus the shared ones. Verified live against the stack and the corpus with zero Claude calls. |
+| `tools/incident/analyze_server.py` (+ `logs.py`, `patterns.py`) | **Day 13.** The `aioc-analyze` stdio server for the case study's two deliberately overlapping tools, now the **`1.0.0` baseline, kept runnable**. `analyze_logs` reads what a container printed through `docker compose logs`; `analyze_events` reads the seeded timeline. **Part 4 is the contract's v1.0.0 sentence verbatim and is pinned by `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative`** - never sharpen it; `check_tool_routing.py --variant v1` must keep measuring the "before". |
+| `tools/incident/search_server.py` | **Day 14.** The `aioc-search` server the `1.1.0` split produced: `search_container_logs` / `search_recorded_events`, the v1 implementation and input schemas imported under the new names, parts 1-3 composed from the v1 text verbatim (pinned by a test), part 4 naming the alternative and stating the discriminator both ways. `check_tool_routing.py --variant v1_1` lists it. No agent consumes either server yet. |
 | `observability/tracing.py` | **Day 9.** The `Tracer`/`RequestTrace`/`AgentSpan` seam. `NullTracer` is the default everywhere; `default_tracer()` returns the `LangfuseTracer` adapter only when both keys are set (SDK client built lazily, injectable stub in tests). One trace per request; `agent:<name>` spans open/close in the worker thread that runs them, so a parallel plan shows overlapping spans; `ToolCallRef`s ride as child events carrying their measured timing; `CoordinatorResponse.trace_id` comes from the trace. Tracing activates **only** when an entry point passes a tracer - keys in `.env` alone cannot make tests emit spans. |
 | `tools/envelope.py` + `tools/policy.py` | The contract wire envelope (sec 6) + the chaos ground-truth permission gate shared by all servers. |
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
@@ -157,33 +159,37 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 514 passed
+uv run pytest -q                                                   # expect 565 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **514 passed** with the stack up (501 passed, 13 skipped without
-it), lint and mypy clean, at the end of Day 13. The suite took ~20s on this machine with the
-stack up; the `test_mcp_toolset.py` tests launch the real GitHub, deployment, and analyze
-server subprocesses and are most of it.
+Costs nothing. Last run: **565 passed** with the stack up (552 passed, 13 skipped without
+it), lint and mypy clean, at the end of Day 14. The suite took ~25s on this machine with the
+stack up; the `test_mcp_toolset.py` tests launch the real GitHub, deployment, analyze, and
+search server subprocesses and are most of it.
 
-The whole system has now been proven live end to end - the Day 10 demo (**~3 Claude
-calls** per run, needs the stack; `--skip-inject` reuses active chaos, `--query` overrides
-the canonical query):
+The whole system has now been proven live end to end - the Day 10 demo (**~4 Claude
+calls** per run since Day 14 added the synthesis call, needs the stack; `--skip-inject`
+reuses active chaos, `--query` overrides the canonical query; not re-run on Day 14, so the
+committed GIF still shows the deterministic synthesis):
 
 ```bash
 PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
 ```
 
-`check_day13_sequential.py --deploy` (~6-9 calls; 2026-09-13: 8 calls, 263.8k input tokens,
-143.8s) is the Day 13 regression: `respond()` on a scenario where the release identity is only
-reachable through the PR. It asserts the coordinator planned Deployment `sequential` after
-GitHub on its own, that Deployment's recorded `context_passed` carries GitHub's digest after
-the planner's block, and that Deployment started after GitHub ended. It recreates the demo at
-the PR's head commit; a plain `docker compose up -d --wait` afterwards puts it back on
-`baseline` (done at the end of Day 13). `check_tool_routing.py` (20 calls per query set, 40
-for both; `--dry-run` free) is the routing case study's measurement and the Day 14 re-run
-target - §7 item 15 says what the baseline came back as.
+`check_day13_sequential.py --deploy` (~8-15 calls) is the Day 13 regression **and the
+refinement loop's live test since Day 14**: `respond()` on a scenario where the release
+identity is only reachable through the PR, with the loop (`--max-rounds`, default 2) and the
+model-written synthesis (`--deterministic-synthesis` to skip) on. It asserts the plan is
+sequential, that the invocation standing for Deployment (the last one that answered) carries
+GitHub's digest after the planner's block and started after GitHub ended, and that every
+`round >= 1` invocation carries the refinement block. It recreates the demo at the PR's
+**merge commit** (Day 14 change - the head was the wrong release, war story #10); a plain
+`docker compose up -d --wait` afterwards puts it back on `baseline` (done at the end of Day
+14). Day 14's two attempts are in §7 item 18. `check_tool_routing.py` (20 calls per query
+set, 40 for both; `--dry-run` free; `--variant v1` / `v1_1`) is the routing case study's
+measurement; both the before and the after are recorded (§7 item 15).
 `check_day12_deployment.py --deploy` (~3-5 calls) is the Day 12 regression: it recreates the
 demo containers at `origin/main`, then the Deployment agent diffs two real refs and reads the
 live rollout over the wire. `check_day9_trace.py --fake-agents` remains the zero-cost tracing smoke test, and Day 7's
@@ -191,53 +197,40 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 14 - the refinement loop, and the routing experiment (part 2)
+## 6. Next work: Day 15 - integration: four agents live, and the cost review
 
-**From the plan:** A: the coordinator **refinement loop** - detect gaps in synthesis,
-re-delegate targeted queries. B: split/rename the overlapping tools, re-run the same 20 (now
-40) queries, record the new rate, and draft `docs/case-study-tool-routing.md` with the
-before/after numbers.
+**From the plan:** checkpoint: a multi-agent query exercising parallel *and* sequential
+paths. Both tracks: cost review - check Console spend against the $100 alert.
 
-What already exists for the refinement loop:
+What already exists for it:
 
-- The gaps are machine-consumable already. `Gap.suggested_agent` + `Gap.suggested_query`
-  are set by the agents and by the executor's own `_invocation_failed_gap`; the loop
-  consumes them directly and stops on `resolvable: false` (the coordinator rule in
-  `.claude/rules/coordinator.md`). `Coordinator.plan` takes `round_number` and stamps
-  `round` on every invocation; `CoordinatorResponse.refinement_rounds` is hard-coded `0`
-  in the executor and is the field to bump.
-- The live Day 13 run produced exactly the input the loop needs: Deployment's gap
-  "compared_to_baseline was null" with `suggested_agent: deployment` and a wider-lookback
-  `suggested_query`, and GitHub's two out-of-scope gaps pointing at the Deployment agent's
-  tools. Re-delegating those is the loop's first real test - re-run
-  `check_day13_sequential.py` once it exists and count rounds.
-- A re-delegated invocation is a new `AgentInvocation` with `round: 1+` and its own
-  `context_passed`; the handoff module (`compose_dependent_context` / `digest`) is the
-  natural way to give it the previous round's findings without re-sending the raw
-  responses. Model-written synthesis (the executor's docstring says Day 14 is its first
-  consumer) is the other half; the deterministic `_synthesise` is the fallback to keep.
-- Cost matters here more than anywhere: every round is another full agent run, and the
-  Day 13 sequential run was 263.8k input tokens *before* any refinement. Cap rounds (the
-  plan says "until coverage is sufficient"; two is plenty for the demo) and measure.
+- Every piece of the checkpoint has been proven live on its own: Incident + Docs in
+  parallel (Day 10), GitHub -> Deployment sequential with the handoff (Day 13), the
+  refinement loop re-delegating a failed agent and a cross-agent gap (Day 14, attempt 1),
+  and the model-written synthesis grounding a real answer (Day 14). What has not been run
+  is one query that needs all four - the natural shape is an incident whose suspect is a
+  recent deploy: Incident + Docs parallel, GitHub -> Deployment sequential, one synthesis.
+  Expect ~12-20 calls and 400k+ input tokens at today's per-round re-sending (item 16);
+  say the cost before running it.
+- `demo_day10.py` already takes `--query` and now passes `ModelSynthesiser()`; a four-agent
+  query through it would record the transcript for a Day 15 GIF the same way Day 10 did.
+  `check_day13_sequential.py` is the sequential half with the loop on.
+- **The cost review is overdue in one specific way:** every Claude call re-sends the tool
+  schema and system prompt, and the tool-driven agents re-send a ~22k-token PR read and a
+  ~7k-token diff reply on every round (item 16). Prompt caching (item 4) and the Day 21
+  trimming are the two levers; the three Day 14 sequential attempts cost 373.7k, 232.7k,
+  and 344.0k input tokens (item 18). Langfuse has every trace; the Console has the spend.
+- Day 16's HITL gate reads `DeploymentFindings.approval` (stamped `requires_approval: true`
+  by the agent since Day 12) and `RecommendedAction.requires_approval`; nothing in the
+  executor consumes them yet. Day 17's validation-retry loop is the general answer to the
+  agent-level refusals that the refinement loop retried blind on Day 14 (a paraphrased
+  excerpt, a health reply not covering `to_version`): re-request with the error attached.
 
-What already exists for the routing experiment's second half:
-
-- **The baseline is 0/20 on the plain set and 0/20 on the hard set** (Sonnet, v1
-  descriptions listed over the wire). Read §7 item 15 before deciding what "after" means:
-  the weak part 4 caused no misrouting because parts 1 and 3 already state what each tool
-  reads. The split still happens (it is the pre-authorised `1.1.0` change and the
-  case-study deliverable), the same 40 queries are re-run through `check_tool_routing.py
-  --variant v1_1`, and the write-up reports 0 -> 0 honestly if that is the result, with
-  the levers that would have produced a non-zero baseline named (a cheaper router model;
-  parts 1-3 written as loosely as part 4). Do not edit the query sets - their hashes are
-  in the run records (`plain` `b0da5960...`, `hard` `9e31bedb...`).
-- The `1.1.0` bump is the §0 process minus the second engineer: the v1.0.0 definitions in
-  CONTRACTS.md sec 7.5 / 7.6 stay verbatim (struck through, not deleted), new names and a
-  usable part 4 for each, a `schema_version` bump, a sec 9 row, and the entry in
-  `docs/design-notes/contract-changes.md` written before the code. `VARIANTS` in
-  `check_tool_routing.py` is the one place to register the new server module, and
-  `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative` must keep passing
-  against the v1 module (keep it; add the "after" assertion against the new one).
+<!-- superseded Day 14 notes follow, kept for the record -->
+**Day 14 as planned:** A: the refinement loop. B: split/rename the overlapping tools, re-run the
+same 20 (40) queries, record the new rate, draft the case study. Done; see §3, the case study
+is `docs/case-study-tool-routing.md` (0/40 -> 0/40, with the levers named), and the live
+sequential run is §7 item 18.
 
 <!-- superseded Day 13 notes follow, kept for the record -->
 **Day 13 as planned:** A: the sequential dependency path with a code comment on why it cannot
@@ -452,17 +445,15 @@ for github queries.
 9. **`langfuse>=4.14.4` is a new runtime dependency** (the v4 observation API is what the
    adapter targets). It pulls the OTel SDK; nothing imports it unless a `LangfuseTracer`
    actually starts a request, so offline cost is import weight only.
-15. **The routing baseline is 0/40, and that is the finding (Day 13).** With parts 1 and 3
-   of the sec 6.5 template stating what each tool reads, Sonnet never needed the weak
-   part 4: 0/20 misrouted on twenty plainly worded queries and 0/20 on twenty written
-   afterwards with the surface vocabulary pulling the wrong way ("the deploy log", "the
-   operational output", "analyze its activity"). The case study's premise did not
-   materialise under these conditions. Two levers would likely change it, neither run
-   unasked because the standing rule says no model matrix without a request: a cheaper
-   router model (Haiku, ~20 calls per set at a fraction of Sonnet's price, and the same
-   model the Day 23 experiment measures), and parts 1-3 written as loosely as part 4.
-   Both are a `--model` flag or a second server module away; `check_tool_routing.py`
-   records the model and the query-set hashes on every run.
+15. **The routing case study is 0/40 before and 0/40 after (Days 13-14).** With parts 1
+   and 3 of the sec 6.5 template stating what each tool reads, Sonnet never needed part 4:
+   0/20 + 0/20 with the weak v1 descriptions, and 0/20 + 0/20 with the `1.1.0` names and a
+   part 4 that names the alternative (2026-09-17, 125.9k input tokens, +10% per call for
+   the longer part 4). `docs/case-study-tool-routing.md` says what that means and names
+   the two levers that would produce a non-zero baseline - a cheaper router
+   (`--model claude-haiku-4-5-20251001`, also the Day 23 question) and parts 1-3 written
+   as loosely as part 4 (a second `v1` module in `VARIANTS`). Neither was run unasked;
+   the standing rule says no model matrix without a request.
 16. **The sequential run costs ~264k input tokens, and it is not the handoff's fault.**
    PR #15 is 27 files and +4.6k lines; `get_pull_request` returned ~22k tokens that were
    re-sent on every GitHub round, and Deployment's ~7k-token diff reply on every
@@ -474,6 +465,51 @@ for github queries.
    four agents, covered by a Deployment test and the existing envelope tests. A reported
    `partial` / `insufficient_evidence` / `error` is never raised. The general fix for a
    report the contract refuses is still the Day 17 validation-retry loop.
+18. **The Day 14 live sequential run, three attempts (2026-09-17).** Attempt 1 exercised the
+   loop end to end and failed the check honestly: GitHub refused its own report in round 0
+   (a paraphrased excerpt), the loop retried it in round 1 and it answered with a gap
+   pointing at Deployment, the loop ran Deployment in round 2 with GitHub's digest (4,303
+   chars of context) and Deployment refused its own report because the demo was deployed
+   at the PR head while GitHub had (correctly) named the merge commit as the release; the
+   synthesis fell back because the nested `answer` object came back as XML-style text.
+   373.7k input tokens, 175 s, trace `0dc1c1b0ec90232f3fa96ed68c62174d`. Fixes: the check
+   deploys the merge commit (resolved from the local clone; exposing `merge_commit_sha` on
+   the PR reply was tried in attempt 2 and led the model to report an unfetched commit), the synthesis
+   schema is flat, and the check evaluates the invocation that stands for each agent.
+   Attempt 2: failed in a third way, and it was the fix's fault: the new `merge_commit_sha`
+   field in the PR reply led the model to report the merge commit as a commit it had never
+   fetched with `list_commits`, and the agent's grounding rule refused it in round 0 and
+   again on the round-1 retry (232.7k input tokens, 132.5 s, `error`). The field was
+   reverted; the check resolves the merge commit from the local clone instead.
+   Attempt 3: **PASS** (trace `f89929cd56da402d6b94dc1f84286617`, 344.0k input / 18.6k
+   output tokens, 191.9 s, `partial`, 4 unresolved gaps). Round 0: GitHub `partial` @
+   0.75 (PR read, commits listed, one gap pointing at Deployment), Deployment `sequential`
+   after it with a 3,399-char context carrying GitHub's digest, `complete` @ 0.62 (three
+   config keys added, no image change, rollout `degraded`, one gap: `compared_to_baseline`
+   null, wider lookback suggested). Round 1: the loop grouped both gaps onto one Deployment
+   invocation depending on *both* round-0 invocations (7,246-char context, two digests);
+   Deployment refused its own report (`from_version` not returned by a tool - the health
+   baseline was null). Round 2: the retry (parallel, 1,313 chars) failed report validation
+   (a gap with `suggested_agent` but no `suggested_query`). The model synthesis then
+   grounded an answer at 0.65 on nine real evidence ids across both agents and said plainly
+   that two follow-up attempts to close the baseline gap failed - which is the honest
+   result: the loop re-delegated the right things and the agents' own rules refused twice.
+   Both refusals are Day 17's (item 20).
+19. **The `1.1.0` bump left the §0 step-3 tension on record, not resolved.** By the letter
+   a rename is a removal (major); the pre-authorization fixed it at minor. The design-note
+   entry says so. The §8 worked example still says `1.0.0` on purpose - a `1.0.0` payload
+   is valid under `1.1.0`, and nothing enforces "fail loudly on a major mismatch" yet
+   (no consumer reads `schema_version`). That enforcement is a small validator away and
+   belongs with the Day 16 schemas-everywhere pass.
+20. **Two live-only agent refusals the refinement loop cannot fix by retrying blind:** a
+   GitHub excerpt paraphrase (retry worked once, by luck of sampling) and a Deployment
+   report whose health reply did not cover `to_version` (retry would fail identically).
+   Both are the Day 17 validation-retry loop's job - re-request *with the error attached* -
+   and the refinement loop's identical-gap rule already stops it spending a second round
+   on them.
+21. **The Day 10 GIF predates the model-written synthesis.** `demo_day10.py` now passes
+   `ModelSynthesiser()` and prints the synthesis; re-running it (~4 calls) and re-rendering
+   the GIF is a Day 15 nicety, not a blocker.
 
 ## 8. Where things are written down
 
@@ -485,8 +521,9 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 9 added #15 and #16) |
-| Eight debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24) |
+| Ten debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's) |
+| The routing case study, before and after | `docs/case-study-tool-routing.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |
 

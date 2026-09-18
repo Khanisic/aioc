@@ -1,11 +1,13 @@
 """Day 10: the first real end-to-end demo - one query through the whole system.
 
-    uv run python scripts/demo_day10.py                # ~3 Claude calls
+    uv run python scripts/demo_day10.py                # ~4 Claude calls
     uv run python scripts/demo_day10.py --skip-inject  # reuse whatever chaos is active
 
-Costs ~3 Claude API calls (one plan + one per selected agent, typically Incident + Docs)
-plus a fraction-of-a-cent Voyage query embed when that key is set. Needs the Docker stack
-up and `ANTHROPIC_API_KEY`; traces to Langfuse when those keys are set.
+Costs ~4 Claude API calls (one plan, one per selected agent - typically Incident + Docs -
+and, since Day 14, one model-written synthesis; a refinement round, if the agents leave a
+resolvable gap, is one more agent run each) plus a fraction-of-a-cent Voyage query embed
+when that key is set. Needs the Docker stack up and `ANTHROPIC_API_KEY`; traces to
+Langfuse when those keys are set.
 
 The story, end to end, with nothing scripted after the injection:
 
@@ -13,7 +15,9 @@ The story, end to end, with nothing scripted after the injection:
 2. Read the resulting metrics out of Prometheus - the coordinator's situation block.
 3. Ask the execution plan's canonical query: "Why did latency spike after the last deploy?"
 4. The coordinator plans (dynamic selection, explicit context per agent, reasons for every
-   skipped agent), the executor runs Incident + Docs **in parallel**, and the response is
+   skipped agent), the executor runs Incident + Docs **in parallel**, re-delegates any
+   resolvable gap they leave (Day 14), synthesises the answer with the model (Day 14,
+   grounded in the agents' evidence with a deterministic fallback), and the response is
    one contract-valid `CoordinatorResponse` with measured cost and a Langfuse trace id.
 
 The deploy-log line in the situation block is scenario framing (the on-call's knowledge),
@@ -38,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runlog import RunRecorder  # noqa: E402 - needs the sys.path insert above
 
 from aioc.contracts import DocsAgentResponse, IncidentAgentResponse  # noqa: E402
+from aioc.coordinator import Executor, ModelSynthesiser  # noqa: E402
 from aioc.coordinator.executor import respond  # noqa: E402
 from aioc.llm import LLMSettings  # noqa: E402
 from aioc.observability import (  # noqa: E402
@@ -171,9 +176,10 @@ def main(argv: list[str] | None = None) -> int:
     traced = isinstance(tracer, LangfuseTracer)
     say(f'[3/4] Asking the coordinator: "{args.query}"')
     say(
-        "      (planning + parallel agent execution: ~3 Claude calls"
+        "      (planning + parallel agent execution + synthesis: ~4 Claude calls"
         + (", traced to Langfuse)" if traced else "; tracing off - no Langfuse keys)")
     )
+    executor = Executor(tracer=tracer, synthesiser=ModelSynthesiser())
     say()
 
     with RunRecorder(
@@ -185,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         run.artifact("situation.txt", situation)
         start = time.monotonic()
         try:
-            resp = respond(args.query, situation=situation, tracer=tracer)
+            resp = respond(args.query, situation=situation, executor=executor, tracer=tracer)
         except Exception as exc:
             run.event(
                 "demo",
@@ -206,7 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"  intent      {intent} @ {resp.intent.confidence:.2f}")
         for inv in resp.selected_agents:
             deps = f" after {', '.join(inv.depends_on)}" if inv.depends_on else ""
-            say(f"  selected    {inv.agent.value:<11} {inv.mode.value}{deps}")
+            rnd = f" (refinement round {inv.round})" if inv.round else ""
+            say(f"  selected    {inv.agent.value:<11} {inv.mode.value}{deps}{rnd}")
         for skipped in resp.skipped_agents:
             say(f"  skipped     {skipped.agent.value:<11} {skipped.reason}")
         say()
@@ -230,12 +237,16 @@ def main(argv: list[str] | None = None) -> int:
                     say(f"     claim [{docs}]: {claim.statement}")
             say()
 
+        say("  synthesis:")
+        for line in resp.synthesis.splitlines():
+            say(f"     {line}")
+        say()
         say(f"  answer ({resp.answer.confidence:.2f}): {resp.answer.value}")
         say()
         say(
             f"  status {resp.status.value} | cost {resp.cost.input_tokens} in / "
             f"{resp.cost.output_tokens} out | {wall_seconds:.1f}s wall | "
-            f"gaps {len(resp.unresolved_gaps)}"
+            f"refinement rounds {resp.refinement_rounds} | gaps {len(resp.unresolved_gaps)}"
         )
         trace_url = (
             tracer.trace_url(resp.trace_id) if traced and resp.trace_id is not None else None
@@ -261,7 +272,13 @@ def main(argv: list[str] | None = None) -> int:
                 "trace_url": trace_url,
                 "cost": {"in": resp.cost.input_tokens, "out": resp.cost.output_tokens},
                 "wall_seconds": round(wall_seconds, 1),
+                "refinement_rounds": resp.refinement_rounds,
                 "unresolved_gaps": len(resp.unresolved_gaps),
+                "synthesis_source": (
+                    "deterministic_fallback"
+                    if "deterministic form is used instead" in (resp.answer.reasoning or "")
+                    else "model"
+                ),
             },
             message=(resp.answer.value or resp.synthesis)[:300],
         )

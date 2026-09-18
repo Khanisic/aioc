@@ -90,11 +90,11 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `ingest_embeddings.py` | 0 Claude; Voyage per new/stale row (`--dry-run` free) | The corpus vectors exist and re-ingestion is idempotent |
 | `check_day8_docs.py` | 1 (+1 Voyage query embed with a key) | The Docs agent answers from the seeded corpus with verbatim citations |
 | `check_day9_trace.py` | ~3, or **0** with `--fake-agents` | One Langfuse trace shows two agents running concurrently (needs the Langfuse keys; `--fake-agents` proves executor concurrency with scripted agents for free) |
-| `demo_day10.py` | ~3 per run | The whole system, live: inject chaos, build the situation from Prometheus, `respond()` end to end with tracing; records a timed transcript that `render_demo_gif.py` (free) turns into the demo GIF |
+| `demo_day10.py` | ~4 per run (plan, the agents, the model-written synthesis; more if a refinement round runs) | The whole system, live: inject chaos, build the situation from Prometheus, `respond()` end to end with tracing; records a timed transcript that `render_demo_gif.py` (free) turns into the demo GIF |
 | `check_day11_github.py` | ~3-5 | The GitHub agent reads a real PR over the MCP wire; every PR, commit, and excerpt traces back to a tool reply |
 | `check_day12_deployment.py` | ~3-5 | The Deployment agent diffs two real refs of this repository and reads the live rollout over the wire; `--deploy` recreates the demo containers at the release under test first (needs the stack) |
-| `check_day13_sequential.py` | ~6-9 | The sequential path end to end through `respond()`: the coordinator plans Deployment after GitHub on its own, the executor hands GitHub's digest to Deployment, and the recorded `context_passed` shows it; `--deploy` recreates the demo at the PR's head commit first (needs the stack and the GitHub token) |
-| `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between `analyze_logs` and `analyze_events` over 20 plain and 20 adversarially worded queries; prints and records the misrouting rate per set with the query-set hash, so the Day 14 re-run compares like with like |
+| `check_day13_sequential.py` | ~8-15 | The sequential path end to end through `respond()`: the coordinator plans Deployment after GitHub on its own, the executor hands GitHub's digest to Deployment, and the recorded `context_passed` shows it; since Day 14 the refinement loop re-delegates the gaps the agents leave (`--max-rounds`, default 2; `0` reproduces the Day 13 form) and the model writes the synthesis (`--deterministic-synthesis` skips that call); `--deploy` recreates the demo at the PR's head commit first (needs the stack and the GitHub token) |
+| `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between the two overlapping tools over 20 plain and 20 adversarially worded queries; `--variant v1` lists the `1.0.0` `analyze_*` server (the baseline), `--variant v1_1` the `1.1.0` `search_*` server (the split), the same ground truth mapped onto each server's names; prints and records the misrouting rate per set with the query-set hash, so before and after compare like with like; `--model` swaps the router |
 
 ```bash
 # One call per model. Validates diagnose() against the frozen contract.
@@ -122,7 +122,34 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day9_trace.py --fake-agents
 
 # Prints a full validated response. One call.
 uv run python examples/incident_structured_demo.py
+
+# The whole system: inject chaos, read Prometheus, respond() end to end, traced. ~4 calls.
+# Needs the stack. --skip-inject reuses active chaos; --query overrides the canonical query.
+PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
+uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
+
+# The GitHub agent reads a real PR over the MCP wire. ~3-5 calls. Needs GITHUB_TOKEN + GITHUB_REPO.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py --pr 12
+
+# The Deployment agent diffs two real refs and reads the live rollout. ~3-5 calls.
+# --deploy recreates the demo containers at --to first; needs the stack and the token.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy
+
+# The sequential path through respond(): GitHub, then Deployment with GitHub's digest in its
+# context, then the refinement loop and the synthesis. ~8-15 calls. Needs the stack and the
+# token; --deploy recreates the demo at the PR head; --max-rounds 0 is the Day 13 form.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
+
+# The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
+# --variant v1 is the 1.0.0 baseline, --variant v1_1 the 1.1.0 split.
+uv run python scripts/check_tool_routing.py --dry-run
+uv run python scripts/check_tool_routing.py --set hard
+uv run python scripts/check_tool_routing.py --variant v1_1
 ```
+
+After a `--deploy` run the demo services report the release under test; put them back with
+`docker compose up -d --wait`. After a demo, `make chaos-reset` (or
+`uv run python demo-app/chaos/inject.py --reset`) - injected chaos persists.
 
 Default with no arguments for the model matrix is three models, one call each.
 `--repeat N` multiplies by N per model, so `--models a b c --repeat 3` is nine calls.

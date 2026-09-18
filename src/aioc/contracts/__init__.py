@@ -1,4 +1,4 @@
-"""Pydantic v2 implementation of the frozen contract in docs/CONTRACTS.md (schema 1.0.0).
+"""Pydantic v2 implementation of the frozen contract in docs/CONTRACTS.md (schema 1.1.0).
 
 Import surface for the Reasoning Layer. The `CoordinatorResponse` is the top of the tree;
 everything else hangs off it.

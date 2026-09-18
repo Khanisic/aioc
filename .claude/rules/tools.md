@@ -14,6 +14,8 @@ paths:
   means the request cannot be computed, not that it computed to nothing.
 - `meta` is required on every success response - it is the baseline the token-reduction work measures.
 - Config values are NEVER returned - keys only, at every layer.
-- `analyze_logs` / `analyze_events` overlap on purpose (the Domain 2 routing case study). Do not
-  "fix" them outside the documented sec 0 pre-authorized `1.1.0` refactor, or the case-study
-  baseline is lost.
+- `analyze_logs` / `analyze_events` (`incident/analyze_server.py`) overlap on purpose: they are the
+  Domain 2 routing case study's baseline, and the `1.1.0` split that fixed them is
+  `incident/search_server.py` (`search_container_logs` / `search_recorded_events`). Do not sharpen
+  the v1 module - it must stay re-runnable as the "before" - and keep the split's parts 1-3 verbatim
+  from v1 so the case study keeps isolating the name and part 4.

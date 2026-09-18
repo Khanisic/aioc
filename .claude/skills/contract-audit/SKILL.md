@@ -6,7 +6,7 @@ agent: Explore
 background: false
 allowed-tools: Read, Grep, Glob, Bash(uv run:*)
 ---
-Audit `src/aioc/contracts/` against the frozen contract in `docs/CONTRACTS.md` (schema `1.0.0`) and
+Audit `src/aioc/contracts/` against the frozen contract in `docs/CONTRACTS.md` (schema `1.1.0`) and
 report drift. You run in a forked, read-only context - do not edit files.
 
 Work section by section through CONTRACTS.md sec 2-7 and check:
