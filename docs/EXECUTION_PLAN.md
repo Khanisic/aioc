@@ -364,6 +364,36 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 ### Day 15 — Integration: four agents live
 - **Checkpoint:** A multi-agent query exercising parallel *and* sequential paths.
 - **Both tracks:** Cost review — check Console spend against the $100 alert.
+- **Done (2026-09-18):** `scripts/check_day15_integration.py` is the checkpoint: a real fault injected,
+  the situation block built from live Prometheus metrics plus what the on-call knows about releases, and
+  one query that needs all four agents. It asserts all four are planned and answer, that a parallel
+  group of two or more really overlapped in wall-clock time, and everything the Day 13 check asserts
+  about the sequential half. The PR under test is small on purpose (#11, six files; the previous
+  release is main before the merge), which took the PR read from ~22k tokens to ~1.1k and the release
+  diff from ~7.4k to ~0.4k. `scripts/cost_review.py` (free) is the cost review: it prices every recorded
+  live run by check and by day and says what it cannot see.
+- **Three defects the first four-agent run found, all fixed:** the planner's roster said the Incident
+  agent "reads the historical incident corpus" (it has no tools; the corpus is the Docs agent's), so
+  the plan skipped Docs with a reason quoting that sentence; the digest's ceiling cut the evidence list
+  first and the Docs claim lines showed document ids in the slot every other line uses for evidence
+  ids, so the model synthesis cited `doc_` ids and the grounding check correctly refused it; and the
+  Day 13 evaluator compared a round-1 re-delegation with round 2's context. The roster is corrected
+  and pinned by a test, the evidence list now survives the ceiling (the body gives up the room),
+  claim lines say `docs=`, and the evaluator reads the planner's block from round 0.
+- **Verified:** 581 offline tests (16 new); lint and mypy clean; the synthesis fix confirmed in one call
+  over the recorded failing run (a grounded 0.62 answer citing 25 real evidence ids) before the re-run.
+- **Checkpoint produced (2026-09-18):** **PASS on the second attempt.** Incident, Docs, and GitHub ran
+  concurrently (0.0 -> 22.9 s, 33.5 s, 78.5 s), Deployment ran `sequential` after GitHub with its digest
+  (78.5 -> 146.8 s), and the model-written synthesis answered at 0.60 on 13 evidence ids with the right
+  conclusion - the release is not the cause; payments-api latency is propagating through the fan-out;
+  two precedents. 342.9k input / 47.5k output tokens, 279.0 s. `docs/assets/day15-demo.gif` replays it.
+- **Cost review:** measured spend across every recorded live run is **$7.14** (2.58M input / 198k
+  output tokens), 7% of the $100 alert, a floor rather than the bill (16 early runs recorded no usage).
+  The finding that matters is not caching: in the passing run the plan had answered everything by
+  146.8 s, and refinement round 1 then re-delegated all four agents off gaps that said "this part of
+  the question is not mine" - roughly half the bill, and three of the four re-delegations were refused
+  by the agents' own rules. Prompt caching stays on Day 19 as planned; the out-of-scope gaps are
+  HANDOFF §7 item 22. Numbers in `docs/interview-prep/numbers.md`, the story in war story #11.
 
 ---
 

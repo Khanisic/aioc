@@ -458,3 +458,18 @@ def test_select_schema_guidance_fails_loudly_on_a_renamed_contract_field():
 
     with pytest.raises(RuntimeError, match="out of sync"):
         _apply_guidance({"properties": {}, "$defs": {}})
+
+
+def test_the_roster_claims_no_capability_an_agent_lacks() -> None:
+    """Day 15: the roster said the Incident agent "reads ... the historical incident corpus".
+    It has no tools, and the corpus is the Docs agent's. The first four-agent run skipped
+    Docs on exactly that sentence, with a reason that quoted it - the planner was right
+    about the system it had been described, and the description was wrong."""
+    incident, docs = (
+        SELECTION_SYSTEM_PROMPT.split("- `incident`:")[1].split("- `docs`:")[0],
+        SELECTION_SYSTEM_PROMPT.split("- `docs`:")[1].split("- `github`:")[0],
+    )
+    assert "It has no tools" in incident
+    assert "cannot search past incidents" in incident
+    assert "corpus" not in incident
+    assert "corpus of past incidents" in docs

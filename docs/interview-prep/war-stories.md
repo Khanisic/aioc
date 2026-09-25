@@ -266,6 +266,49 @@ And a structured-output schema should be as flat as the data allows; a model tha
 
 ---
 
+## 11. The coordinator skipped the Docs agent, and the reason it gave was a sentence I had written
+
+**Symptom.** The first run of all four agents on one query (`check_day15_integration.py --deploy`) failed its check on "the plan did not select docs", and the model-written synthesis had fallen back to the deterministic form.
+The query had a part that was plainly the Docs agent's: "what do our past incidents say about handling this kind of failure?"
+Every offline test was green, and coordinator selection had been measured at 5/5.
+
+**The hunt.** The plan's `skipped_agents` entry gave the reason in full: the past-incidents question "is served by the incident agent's access to the historical incident corpus, not the runbook/docs corpus."
+That sounded like a model inventing a capability, so I went looking for where the Incident agent touches the corpus.
+It does not.
+It has no tools at all; it reasons over the context block it is handed, and its own schema guidance says `similar_incidents` stays empty "unless the context actually names prior incidents".
+The corpus belongs to the Docs agent, and it is a corpus of past incidents, not of runbooks.
+Then I read the planner's roster, the one block of text the coordinator has about its agents.
+`incident`: "Reads Prometheus and the historical incident corpus."
+`docs`: "answers from the retrieved runbook and documentation corpus."
+Both sentences dated from Day 6 (2026-07-29) - before the Docs agent or its corpus existed, and when the Incident agent's corpus access was still a plan - and described the intention rather than the build.
+The comment above the roster says keeping it in one place "is what stops the prompt from claiming a capability the agent does not have."
+The coordinator had reasoned correctly from a description that was wrong, and said so in writing.
+The five-case selection check never caught it because none of its cases asks for precedent alongside a live diagnosis.
+
+The refinement loop had quietly repaired the plan: the Incident agent raised a gap ("no historical incident corpus data was provided") pointing at Docs, and round 1 ran Docs.
+That is the loop working, and it is also how a wrong roster could have stayed hidden for good - at the price of a round.
+
+The synthesis fallback was a separate defect with the same shape.
+The rejection read: "answer cites evidence id(s) ['doc_0005', 'doc_0009', 'doc_0017'] that no agent response carries."
+Correct by the contract: the coordinator cites evidence ids, and those are document ids.
+But the model had not invented them; it had copied them from the Docs digest, where every claim line read `claim_x @0.85 [doc_0005]` - document ids in the bracket slot that every other digest line uses for evidence ids.
+And the real evidence list, the last section of the digest, had been cut by the 4,000-character ceiling after two of its eleven entries.
+The synthesiser cited the only ids it could see, in the slot where ids go.
+This was the first synthesis over a Docs report; Day 14's had GitHub and Deployment only, and neither is long enough to reach the ceiling.
+
+**Fix.** The roster now says what the agents are: Incident reasons over the observations it is handed and has no tools; Docs answers from the corpus of past incidents and is the agent for precedent.
+A test pins both sentences, because the roster is a capability claim and nothing else was checking it.
+The digest keeps its evidence list out of the cut - the body gives up the room, the ceiling still holds - and Docs claim lines say `docs=doc_0005`, so brackets mean evidence ids everywhere.
+Before paying for another full run, one call replayed the synthesis over the recorded reports: grounded, 0.62, 25 real evidence ids across all four agents.
+The second full run passed: Incident, Docs, and GitHub overlapping from 0.0 s, Deployment after GitHub with its digest, a model-written answer at 0.60 that told the on-call their suspect release was not the cause.
+A third complaint in the first run was the check's own bug: it took "the planner's block" from the last invocation that answered, so an agent re-delegated in two rounds had its round-1 context compared with round 2's.
+
+**Transferable lesson.** A model that gives a wrong reason in plain words is handing you a grep string; the false sentence was mine, in the prompt, nearly verbatim.
+Descriptions of a system written before the system exists go stale silently, and a prompt is a place where stale documentation executes.
+And when a bounded summary has to lose something, decide what it may not lose: the ids a reader is allowed to cite are the one part of a digest that everything downstream validates against.
+
+---
+
 ## How to tell these in an interview
 
 Lead with the symptom, not the answer.
@@ -273,5 +316,5 @@ Lead with the symptom, not the answer.
 Opening with "I had a max_tokens misconfiguration" throws the story away.
 
 Have one sentence ready for what you changed *besides* the fix.
-Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error.
+Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error, the test that pins the roster's capability claims.
 Fixing the bug is table stakes. Making the failure legible next time is the part that reads as seniority.

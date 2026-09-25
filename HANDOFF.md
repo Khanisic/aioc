@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 14** of 30, after the refinement loop and the synthesis seam
-landed, the `1.1.0` split was made, and the routing case study got its "after".
+Written at the end of **Day 15** of 30, after all four agents ran live on one query
+(parallel and sequential paths in one request) and the cost review was done.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 15.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 16.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,10 +16,13 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 565-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 581-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
-  cost 1-3 calls each. Before running anything live, say how many calls it will cost. Do
+  cost 1-3 calls each. Before running anything live, say how many calls it will cost -
+  and for a `respond()` run, quote the last measured run of the same shape (~$0.70-1.20,
+  `scripts/cost_review.py`), not a guess from input sizes: both Day 15 estimates were
+  low by 2-3x. Do
   not run a model matrix unasked. (Voyage embedding calls count too -
   `scripts/ingest_embeddings.py` is opt-in and its `--dry-run` is free. Langfuse spans are
   not Claude calls, but they are network - same opt-in rule.)
@@ -36,7 +39,7 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 | Thing | Decision |
 |---|---|
 | **A / B labels** across all 30 days | **Kept**, redefined as *layer* names rather than people. They mark which side of the contract a day's work sits on. |
-| **The frozen contract** | **Unchanged and still hard.** `schema_version` is still `1.0.0`. One head owning both sides makes the boundary easier to erode, not less necessary. |
+| **The frozen contract** | **Unchanged and still hard.** `schema_version` is `1.1.0` since Day 14 - the one pre-authorized split, made through the sec 0 process - and nothing else has moved. One head owning both sides makes the boundary easier to erode, not less necessary. |
 | **The §0 change process** | **Rewritten.** "Both engineers agree in writing" became a dated rationale in `docs/design-notes/contract-changes.md`, written *before* the code changes, plus the superseded text struck through rather than deleted. The record replaces the counterparty. |
 | **Daily sync ritual** | Replaced by reading this file plus the previous day's done-when before writing code. |
 | **Risk register** | "Uneven contribution" is struck through and replaced by three real ones: layer boundary erodes, contract changes unrecorded, single point of failure. |
@@ -82,9 +85,9 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated), with a `usage` accumulator (the Day 7 cost seam). The schema-annotation helper it pioneered now lives in `agents/_annotate.py`, shared with the Docs agent. |
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
-| `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. |
+| `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. **Day 15 corrected the agent roster** (`_AGENT_CAPABILITIES`): it claimed the Incident agent reads the incident corpus and called Docs a runbook corpus, and the first four-agent plan skipped Docs quoting that sentence (war story #11). Incident has no tools; the corpus of past incidents is the Docs agent's. `test_the_roster_claims_no_capability_an_agent_lacks` pins it - update the roster when an agent's capabilities change. |
 | `coordinator/executor.py` | Day 7, **parallel + traced Day 9, handoff Day 13, refinement loop + synthesis seam Day 14.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; cost measured, not estimated. The parallel group runs on a thread pool with per-runner `Usage` accumulators; the sequential chain composes each dependent's context from the planner's block plus `handoff.digest` of each direct dependency and records it verbatim. **The refinement loop** runs after the plan: every open gap that is `resolvable` and names a `suggested_agent` is re-delegated as a `round: 1+` invocation (query = `suggested_query` verbatim; context = planner's block + refinement block + the raising responses' digests; one invocation per agent per round; `max_refinement_rounds` default 2; an identical gap never asked twice; `resolvable: false` and unregistered agents never retried); a re-delegation that answers closes its gaps. **Synthesis is a seam**: `synthesiser=None` (default) is the deterministic Day 7 form; `ModelSynthesiser()` is opt-in at the entry point (like tracing), with a deterministic fallback recorded in `answer.reasoning`. `status` is `complete` only when nothing is open and each agent's latest report is complete. `respond()` = plan + execute in one call, and owns the request trace. |
-| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. **Day 14** added `refinement_block` (the gaps a re-delegated invocation is closing, with the `suggested_query` verbatim) and `refinement_query`. |
+| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. **Day 15:** the evidence list is kept out of the ceiling's cut (the body gives up the room - the synthesiser cites from that list, and a cut list made it cite document ids) and Docs claim lines say `docs=doc_0005`, so brackets mean evidence ids everywhere. **Day 14** added `refinement_block` (the gaps a re-delegated invocation is closing, with the `suggested_query` verbatim) and `refinement_query`. |
 | `coordinator/synthesis.py` | **Day 14.** `SynthesisRequest` (query, intent, each response with its invocation, execution gaps, open gaps, rounds), `deterministic` (the Day 7 form), and `ModelSynthesiser`: one forced `emit_synthesis` call over the responses' digests, **flat schema** (`synthesis`, `answer`, `confidence`, `evidence`, `reasoning` - the nested `Assessment` form came back as XML-style text on the first live run, war story #10), `check_grounding` rejects an evidence id no agent carries or a confident uncited answer with `SynthesisError`. Verified live in one call over a recorded run. |
 | `agents/_status.py` | **Day 13.** `settle_status`: `complete` over a null findings judgement becomes `partial` in every agent's runtime, that direction only. The first live sequential run was refused for exactly this. |
 | `tools/incident/analyze_server.py` (+ `logs.py`, `patterns.py`) | **Day 13.** The `aioc-analyze` stdio server for the case study's two deliberately overlapping tools, now the **`1.0.0` baseline, kept runnable**. `analyze_logs` reads what a container printed through `docker compose logs`; `analyze_events` reads the seeded timeline. **Part 4 is the contract's v1.0.0 sentence verbatim and is pinned by `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative`** - never sharpen it; `check_tool_routing.py --variant v1` must keep measuring the "before". |
@@ -100,7 +103,9 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `tools/deployment/` | **Day 12.** The `aioc-deployment` stdio server for the two contract-named tools. `release.py`: `diff_release` reads compose, `.env`-style, and Kubernetes manifests at both refs (`GitHubApi.file_content`) and diffs them structurally, every value hashed the moment it is parsed - keys, image references, manifest paths, and commits come back, values cannot. `health.py`: `check_rollout_health` runs a Prometheus battery for one service and applies the deterministic status rule; the deployed version is the demo app's new `service_build_info` gauge, which also gives the baseline (previous version in the window) and `rolled_back`. Sec 7.3/7.4 codes plus additive `PROMETHEUS_UNAVAILABLE`, `VERSION_NOT_OBSERVABLE`, `ENVIRONMENT_NOT_MONITORED`. Verified over the wire against the live stack. |
 | `agents/deployment.py` | **Day 12.** `DeploymentAgent.assess`: the Day 11 shape over `aioc-deployment`. The model reports the service, the releases, and four judgements (`rollout_status`, `regression_suspected`, `rollback_recommendation`, `approval`); the runtime stamps `changed_config_keys`, `image_changes`, `health_signals` (lookback from the call's arguments) from the replies for those releases, refuses a service or release no tool returned, requires a gap against any tool's fields when that tool was not run (not looked is never `[]`), grounds every excerpt against the replies or the context block, and stamps `requires_approval: true`. Registered in `default_runners()` - the set is complete. |
 | `docker/postgres/init/` | 18 incidents, 65 timeline events, seeded. `04-embeddings.sql` (Day 8) adds `incident_embeddings` - additive and `IF NOT EXISTS`, already applied to the running database by the ingest script's table guard. **Vectors are ingested** (18/18, `voyage-3.5`, 2026-08-21) and hybrid search is live. |
-| `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
+| `scripts/check_day15_integration.py` | **Day 15.** The four-agent checkpoint: deploys the demo at PR #11's merge commit, injects a real fault, builds the situation from live metrics plus the Day 13 release note, and runs `respond()` on a four-part query. Asserts all four planned and answering, a parallel group that overlapped in measured time, and the Day 13 sequential assertions (imported from `check_day13_sequential.py`, whose multi-round bug it found). Records `transcript.json`; resets chaos itself. **PASS on attempt 2**, `docs/assets/day15-demo.gif`. |
+| `scripts/cost_review.py` | **Day 15.** Free. Prices every recorded live run by check and by day against the alert, and says what it cannot see (runs with no recorded usage, ad-hoc calls, Voyage). `--json`, `--since`, `--alert`. Prices are a table in the file, dated; no caching is assumed. |
+| `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript; `--title` / `--command` since Day 15 so it renders any recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
 | `demo-app/services/app.py` | **Day 12** added `service_build_info{service,git_sha} = 1` (the deployed version as a metric, next to `/version`). The image must be rebuilt for it to exist: `docker compose up -d --build --wait`. |
 
 ## 4. Environment traps - read before debugging anything
@@ -159,12 +164,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 565 passed
+uv run pytest -q                                                   # expect 581 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **565 passed** with the stack up (552 passed, 13 skipped without
-it), lint and mypy clean, at the end of Day 14. The suite took ~25s on this machine with the
+Costs nothing. Last run: **581 passed** with the stack up (568 passed, 13 skipped without
+it), lint and mypy clean, at the end of Day 15. The suite took ~25-45s on this machine with the
 stack up; the `test_mcp_toolset.py` tests launch the real GitHub, deployment, analyze, and
 search server subprocesses and are most of it.
 
@@ -177,6 +182,13 @@ committed GIF still shows the deterministic synthesis):
 PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free
 ```
+
+`check_day15_integration.py --deploy` (~12-20 calls, **~$1.10 measured**, 343-348k input
+tokens both times) is the whole system on one query: four agents, the parallel and the
+sequential path, the loop, the model synthesis. `--max-rounds 1` is what passed; the run
+resets chaos itself, and a plain `docker compose up -d --wait` afterwards puts the demo back
+on `baseline` (done at the end of Day 15). `uv run python scripts/cost_review.py` is free
+and says what all of this has cost so far.
 
 `check_day13_sequential.py --deploy` (~8-15 calls) is the Day 13 regression **and the
 refinement loop's live test since Day 14**: `respond()` on a scenario where the release
@@ -197,9 +209,36 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 15 - integration: four agents live, and the cost review
+## 6. Next work: Day 16 - schemas everywhere + HITL
 
-**From the plan:** checkpoint: a multi-agent query exercising parallel *and* sequential
+**From the plan:** A: all four agents on validated schemas - nullable fields (absent data
+returns `null`, never a fabricated value), enums using the `other` + detail-string pattern.
+B: human-in-the-loop approval gate for critical actions (rollback, restart, merge).
+
+What already exists for it:
+
+- The A half is largely built: all four agents already return schema-validated contract
+  envelopes through forced structured-output tools, with `null` + `Gap` and `other` +
+  detail enforced by the contract models and one negative test per invariant. What Day 16
+  adds is the audit that says so - run the `contract-audit` skill, then close what it
+  finds - and the one enforcement the contract asks for that nothing does yet: consumers
+  reading `schema_version` and failing loudly on a major mismatch (§7 item 19).
+- The B half is new code in `src/aioc/hitl/` (empty today). The inputs are already
+  stamped: `DeploymentFindings.approval` (`requires_approval: true` since Day 12) and
+  `RecommendedAction.requires_approval` on the Incident agent's actions. Nothing in the
+  executor consumes them. Day 17's audit log (B) records what the gate decides, so give the
+  gate a decision record now rather than retrofitting one.
+- **Do item 22 first or alongside** - it is the cheapest large cost win on the table and it
+  changes what every live check after it costs.
+
+<!-- superseded Day 15 notes follow, kept for the record -->
+**Day 15 as planned:** checkpoint: a multi-agent query exercising parallel *and* sequential
+paths; both tracks: cost review against the $100 alert. Done; see §3, §7 items 22-25, war
+story #11, and `docs/interview-prep/numbers.md` (PASS on the second attempt, 2026-09-18;
+measured spend $7.14, 7% of the alert).
+
+
+**From the plan (Day 15):** checkpoint: a multi-agent query exercising parallel *and* sequential
 paths. Both tracks: cost review - check Console spend against the $100 alert.
 
 What already exists for it:
@@ -511,6 +550,40 @@ for github queries.
    `ModelSynthesiser()` and prints the synthesis; re-running it (~4 calls) and re-rendering
    the GIF is a Day 15 nicety, not a blocker.
 
+22. **Out-of-scope gaps are the biggest cost lever found so far (Day 15).** Every agent
+   receives the whole user query, so on a four-part question each one raised resolvable
+   gaps for the parts that were not its own, pointing at the sibling that was already
+   answering them ("no documentation describes PR #11" -> github). The loop did what it
+   does with a resolvable gap: round 1 re-delegated **all four agents**, with contexts up
+   to 18k chars, after the plan had already answered everything at 146.8 s. That round was
+   about half of a ~$1.16 run, and the run ended `partial` with 14 open gaps on a correct
+   answer. The contract has no per-invocation query (`AgentInvocation` is frozen), so the
+   fix belongs in context composition, and the project's own rule says which kind:
+   plumbing the runtime knows is stamped, not asked of the model. Recommended: the
+   executor appends a short roster block to each invocation's context - which other
+   agents are on this request and what each was asked for (their `reason`), and that a gap
+   is for what *this* agent could not establish, never for a sibling's part - recorded
+   verbatim in `context_passed` like the handoff. Offline-testable; one live re-run
+   (~$0.60 if it works) gives the before/after. The alternative (teach the loop to drop a
+   gap whose `suggested_agent` already answered this round) is a judgement call the loop
+   was designed not to make (decision #22).
+23. **A third live-only agent refusal joined item 20's two:** the Docs agent's report was
+   rejected for an extra field the model invented (`findings.coverage_answer_placeholder`,
+   `extra_forbidden`) on a round-1 re-delegation with a 5k-char context. Day 17's
+   validation-retry loop owns all three; the GitHub paraphrase refusal has now happened three
+   times in live runs (Day 14 attempt 1, then round 0 of Day 15 attempt 1 and round 1 of
+   attempt 2), each costing a whole agent run.
+24. **The selection check has no case shaped like the one that broke.**
+   `check_agent_selection.py`'s five cases never ask for precedent and a live diagnosis in
+   one query, which is why a wrong roster survived from Day 6 to Day 15 at 5/5. One more
+   case costs one planning call. Worth adding before the Day 19 eval set is drawn up.
+25. **Spend, measured (2026-09-18): $7.14** across every recorded live run (2.58M input /
+   198k output tokens, Sonnet 5, no caching), 7% of the $100 alert - a floor, since 16
+   early runs recorded no usage. **The Console figure has not been compared with it yet**;
+   that is a two-minute check only the account owner can do, and a Console number far
+   above the floor means unrecorded spend worth finding. Prompt caching (item 4) stays on
+   Day 19 by decision #27.
+
 ## 8. Where things are written down
 
 | Need | File |
@@ -521,8 +594,8 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24) |
-| Ten debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27) |
+| Eleven debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's) |
 | The routing case study, before and after | `docs/case-study-tool-routing.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |

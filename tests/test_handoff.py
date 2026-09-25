@@ -21,6 +21,7 @@ from aioc.contracts import (
     GitHubAgentResponse,
     IncidentAgentResponse,
 )
+from aioc.coordinator import handoff as handoff_module
 from aioc.coordinator.handoff import (
     HANDOFF_HEADER,
     MAX_DIGEST_CHARS,
@@ -327,3 +328,54 @@ def test_digest_lines_are_quotable_verbatim_by_the_deployment_agent():
         assert "\\n" not in line
         assert ledger.in_context(line.strip())
     assert isinstance(_github_response("req_x", "inv_gh"), GitHubAgentResponse)
+
+
+# -- Day 15: what the first four-agent run found ----------------------------------------------
+
+
+def _wide_docs_response() -> DocsAgentResponse:
+    """The shape that broke the first live four-agent synthesis: ten long supported claims
+    and eleven evidence refs, which is past the ceiling."""
+    docs = _example_responses()["docs"]
+    assert isinstance(docs, DocsAgentResponse)
+    claim = next(c for c in docs.findings.claims if c.supported)
+    claims = [
+        claim.model_copy(update={"id": f"claim_{i:02d}", "statement": f"claim {i} " + "x" * 400})
+        for i in range(MAX_ITEMS)
+    ]
+    evidence = [
+        docs.evidence[0].model_copy(update={"id": f"ev_doc{i:04d}"}) for i in range(MAX_ITEMS + 1)
+    ]
+    findings = docs.findings.model_copy(update={"claims": claims})
+    return docs.model_copy(update={"findings": findings, "evidence": evidence})
+
+
+def test_the_evidence_list_survives_the_ceiling(monkeypatch):
+    # The ids a reader may cite are the last thing in a digest, so they used to be the first
+    # thing the ceiling cut - and a synthesiser that cannot see the evidence ids cites
+    # whatever ids it can see. The body is cut instead; the ceiling still holds. (A lower
+    # ceiling here, so the fixture does not have to be as large as the live report was.)
+    ceiling = 2000
+    monkeypatch.setattr(handoff_module, "MAX_DIGEST_CHARS", ceiling)
+    docs = _wide_docs_response()
+    text = digest(docs)
+    marker = TRUNCATION_MARKER.format(limit=ceiling)
+    assert marker in text
+    assert len(text) <= ceiling + len("\n</handoff>")
+    assert f"evidence ({len(docs.evidence)}):" in text
+    for ref in docs.evidence[:MAX_ITEMS]:
+        assert f"  - {ref.id} " in text
+    assert text.index(marker) < text.index("evidence (")  # the cut is in the body
+    assert text.rstrip().endswith("</handoff>")
+
+
+def test_docs_claims_never_put_a_document_id_where_evidence_ids_go():
+    docs = _example_responses()["docs"]
+    assert isinstance(docs, DocsAgentResponse)
+    claim_lines = [ln for ln in digest(docs).splitlines() if ln.startswith("  - claim_")]
+    supported = [c for c in docs.findings.claims if c.supported]
+    assert claim_lines
+    for claim in supported:
+        (line,) = [ln for ln in claim_lines if ln.startswith(f"  - {claim.id} ")]
+        assert f"docs={claim.sources[0].document_id}" in line
+        assert "[" not in line.split(":", 1)[0]  # brackets mean evidence ids, everywhere

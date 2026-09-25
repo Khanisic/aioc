@@ -1,18 +1,24 @@
-# AIOC — Enterprise AI Operations Center
+# AIOC - Enterprise AI Operations Center
 
-A coordinator that dynamically routes operational questions to four deep subagents —
-**Incident, Docs, GitHub, Deployment** — each producing schema-validated,
+A coordinator that dynamically routes operational questions to four deep subagents -
+**Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 7.** The coordinator now **plans and delegates**: it selects agents
+> **Status: Day 15 of 30.** All four agents run live on one query. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
-> hands each one exactly the context it wrote into the plan, and assembles a contract
-> `CoordinatorResponse` - with honest `Gap`s, never fabricated responses, for the three
-> agents that do not exist yet. Two MCP tools run as real stdio servers
-> (`get_incident_timeline`, `correlate_events`), all four error classes return
-> distinctly, and chaos ground-truth signals are permission-gated at every tool.
-> The Docs agent and retrieval are next.
+> runs independent agents in parallel and dependent ones sequentially with a bounded
+> handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
+> synthesis that is grounded in code against the agents' evidence. Six contract-named MCP
+> tools run as real stdio servers with a four-class error taxonomy, and every response is
+> a schema-validated `CoordinatorResponse` with measured cost and a trace id.
+> HITL, the validation-retry loop, and the eval harness are next.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
+
+![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
+
+*The Day 15 checkpoint, replayed from the run's own transcript. A real fault is injected, the
+on-call suspects the last release, and four agents show it is not the cause: the PR touched
+tracing code only, the release diff is empty, and the latency originates downstream.*
 
 ---
 
@@ -26,7 +32,7 @@ confidence-scored output through custom MCP tools.
 | [`docs/guides/`](docs/guides/) | How-to guides: [running the tests](docs/guides/running-tests.md), [the incidents table](docs/guides/incidents-table.md) |
 | [`docs/interview-prep/`](docs/interview-prep/README.md) | War stories, decisions, and the measured numbers behind them |
 
-`docs/CONTRACTS.md` is frozen at `1.0.0`. Changing anything in it requires a written
+`docs/CONTRACTS.md` is frozen at `1.1.0` (one pre-authorized tool split on Day 14). Changing anything in it requires a written
 rationale recorded before the code changes, the superseded text struck through rather
 than deleted, a version bump, and a changelog row.
 
@@ -52,7 +58,7 @@ That checks the stack is *usable*: containers healthy, the `vector` extension
 installed, Redis answering, all three demo services exposing metrics, Prometheus
 actually scraping them, and the incident corpus seeded and covering every failure
 mode. The extension check matters because a plain `postgres` image starts perfectly
-happily and then fails much later, inside the retrieval code — and the coverage check
+happily and then fails much later, inside the retrieval code - and the coverage check
 matters because a failure mode with no seed rows cannot be scored by the eval at all.
 
 No `make` on Windows? Every recipe in the [`Makefile`](Makefile) is a single
@@ -89,6 +95,11 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy 
 # the sequential path: GitHub reads the PR, then Deployment gets GitHub's digest; since Day 14
 # also the refinement loop and the model-written synthesis (~8-15 calls)
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
+
+# all four agents on one query - the parallel and the sequential path in one request
+# (~12-20 calls, ~$1.10 measured); then what every recorded live run has cost (free)
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day15_integration.py --deploy --max-rounds 1
+uv run python scripts/cost_review.py
 
 # the routing case study: 20 queries per set, --dry-run is free; --variant v1_1 is the split
 uv run python scripts/check_tool_routing.py --dry-run
@@ -130,23 +141,23 @@ out. See that directory's README for the record schema.
 ```
 .claude/           rules, slash commands, skills, and the shared permission layer
 src/aioc/
-  contracts/       jointly owned — the executable form of docs/CONTRACTS.md
+  contracts/       jointly owned - the executable form of docs/CONTRACTS.md
   llm/             Claude API harness - messages, streaming, the tool_use loop
   coordinator/     planner (selection) + executor (delegation, handoff, refinement loop) + synthesis
   agents/          incident · docs · github · deployment
-  tools/           custom MCP servers — envelope, chaos policy gate, incident/ servers
+  tools/           custom MCP servers - envelope, chaos policy gate, incident/ servers
   memory/          redis (working) · postgres (episodic) · pgvector (semantic)
   observability/   prometheus reads (live) · Langfuse tracing (Day 9)
   hitl/            human-in-the-loop approval gate and audit log
 demo-app/          containerized services to break, plus chaos/ injection scripts
-infrastructure/    Kubernetes manifests — documentation, not a deployment path
+infrastructure/    Kubernetes manifests - documentation, not a deployment path
 evaluations/       eval sets and committed results
-scripts/           dev tooling — run logging, live API checks
+scripts/           dev tooling - run logging, live API checks
 test-results/      structured records of every run (gitignored; schema in its README)
 ```
 
 `src/aioc/contracts/` is the one package both layers import. Note that the
-MCP boundary is JSON Schema, not Pydantic — a tool server must not depend on the
+MCP boundary is JSON Schema, not Pydantic - a tool server must not depend on the
 reasoning layer's models. See §6 of the contract.
 
 ---
@@ -176,8 +187,8 @@ for why each piece sits where it does.
 
 | Domain | Weight | Implemented in | Design note |
 |---|---|---|---|
-| 1 — Agentic Architecture & Orchestration | 27% | — | — |
-| 2 — Tool Design & MCP Integration | 18% | — | — |
-| 3 — Claude Code Configuration & Workflows | 20% | — | — |
-| 4 — Prompt Engineering & Structured Output | 20% | — | — |
-| 5 — Context Management & Reliability | 15% | — | — |
+| 1 - Agentic Architecture & Orchestration | 27% | - | - |
+| 2 - Tool Design & MCP Integration | 18% | - | - |
+| 3 - Claude Code Configuration & Workflows | 20% | - | - |
+| 4 - Prompt Engineering & Structured Output | 20% | - | - |
+| 5 - Context Management & Reliability | 15% | - | - |

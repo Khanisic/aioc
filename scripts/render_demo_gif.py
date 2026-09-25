@@ -2,16 +2,20 @@
 # requires-python = ">=3.12"
 # dependencies = ["pillow>=10"]
 # ///
-"""Render a Day 10 demo transcript into the checkpoint GIF.
+"""Render a recorded demo transcript into a checkpoint GIF.
 
     uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>
     uv run scripts/render_demo_gif.py --run <run-dir> --out docs/assets/day10-demo.gif
 
+`--title` and `--command` set the window title and the command typed at the top of the
+replay; the defaults are Day 10's, and the Day 15 checkpoint GIF passes its own.
+
 Free - no API calls, no network. Input is the `transcript.json` artifact that
-`scripts/demo_day10.py` records (every printed line with its wall-clock offset); output is
-an animated terminal replay. It is the *real* transcript re-rendered, not a re-enactment:
-line content and order are untouched, and only the dead time is compressed (a 40s model
-call becomes a ~2s pause, because nobody watches a GIF buffer).
+`scripts/demo_day10.py` and `scripts/check_day15_integration.py` record (every printed line
+with its wall-clock offset); output is an animated terminal replay. It is the *real*
+transcript re-rendered, not a re-enactment: line content and order are untouched, and only
+the dead time is compressed (a 40s model call becomes a ~2s pause, because nobody watches a
+GIF buffer).
 
 Pillow is declared as PEP 723 inline script metadata, so `uv run` provisions it on the fly
 and the project's own dependency tree stays clean - this is a dev-tooling concern, not a
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -38,7 +43,6 @@ MIN_FRAME_MS = 90  # a line never flashes faster than this
 READ_MS_PER_CHAR = 6  # lines that printed in one burst still reveal at reading pace
 MAX_FRAME_MS = 2200  # and a 40s model call compresses to this
 END_HOLD_MS = 7000  # hold the finished screen long enough to read the answer
-
 BG = (13, 17, 23)
 BAR = (22, 27, 34)
 DEFAULT = (230, 237, 243)
@@ -49,19 +53,17 @@ YELLOW = (227, 179, 65)
 CYAN = (121, 192, 255)
 TITLE = (201, 209, 217)
 
+_DAY_HEADING = re.compile(r"Day \d+:")
+_STEP = re.compile(r"\[\d+/\d+\]")  # "[2/5] Injecting a real fault"
+
 
 def _color_for(line: str) -> tuple[int, int, int]:
     s = line.strip()
-    if line.startswith("===") or s.startswith("AIOC") or s.startswith("Day 10:"):
+    if line.startswith("===") or s.startswith("AIOC") or _DAY_HEADING.match(s):
         return BLUE
-    if (
-        s.startswith("[1/4]")
-        or s.startswith("[2/4]")
-        or s.startswith("[3/4]")
-        or s.startswith("[4/4]")
-    ):
+    if _STEP.match(s):
         return YELLOW
-    if s.startswith("selected"):
+    if s.startswith(("selected", "overlapped", "--- ")):
         return GREEN
     if s.startswith("skipped"):
         return DIM
@@ -69,7 +71,9 @@ def _color_for(line: str) -> tuple[int, int, int]:
         return BLUE
     if s.startswith("claim ["):
         return CYAN
-    if s.startswith(("intent", "failure_mode:", "affected:", "answer (", "status ", "trace ")):
+    if s.startswith(
+        ("intent", "failure_mode:", "affected:", "answer (", "status ", "trace ", "synthesis")
+    ):
         return YELLOW
     if line.startswith("    "):  # injector output and the metrics block
         return DIM
@@ -103,9 +107,15 @@ def _load_font() -> ImageFont.FreeTypeFont:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[4])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run", required=True, help="run directory holding transcript.json")
     parser.add_argument("--out", default="docs/assets/day10-demo.gif")
+    parser.add_argument("--title", default="AIOC - Day 10 demo", help="window title bar text")
+    parser.add_argument(
+        "--command",
+        default="uv run python scripts/demo_day10.py",
+        help="the command typed at the top of the replay",
+    )
     args = parser.parse_args(argv)
 
     transcript_path = Path(args.run) / "transcript.json"
@@ -121,9 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     height = PAD_TOP + ROWS * line_h + PAD_BOTTOM
 
     # The typed command opens the replay; everything after it is the recorded transcript.
-    rows: list[tuple[str, tuple[int, int, int]]] = [
-        ("$ uv run python scripts/demo_day10.py", GREEN)
-    ]
+    rows: list[tuple[str, tuple[int, int, int]]] = [(f"$ {args.command}", GREEN)]
     frames: list[Image.Image] = []
     durations: list[int] = []
 
@@ -133,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
         draw.rectangle((0, 0, width, PAD_TOP - 14), fill=BAR)
         for i, dot in enumerate(((255, 95, 86), (255, 189, 46), (39, 201, 63))):
             draw.ellipse((PAD_X + i * 22, 9, PAD_X + 12 + i * 22, 21), fill=dot)
-        draw.text((width // 2 - 90, 7), "AIOC - Day 10 demo", font=font, fill=TITLE)
+        title_w = int(draw.textlength(args.title, font=font))
+        draw.text(((width - title_w) // 2, 7), args.title, font=font, fill=TITLE)
         for row, (text, color) in enumerate(rows[-ROWS:]):
             draw.text((PAD_X, PAD_TOP + row * line_h), text, font=font, fill=color)
         frames.append(img)

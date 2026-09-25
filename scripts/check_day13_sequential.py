@@ -222,12 +222,22 @@ def _evaluate(resp: Any, timings: list[dict[str, Any]], pr: int) -> list[str]:
         complaints.append(
             f"refinement_rounds is {resp.refinement_rounds} but the deepest round is {rounds}"
         )
+    # The planner's block for an agent is what the plan (round 0) wrote for it, before any
+    # digest the executor appended. Taken from `by_agent` until Day 15, which is the *last*
+    # invocation that answered: once an agent was re-delegated in two rounds, round 1 was
+    # compared against round 2's block, refinement header and all, and a run that was right
+    # failed. An agent the plan skipped has no planner's block to start with.
+    planned_block = {
+        inv.agent: inv.context_passed.split(HANDOFF_HEADER)[0].strip()
+        for inv in resp.selected_agents
+        if inv.round == 0
+    }
     for inv in refined:
         header = REFINEMENT_HEADER.format(round=inv.round)
         if header not in inv.context_passed:
             complaints.append(f"{inv.invocation_id} (round {inv.round}) has no refinement block")
-        elif inv.agent in by_agent:
-            planner_block = by_agent[inv.agent].context_passed.split(HANDOFF_HEADER)[0].strip()
+        elif inv.agent in planned_block:
+            planner_block = planned_block[inv.agent]
             if not inv.context_passed.startswith(planner_block):
                 complaints.append(
                     f"{inv.invocation_id} does not start with the planner's block for "

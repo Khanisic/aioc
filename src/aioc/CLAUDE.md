@@ -33,6 +33,10 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   `handoff.py` (Day 13) is the sequential handoff: a bounded, plain-text digest of a dependency's
   response that the executor appends to the dependent's planner block at the moment the dependency
   returns, and records verbatim in that invocation's `context_passed`. Direct dependencies only.
+  The digest's evidence list is never what the ceiling cuts (Day 15): the synthesiser cites from
+  it, and in a digest a bracketed list always means evidence ids. The planner's agent roster
+  (`planner._AGENT_CAPABILITIES`) is a capability claim pinned by a test - keep it true when an
+  agent's tools change.
   The refinement loop (Day 14) lives in `executor.py` and reuses that composition: an open gap with
   a `suggested_agent` becomes a `round: 1+` invocation whose query is the `suggested_query`
   verbatim and whose context is the planner's block, the refinement block, and the raising

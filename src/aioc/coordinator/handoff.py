@@ -156,10 +156,16 @@ def digest(response: AgentResponse) -> str:
     else:  # pragma: no cover - the four findings types are the closed set today
         lines.extend(_generic(findings))
     lines.extend(_gaps(response))
-    lines.extend(_evidence(response))
-    # The body is bounded and the closing tag is appended afterwards, so a truncated digest
-    # is still a well-formed block with a visible marker rather than one that stops mid-line.
-    return _bounded("\n".join(lines)) + "\n</handoff>"
+    # The evidence list is kept out of the cut: it is the only place a reader learns which
+    # ids it may cite, and it used to be the tail the ceiling removed first. The Day 15 run
+    # is why - a ten-claim Docs digest lost nine of its eleven evidence refs, the
+    # synthesiser cited the document ids it could still see, and the grounding check
+    # (correctly) refused the synthesis. The body gives up the room instead.
+    tail = "\n".join(_evidence(response))
+    body = _bounded("\n".join(lines), MAX_DIGEST_CHARS - (len(tail) + 1 if tail else 0))
+    # The closing tag is appended afterwards, so a truncated digest is still a well-formed
+    # block with a visible marker rather than one that stops mid-line.
+    return (f"{body}\n{tail}" if tail else body) + "\n</handoff>"
 
 
 # ------------------------------------------------------------------------ per-agent bodies
@@ -246,8 +252,10 @@ def _docs(f: DocsFindings) -> list[str]:
     if supported:
         out.append(f"supported_claims ({len(supported)}):")
         for c in _capped(supported, out):
+            # `docs=`, not brackets: everywhere else in a digest a bracketed list is
+            # evidence ids, and a document id in that slot gets cited as one.
             docs = _joined(sorted({s.document_id for s in c.sources}))
-            out.append(f"  - {c.id} @{c.confidence:.2f} [{docs}]: {_text(c.statement, 200)}")
+            out.append(f"  - {c.id} @{c.confidence:.2f} docs={docs}: {_text(c.statement, 200)}")
     if unsupported:
         out.append(f"unsupported_claims ({len(unsupported)}):")
         for c in _capped(unsupported, out):
@@ -372,13 +380,15 @@ def _ts(value: datetime) -> str:
     return value.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _bounded(text: str) -> str:
-    """Cap the digest body, ending on a whole line and saying so - a cut that stops mid-line
-    would leave a half-fact the dependent could quote as if it were whole."""
-    if len(text) <= MAX_DIGEST_CHARS:
+def _bounded(text: str, limit: int) -> str:
+    """Cap the digest body at ``limit`` (the ceiling less the evidence list that follows it),
+    ending on a whole line and saying so - a cut that stops mid-line would leave a half-fact
+    the dependent could quote as if it were whole. The marker names the digest's ceiling,
+    which is what the whole block still honours."""
+    if len(text) <= limit:
         return text
     marker = TRUNCATION_MARKER.format(limit=MAX_DIGEST_CHARS)
-    budget = MAX_DIGEST_CHARS - len(marker) - 1
+    budget = limit - len(marker) - 1
     kept = text[:budget]
     cut = kept.rfind("\n")
     if cut > 0:
