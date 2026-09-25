@@ -407,3 +407,52 @@ The rationale was written in `docs/design-notes/contract-changes.md` before the 
 **Why keep the v1 module shipped.** The before must be re-runnable over the same wire as the after, or the numbers in `docs/case-study-tool-routing.md` are a memory rather than a measurement.
 
 **What I would watch.** The after came back 0/40 too, and the write-up says so; the levers that would produce a non-zero baseline (a cheaper router model, parts 1-3 written loosely) are named there and are one flag or one module away.
+
+## 25. A bounded digest decides what it may not lose, and the evidence ids are it
+
+**Context.** The handoff digest has a hard 4,000-character ceiling, cut on a line, announced by a marker.
+Until Day 15 the cut simply took the tail, and the tail is the evidence list.
+A ten-claim Docs report lost nine of its eleven evidence refs that way, and the model synthesis, reading claim lines that showed document ids in brackets, cited `doc_` ids; the grounding check refused the synthesis, correctly.
+
+**Decision.** The evidence list is rendered first and kept out of the cut; the findings and gaps above it are bounded to whatever the ceiling leaves.
+The ceiling itself did not move.
+Docs claim lines say `docs=doc_0005` rather than `[doc_0005]`, so that across every digest a bracketed list means evidence ids and nothing else.
+
+**Why not raise the ceiling.** The ceiling is what keeps a handoff at a few hundred tokens and a two-hop chain from snowballing; a larger one moves the cliff rather than removing it, and the next long report falls off it the same way.
+
+**Why not loosen the grounding check to accept document ids.** The contract says the coordinator's evidence resolves against the union of its subagents' `evidence[]`.
+A document id names a source, not the evidence record with the quote in it; accepting it would make the coordinator's citations weaker than its agents'.
+The check was right and the digest was misleading, so the digest changed.
+
+**What I would watch.** The evidence list is itself capped at ten with an honest `(+N more)`, so an eleventh evidence id still cannot be cited by a reader of the digest.
+That is a limit on what gets cited, never a wrong citation, which is the right way round.
+
+## 26. The planner's roster is a capability claim, so it gets a test
+
+**Context.** The coordinator knows its agents through one block of text in the planning prompt.
+On Day 15 that block said the Incident agent "reads the historical incident corpus" and described Docs as a runbook corpus; neither was true of the system as built, and the plan skipped Docs on a four-part question with a reason that quoted the sentence.
+
+**Decision.** The roster was rewritten from what the agents do today - Incident has no tools and reasons over the context it is handed; Docs answers from the corpus of past incidents and is the agent for precedent - and a test pins the load-bearing phrases.
+
+**Why a test for prompt text, when prompt text is explicitly not frozen.** Most of the prompt is instruction and may churn freely.
+The roster is different in kind: it is a statement of fact about other modules, and the coordinator's selection is only as right as it is.
+The test does not freeze the wording; it fails when the roster claims corpus access for an agent that has none, which is the drift that cost a live run.
+
+**What I would watch.** Day 15 found this because the scenario finally asked for precedent and diagnosis in one query.
+The five-case selection check would not have; it needs a case of that shape, at one planning call.
+
+## 27. The Day 15 cost review kept caching on Day 19 and named a different lever
+
+**Context.** Day 15's second track was the cost review against the $100 alert.
+The obvious move was prompt caching, carried in HANDOFF for weeks as an obvious win not yet taken.
+
+**Decision.** `scripts/cost_review.py` prices every recorded live run; measured spend is $7.14, 7% of the alert, and 80% of it is the two multi-round `respond()` checks.
+Caching stays on Day 19 where the plan put it, because Day 20 wants the cached-versus-uncached delta measured on the eval suite and that needs an uncached baseline first, and because at this spend the saving is cents per run.
+
+**The lever the review actually found.** In the passing four-agent run, the plan had answered every part of the question by 146.8 s.
+Each agent receives the whole multi-part query, so each raised resolvable gaps for the parts that were not its own, pointing at the sibling already answering them.
+The refinement loop re-delegated all four agents; that round was about half the bill, three of the four re-delegations were refused by the agents' own rules, and the run ended with 14 open gaps on a correct answer.
+The fix belongs in context composition - an agent told which parts of the question other invocations already own has no reason to raise a gap for them - and is recorded as HANDOFF sec 7 item 22 rather than rushed into the integration day.
+
+**What I would watch.** Both cost estimates given before the Day 15 runs were low by 2-3x.
+An estimate for a `respond()` run has to be made from the last measured run of the same shape, not from the size of the inputs.

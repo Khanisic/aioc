@@ -94,6 +94,8 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `check_day11_github.py` | ~3-5 | The GitHub agent reads a real PR over the MCP wire; every PR, commit, and excerpt traces back to a tool reply |
 | `check_day12_deployment.py` | ~3-5 | The Deployment agent diffs two real refs of this repository and reads the live rollout over the wire; `--deploy` recreates the demo containers at the release under test first (needs the stack) |
 | `check_day13_sequential.py` | ~8-15 | The sequential path end to end through `respond()`: the coordinator plans Deployment after GitHub on its own, the executor hands GitHub's digest to Deployment, and the recorded `context_passed` shows it; since Day 14 the refinement loop re-delegates the gaps the agents leave (`--max-rounds`, default 2; `0` reproduces the Day 13 form) and the model writes the synthesis (`--deterministic-synthesis` skips that call); `--deploy` recreates the demo at the PR's head commit first (needs the stack and the GitHub token) |
+| `check_day15_integration.py` | ~12-20 (**~$1.10 measured**, 343-348k input tokens) | The whole system on one query: all four agents, the parallel *and* the sequential path in one request. Deploys the demo at PR #11's merge commit (`--deploy`), injects a real fault, builds the situation from live Prometheus metrics, and asserts all four agents are planned and answer, that a parallel group of two or more overlapped in measured wall-clock time, and everything `check_day13_sequential.py` asserts about the sequential half; `--max-rounds` caps the refinement loop, `--deterministic-synthesis` skips the synthesis call; resets chaos itself and records a transcript `render_demo_gif.py` can replay |
+| `cost_review.py` | **0** | Free: prices every recorded live run by check and by day against the spend alert (`--alert`, `--since`, `--json`); a floor, and it says what it cannot see |
 | `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between the two overlapping tools over 20 plain and 20 adversarially worded queries; `--variant v1` lists the `1.0.0` `analyze_*` server (the baseline), `--variant v1_1` the `1.1.0` `search_*` server (the split), the same ground truth mapped onto each server's names; prints and records the misrouting rate per set with the query-set hash, so before and after compare like with like; `--model` swaps the router |
 
 ```bash
@@ -139,6 +141,13 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy
 # context, then the refinement loop and the synthesis. ~8-15 calls. Needs the stack and the
 # token; --deploy recreates the demo at the PR head; --max-rounds 0 is the Day 13 form.
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
+
+# All four agents on one query: Incident + Docs + GitHub in parallel, Deployment after GitHub,
+# the loop, the synthesis. ~12-20 calls, ~$1.10 measured. Needs the stack and the token.
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day15_integration.py --deploy --max-rounds 1
+
+# What every recorded live run has cost, by check and by day. Free.
+uv run python scripts/cost_review.py
 
 # The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
 # --variant v1 is the 1.0.0 baseline, --variant v1_1 the 1.1.0 split.

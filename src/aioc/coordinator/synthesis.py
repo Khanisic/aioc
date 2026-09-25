@@ -227,7 +227,8 @@ Rules, enforced after you answer:
 1. Every statement in `synthesis` and in `answer` comes from a handoff block. If the
    blocks disagree, say so and say which is better evidenced; do not average them.
 2. `evidence` cites ids from the blocks' `evidence` lists only. An id that is not listed
-   does not exist and citing it rejects the whole synthesis.
+   does not exist and citing it rejects the whole synthesis. Document, claim, incident,
+   action, and gap ids are not evidence ids, however relevant the thing they name.
 3. Confidence follows these bands and is never higher than the reports it rests on:
 
 {_CONFIDENCE_BANDS}

@@ -139,11 +139,11 @@ Coverage is deliberate: the Day 19 eval scores `failure_mode` against ground tru
 
 | | |
 |---|---|
-| Total tests | **514** (501 offline + 13 `integration`-marked) |
-| Runtime | ~20s with the stack up on the Day 13 machine (the Day 11-13 MCP-wire tests launch real server subprocesses, most of it) |
+| Total tests | **581** (568 offline + 13 `integration`-marked), as of Day 15 |
+| Runtime | ~25-45s with the stack up (the Day 11-14 MCP-wire tests launch real server subprocesses, most of it) |
 | Live API calls needed | **0** |
 
-Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 29 coordinator, 29 executor, 14 handoff digest, 28 timeline tool, 30 correlate tool, 69 analyze tools (logs, events, the compose reader, pattern maths), 18 docs agent, 27 retrieval, 10 tracing, 20 github agent, 41 github tool, 11 MCP toolset (real stdio wire, credentials blanked so no network), 25 deployment agent, 73 deployment tool.
+Split: 26 contract, 13 LLM harness, 19 incident agent, 4 chaos mapping, 13 seed corpus, 15 Prometheus context, 30 coordinator, 29 executor, 16 refinement loop, 17 synthesis, 16 handoff digest, 28 timeline tool, 30 correlate tool, 69 analyze tools (logs, events, the compose reader, pattern maths), 16 search tools (the `1.1.0` split), 18 docs agent, 27 retrieval, 10 tracing, 20 github agent, 41 github tool, 13 MCP toolset (real stdio wire, credentials blanked so no network), 25 deployment agent, 73 deployment tool, 13 Day 15 dev tooling (the four-agent check's evaluators, the cost review).
 
 Everything model-facing is driven by scripted fake clients. The four live-checking scripts are separate and opt-in, because a suite that costs money per run stops being run.
 
@@ -351,13 +351,81 @@ Things to say plainly:
 
 ---
 
+## The Day 15 four-agent run, live
+
+`scripts/check_day15_integration.py --deploy`, Sonnet, 2026-09-18.
+`downstream_latency` injected (payments-api +800 ms), the demo deployed at PR #11's merge commit `c729c72`, the previous release its first parent `884b0b6`.
+The query asks what is failing, what past incidents say, what PR #11 changed, and whether the release that shipped it changed `checkout-api`'s configuration or images.
+The release's identity is reachable only through the PR, as on Day 13.
+
+| Attempt | Outcome | Cause | Cost |
+|---|---|---|---|
+| 1 (cap 2) | FAIL: the plan did not select Docs; synthesis fell back; one evaluator complaint | the planner's roster said the Incident agent "reads the historical incident corpus", so the plan skipped Docs with a reason quoting it (the loop then ran Docs in round 1 off Incident's gap); round-0 GitHub refused its own report (paraphrased excerpt) so round-0 Deployment never ran; the model synthesis cited `doc_0005` / `doc_0009` / `doc_0017` and the grounding check refused it - the Docs digest had lost 9 of its 11 evidence refs to the ceiling and showed document ids in the evidence-id slot; the evaluator compared a round-1 re-delegation with round 2's context | 348.0k in / 38.5k out, 265.5 s |
+| replay | grounded | the model synthesis re-run over attempt 1's five recorded reports after the digest fix: answer @ 0.62 citing 25 real evidence ids across all four agents | 8.9k in / 2.3k out, 1 call |
+| 2 (cap 1) | **PASS** | roster corrected, evidence list kept out of the cut, claim lines say `docs=`, evaluator reads the planner's block from round 0 | 342.9k in / 47.5k out, 279.0 s |
+
+Attempt 2, invocation by invocation:
+
+| Round | Invocation | Mode | Context | Span | Result |
+|---|---|---|---|---|---|
+| 0 | Incident | parallel | 1,108 chars | 0.0 -> 22.9 s | `partial` @ 0.45, no tools; latency propagating from payments-api; 4 gaps |
+| 0 | Docs | parallel | 586 chars | 0.0 -> 33.5 s | `partial` @ 0.50, `search_corpus`; two precedents (inc_0004, inc_0017); 3 gaps |
+| 0 | GitHub | parallel | 439 chars | 0.0 -> 78.5 s | `partial` @ 0.55, `get_pull_request` + 2x `list_commits`; PR #11 touches tracing only; names the merge commit; 3 gaps |
+| 0 | Deployment | sequential after GitHub | 4,118 chars (planner + GitHub digest) | 78.5 -> 146.8 s | `partial` @ 0.60, `diff_release` + `check_rollout_health`; no config, image, or manifest change; rollout `degraded`; 3 gaps |
+| 1 | GitHub | sequential | 9,038 chars | 146.9 -> 186.5 s | refused by the agent's grounding: a paraphrased excerpt |
+| 1 | Deployment | sequential | 16,932 chars | 146.9 -> 240.1 s | refused by the agent's grounding: `from_version` not returned by a tool (null baseline) |
+| 1 | Docs | sequential | 5,233 chars | 146.9 -> 191.1 s | refused by report validation: an extra field the model invented |
+| 1 | Incident | sequential | 18,429 chars (four digests) | 146.9 -> 189.9 s | `partial` @ 0.50; rules PR #11 out using GitHub's and Deployment's findings |
+
+| | |
+|---|---|
+| Plan | `mixed` @ 0.90; all four selected, nothing skipped - correct for a query with four parts |
+| Parallel path | three overlapping pairs: Incident + Docs, Incident + GitHub, Docs + GitHub |
+| Sequential path | Deployment started 0.0 s after GitHub ended, GitHub's digest after the planner's block |
+| Synthesis | model-written; answer @ 0.60 citing 13 evidence ids; names the open gaps and the three failed re-delegations |
+| Status | `partial`, 14 unresolved gaps |
+| Trace | `e4619ab3810b99b8da538764c599ed7e` (attempt 1: `c0ca4148f190838cc44cce2a06d19f75`) |
+
+Things to say plainly:
+
+- **The answer was right, and it contradicted the premise.** The on-call suspected the release. Three agents independently said no: the PR touches tracing code only, the release diff is empty, and the metrics put the slow origin in payments-api. The check asserts the orchestration, never the conclusion, so this is the system working rather than the scenario being steered.
+- **The small PR did what it was chosen for, and the total did not move.** PR #11's read is ~1.1k tokens against PR #15's ~22k, the release diff ~0.4k against ~7.4k. The run still cost 343k input tokens, the same as Day 14's two-agent run, because there are now four agents and a refinement round that re-ran all four.
+- **Round 1 was about half the bill and closed almost nothing.** The plan had answered every part of the question by 146.8 s. Each agent receives the whole four-part query, so each raised gaps for the parts that were not its own, pointing at the sibling that was already answering them. The loop did what it is built to do with a resolvable gap and re-delegated all four agents; three were refused by their own rules (two are HANDOFF §7 item 20's, the third is new) and one answered. 14 open gaps on a correct answer is noise, and it is the next cost lever (HANDOFF §7 item 22).
+- **Both estimates given before the runs were low**, and the record should say so: $0.15-0.40 quoted for attempt 1 (actual ~$1.08) and $0.40-0.90 for attempt 2 (actual ~$1.16). The small PR was priced in; the refinement fan-out and 38-47k output tokens were not.
+
+---
+
+## The Day 15 cost review
+
+`uv run python scripts/cost_review.py` (free; reads `test-results/`), 2026-09-18, Sonnet 5 at $2 / $10 per million tokens, no caching on any recorded run.
+
+| Check | Runs | Unmeasured | Input tokens | Output tokens | USD |
+|---|---|---|---|---|---|
+| `day13-sequential` (Days 13-14) | 5 | - | 1,390,782 | 70,497 | 3.49 |
+| `day15-integration` | 2 | - | 690,938 | 85,931 | 2.24 |
+| `day11-github` | 9 | 7 | 146,627 | 10,203 | 0.40 |
+| `tool-routing-v1_1` | 1 | - | 125,879 | 4,997 | 0.30 |
+| `tool-routing-v1` | 2 | - | 114,639 | 4,952 | 0.28 |
+| `day10-demo` | 2 | - | 32,754 | 12,377 | 0.19 |
+| `day12-deployment` | 1 | - | 62,655 | 5,212 | 0.18 |
+| `day7-delegation` | 2 | 1 | 12,209 | 4,149 | 0.07 |
+| four early checks | 8 | 8 | - | - | - |
+| **Total (measured)** | **32** | **16** | **2,576,483** | **198,318** | **7.14** |
+
+- **7.1% of the $100 alert, as a floor.** Sixteen runs recorded no usage: the Days 4-7 checks predate the `Usage` seam, and seven Day 11 runs died on the revoked key before a first response. Ad-hoc calls (the two one-call synthesis replays) and Voyage are not in it. The Console is the bill; this is the breakdown the Console does not give.
+- **80% of measured spend is two checks**, and both are the multi-round `respond()` path. A single-agent check is $0.07-0.20; a full request with the loop on is ~$0.70-1.20.
+- **Prompt caching stays on Day 19.** At this spend the saving is cents per run, and Day 20 wants the cached-versus-uncached delta measured on the eval suite, which needs an uncached baseline first. `cost_review.py` prices every input token at the full rate and says so; the run records need the cache counters when caching lands.
+- **The lever Day 15 found is not in the token price at all**: the refinement round that re-asks four agents for work their siblings already did.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
 
 - **No eval harness.** Accuracy, hallucination rate, and tool-success rate are Day 19. The Day 5 checkpoint is a single-case preview of it.
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
-- **No cost/latency aggregate.** Langfuse now traces every request (Day 9), and each response carries measured cost - but nothing aggregates across requests yet.
+- **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
 - **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
 - **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.

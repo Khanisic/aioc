@@ -63,13 +63,15 @@ ALL_AGENTS: tuple[AgentName, ...] = (
 # instruction and as the reason text the model has to justify against, so keeping the two in
 # one place is what stops the prompt from claiming a capability the agent does not have.
 _AGENT_CAPABILITIES = """\
-- `incident`: diagnoses live operational problems from metrics, logs, and events. Failure
-  modes, root cause, severity, blast radius, remediation. Reads Prometheus and the historical
-  incident corpus. Use it when something is broken or degraded now, or when the query asks
-  why a system behaved a certain way.
-- `docs`: answers from the retrieved runbook and documentation corpus, citing every claim.
-  Use it for "how do we...", "what is the procedure for...", policy, and ownership questions.
-  It cannot observe live systems.
+- `incident`: diagnoses live operational problems from the observations you hand it in its
+  context (metrics, topology, on-call notes). Failure modes, root cause, severity, blast
+  radius, remediation. Use it when something is broken or degraded now, or when the query
+  asks why a system behaved a certain way. It has no tools: it cannot search past incidents
+  or read anything you did not put in its context.
+- `docs`: answers from the retrieved corpus of past incidents - what happened before, the
+  root causes found, how each was resolved - citing every claim with a verbatim quote. Use
+  it for precedent ("has this happened before", "what did we do last time"), "how do we...",
+  and "what is the procedure for..." questions. It cannot observe live systems.
 - `github`: reads repositories, pull requests, commits, and diffs. Use it when the query
   concerns a code change - what shipped, what a PR does, which commit introduced something.
   It cannot see runtime behaviour.
