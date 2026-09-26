@@ -73,6 +73,18 @@ closed; the new response's own gaps take its place. ``resolvable: false`` is hon
 without exception, and an agent that is not registered is never retried. Every round is
 another full agent run, so the cap defaults low and the executor never guesses at cost.
 
+**Every planned agent is told who else is on the request (Day 16).** Each agent receives
+the whole user query, so on a multi-part question each one saw parts that were another
+agent's and reported them as resolvable gaps pointing at that sibling - and the loop, doing
+exactly what it is for, spent a full round of four agents re-asking for work the plan had
+already done (the Day 15 live run: about half the request's cost, and a correct answer
+ending `partial`). Which agents are on the request, and why each was selected, is plumbing
+the coordinator already holds, so the executor states it: `handoff.roster_block` follows
+the planner's block in every context composed for a planned agent, and is recorded
+verbatim with it. The alternative - the loop dropping a gap whose suggested agent already
+answered - would make the loop judge a gap's worth, which it was deliberately built not to
+do; the fix belongs where the gap is raised.
+
 **Synthesis is a seam with a deterministic fallback (Day 14).** `aioc.coordinator.synthesis`
 holds both forms. The executor defaults to the deterministic one (adopt the
 highest-confidence report and cite its own evidence ids, so the coordinator never mints an
@@ -108,7 +120,13 @@ from aioc.contracts import (
 from aioc.llm import Usage
 from aioc.observability.tracing import NullTracer, RequestTrace, Tracer
 
-from .handoff import compose_dependent_context, refinement_block, refinement_query
+from .handoff import (
+    compose_dependent_context,
+    refinement_block,
+    refinement_query,
+    roster_block,
+    with_roster,
+)
 from .planner import Coordinator, SelectionPlan, utcnow
 from .synthesis import (
     Synthesis,
@@ -397,10 +415,11 @@ class Executor:
             )
 
         run = _Run(query=query, request_id=request_id, trace=trace, usage=usage)
-        # The plan's invocations, in plan order, before anything runs: a parallel one stays
-        # the plan's verbatim; a sequential one is replaced by its composed form when it
-        # runs (CONTRACTS.md sec 5: context_passed is the literal block embedded in the
-        # subagent's prompt - not the block as first planned).
+        # The plan's invocations, in plan order, before anything runs. Each is replaced by
+        # its composed form when it runs - the roster for every planned agent with siblings,
+        # plus the handoff for a sequential one (CONTRACTS.md sec 5: context_passed is the
+        # literal block embedded in the subagent's prompt - not the block as first planned).
+        # One that never runs (no runner, an unmet dependency) keeps the planner's block.
         for inv in plan.selected_agents:
             run.executed[inv.invocation_id] = inv
         run.gaps.extend(_OpenGap(g, None) for g in plan.gaps)
@@ -409,7 +428,7 @@ class Executor:
         rounds = self._refine(plan, run)
         answer, synthesis = self._synthesise(plan, run, rounds)
         unresolved = run.unresolved
-        status = _status(run, unresolved)
+        status = _status(run, unresolved, answer)
 
         response = CoordinatorResponse(
             request_id=request_id,
@@ -450,7 +469,8 @@ class Executor:
             if runner is None:
                 run.note_execution_gap(_agent_missing_gap(inv), inv.invocation_id)
             else:
-                group.append((inv, runner, run.query))
+                composed = inv.model_copy(update={"context_passed": _planned_context(inv, plan)})
+                group.append((composed, runner, run.query))
         for outcome in self._run_group(group, run):
             run.settle(outcome)
 
@@ -475,7 +495,7 @@ class Executor:
                 run.note_execution_gap(_dependency_unmet_gap(inv, unmet), inv.invocation_id)
                 continue
             handed_off = compose_dependent_context(
-                inv.context_passed,
+                _planned_context(inv, plan),
                 [(run.executed[dep], run.by_invocation[dep]) for dep in inv.depends_on],
             )
             composed = inv.model_copy(update={"context_passed": handed_off})
@@ -550,9 +570,8 @@ class Executor:
             for og in open_gaps
             if og.source is not None and og.source in run.by_invocation
         }
-        planner_block = next(
-            (inv.context_passed for inv in plan.selected_agents if inv.agent is agent), None
-        )
+        planned = next((inv for inv in plan.selected_agents if inv.agent is agent), None)
+        planner_block = _planned_context(planned, plan) if planned is not None else None
         head = refinement_block(round_number, gaps, raised_by)
         if planner_block:
             head = f"{planner_block.rstrip()}\n\n{head}"
@@ -776,6 +795,13 @@ def respond(
     return response
 
 
+def _planned_context(inv: AgentInvocation, plan: SelectionPlan) -> str:
+    """The context every run of a planned agent starts from: the planner's block, then the
+    roster of its siblings on this request (`handoff.roster_block`). Deterministic in the
+    plan, so round 0 and every refinement round open with the same text."""
+    return with_roster(inv.context_passed, roster_block(inv.agent, plan.selected_agents))
+
+
 def _describe_plan(plan: SelectionPlan) -> str:
     selected = ", ".join(inv.agent.value for inv in plan.selected_agents) or "none"
     skipped = ", ".join(s.agent.value for s in plan.skipped_agents) or "none"
@@ -879,20 +905,25 @@ def _invocation_failed_gap(inv: AgentInvocation, query: str, exc: Exception) -> 
 # ------------------------------------------------------------------------------- status
 
 
-def _status(run: _Run, unresolved: list[Gap]) -> ResponseStatus:
+def _status(run: _Run, unresolved: list[Gap], answer: Assessment[str]) -> ResponseStatus:
     """Honest roll-up: `complete` only when nothing is open and each agent's latest report
     is itself complete. An invocation that did not run is open through its execution gap
     (agent missing, dependency unmet, or failed), so "everything ran" is already part of
     "nothing is open" - unless a refinement round retried the failure and the retry
     answered, which consumes that gap. A refinement round can likewise close the gap that
     made an earlier report `partial`; the earlier report stays in the response, but the
-    run is judged on where each agent ended up."""
+    run is judged on where each agent ended up. And a run with no answer is not complete,
+    however clean its agents were (a model synthesis may honestly return a null answer)."""
     responses = run.responses
     if not responses:
         return ResponseStatus.ERROR if run.any_failure else ResponseStatus.INSUFFICIENT_EVIDENCE
     latest: dict[AgentName, AgentResponse] = {}
     for response in responses:
         latest[response.agent] = response
-    if not unresolved and all(r.status is ResponseStatus.COMPLETE for r in latest.values()):
+    if (
+        answer.value is not None
+        and not unresolved
+        and all(r.status is ResponseStatus.COMPLETE for r in latest.values())
+    ):
         return ResponseStatus.COMPLETE
     return ResponseStatus.PARTIAL

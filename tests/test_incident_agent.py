@@ -8,6 +8,7 @@ not the model's judgment (that is the Day 19 eval harness's job).
 
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -398,3 +399,33 @@ def test_schema_guidance_fails_loudly_when_a_contract_field_is_renamed():
     # rule a model depends on. It must break at import instead.
     with pytest.raises(RuntimeError, match="out of sync"):
         _apply_guidance({"properties": {}, "$defs": {}})
+
+
+def test_diagnose_stamps_approval_on_an_unflagged_production_write():
+    """Day 16, sec 4.1's semantic half: a low-risk restart the model left unflagged is
+    still a production write, and the runtime says so - upward only, so a read-only
+    action the model chose to gate stays gated."""
+    payload = copy.deepcopy(_STRUCTURED_PAYLOAD)
+    base = payload["findings"]["recommended_actions"][0]
+    payload["findings"]["recommended_actions"] = [
+        {**base, "id": "act_w", "risk": "low", "requires_approval": False},
+        {
+            **base,
+            "id": "act_r",
+            "action": "Watch payments-api resident memory for 15 minutes.",
+            "risk": "low",
+            "requires_approval": True,
+        },
+        {
+            **base,
+            "id": "act_q",
+            "action": "Check the payments-api heap dashboard.",
+            "risk": "low",
+            "requires_approval": False,
+        },
+    ]
+    agent, _ = _agent([_tool_use_message(payload)])
+    resp = agent.diagnose("Why is payments-api failing?", context=_CONTEXT)
+
+    flags = {a.id: a.requires_approval for a in resp.findings.recommended_actions}
+    assert flags == {"act_w": True, "act_r": True, "act_q": False}

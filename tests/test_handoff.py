@@ -15,6 +15,7 @@ from pydantic import TypeAdapter
 
 from aioc.contracts import (
     AgentInvocation,
+    AgentName,
     AnyAgentResponse,
     DeploymentAgentResponse,
     DocsAgentResponse,
@@ -26,9 +27,14 @@ from aioc.coordinator.handoff import (
     HANDOFF_HEADER,
     MAX_DIGEST_CHARS,
     MAX_ITEMS,
+    MAX_TEXT,
+    ROSTER_HEADER,
+    ROSTER_RULE,
     TRUNCATION_MARKER,
     compose_dependent_context,
     digest,
+    roster_block,
+    with_roster,
 )
 from tests.test_contract import _worked_example
 from tests.test_executor import _github_response
@@ -305,6 +311,49 @@ def test_compose_with_two_dependencies_keeps_depends_on_order():
 
 def test_compose_with_nothing_to_hand_off_returns_the_planner_block_unchanged():
     assert compose_dependent_context("planner block", []) == "planner block"
+
+
+# ---------------------------------------------------------------- the roster (Day 16)
+
+
+def _planned(agent: str, reason: str) -> AgentInvocation:
+    return _invocation(f"inv_{agent}").model_copy(
+        update={"agent": AgentName(agent), "reason": reason}
+    )
+
+
+def test_roster_lists_every_sibling_with_its_reason_then_the_rule():
+    planned = [
+        _planned("incident", "diagnose the live spike"),
+        _planned("docs", "find precedent in past incidents"),
+        _planned("github", "read PR 11"),
+    ]
+    block = roster_block(AgentName.DOCS, planned)
+    assert block is not None
+    lines = block.splitlines()
+    assert lines[0] == ROSTER_HEADER
+    assert lines[1:3] == ["- incident: diagnose the live spike", "- github: read PR 11"]
+    assert lines[-1] == ROSTER_RULE
+    assert "- docs:" not in block
+
+
+def test_roster_is_none_for_an_agent_alone_on_the_request():
+    assert roster_block(AgentName.INCIDENT, [_planned("incident", "diagnose")]) is None
+    assert with_roster("planner block", None) == "planner block"
+
+
+def test_roster_clips_a_long_reason():
+    block = roster_block(
+        AgentName.INCIDENT, [_planned("incident", "x"), _planned("docs", "y" * (MAX_TEXT * 3))]
+    )
+    assert block is not None
+    (docs_line,) = [ln for ln in block.splitlines() if ln.startswith("- docs:")]
+    assert len(docs_line) < MAX_TEXT + 20
+
+
+def test_with_roster_appends_after_the_planner_block():
+    composed = with_roster("planner block\n", "ROSTER")
+    assert composed == "planner block\n\nROSTER"
 
 
 def test_digest_lines_are_quotable_verbatim_by_the_deployment_agent():

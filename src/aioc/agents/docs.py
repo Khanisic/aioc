@@ -137,10 +137,10 @@ tool - pass them directly; do not nest them inside a wrapper object.
 Rules validated after you answer - a violation rejects the whole report:
 1. Every `document_id` you cite must be one of the retrieved documents. Never invent one.
 2. Every `quote` and evidence `excerpt` must appear verbatim in the retrieved text.
-3. A claim with no sources must have `supported: false`, and unsupported claims must not
-   shape `answer.value`.
-4. Every sub-question you list as `unanswered` requires a gap whose `blocks_field` is
-   `findings.coverage.unanswered`.
+3. A claim with no sources must have `supported: false`, and an unsupported claim's
+   statement must not appear in `answer.value`.
+4. Every sub-question you list as `unanswered` requires its own gap whose `blocks_field` is
+   `findings.coverage.unanswered` - one gap per unanswered entry, never one for several.
 5. Any `*_detail` field must be null unless its partner field is exactly `other`."""
 
 _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
@@ -160,8 +160,8 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "here. Cite nothing you cannot quote."
         ),
         "gaps": (
-            "What the corpus could not establish. Required for every unanswered "
-            "sub-question - set that gap's `blocks_field` to `findings.coverage.unanswered`."
+            "What the corpus could not establish. One gap per unanswered sub-question, "
+            "each with `blocks_field` set to `findings.coverage.unanswered`."
         ),
         "overall_confidence": "Your confidence in the report as a whole, on the band table.",
     },
@@ -180,8 +180,8 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
         "sub_questions": "The query decomposed into the distinct questions it contains.",
         "answered": "The subset of `sub_questions` the documents answer.",
         "unanswered": (
-            "The subset the documents do not answer. Each entry here requires a matching "
-            "gap. `answered` and `unanswered` together must exactly cover `sub_questions`."
+            "The subset the documents do not answer. Each entry here requires its own "
+            "matching gap. `answered` and `unanswered` together must exactly cover `sub_questions`."
         ),
     },
     "Assessment_str_": {
@@ -228,7 +228,15 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "True only if another agent or more documents could close this gap. False "
             "stops the coordinator's refinement loop, so set it honestly."
         ),
-        "suggested_query": "The question to ask next, when `resolvable` is true.",
+        "suggested_agent": (
+            "The agent that could close this gap (`incident`, `docs`, `github`, "
+            "`deployment`), or null. Not an agent already on this request for the part of "
+            "the query it was asked to answer - that part is its own, not a gap in yours."
+        ),
+        "suggested_query": (
+            "The exact question to put to `suggested_agent`. Required whenever "
+            "`suggested_agent` is set; null when it is null."
+        ),
     },
 }
 
@@ -252,8 +260,8 @@ Report your findings by calling the `{EMIT_TOOL_NAME}` tool exactly once. Do not
 prose outside the tool call. Fill its fields as follows:
 
 - Decompose the query into `coverage.sub_questions` and classify every one as `answered`
-  or `unanswered`. Every unanswered sub-question REQUIRES a gap whose `blocks_field` is
-  `findings.coverage.unanswered`.
+  or `unanswered`. Every unanswered sub-question REQUIRES its own gap (one per entry)
+  whose `blocks_field` is `findings.coverage.unanswered`.
 - State what the documents establish as `claims` - one atomic assertion each, every one
   citing the retrieved documents that state it, with the supporting passage quoted
   VERBATIM. A claim you cannot source gets `supported: false` and an empty `sources` list.

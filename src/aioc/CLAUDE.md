@@ -36,7 +36,8 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   The digest's evidence list is never what the ceiling cuts (Day 15): the synthesiser cites from
   it, and in a digest a bracketed list always means evidence ids. The planner's agent roster
   (`planner._AGENT_CAPABILITIES`) is a capability claim pinned by a test - keep it true when an
-  agent's tools change.
+  agent's tools change. Every planned invocation's context also carries a roster of its siblings
+  (`handoff.roster_block`, Day 16), so an agent does not raise gaps for another agent's part.
   The refinement loop (Day 14) lives in `executor.py` and reuses that composition: an open gap with
   a `suggested_agent` becomes a `round: 1+` invocation whose query is the `suggested_query`
   verbatim and whose context is the planner's block, the refinement block, and the raising
@@ -52,7 +53,11 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   the module is the routing case study's baseline. `incident/search_server.py` (Day 14) is the
   `1.1.0` split: the same tools as `search_container_logs` / `search_recorded_events`, the v1
   implementation under new names, and a part 4 that names the alternative.
-- `memory/`, `observability/`, `hitl/` - Redis/Postgres/pgvector memory tiers, Langfuse tracing, and
-  the human-in-the-loop approval gate (later phases).
+- `hitl/` - the human-in-the-loop approval gate (Day 16). `policy.py` is the contract's approval rule as
+  code (a production-write classifier ORed with the agent's flag and the risk rule; the Incident runtime
+  stamps `requires_approval` from it, upward only). `gate.py` decides every recommendation in each
+  agent's latest report and returns an `ApprovalDecision` record for each, fail-closed (`DenyAll` by
+  default). The records sit alongside the frozen `CoordinatorResponse`, never inside it.
+- `memory/`, `observability/` - Redis/Postgres/pgvector memory tiers (later phases) and Langfuse tracing.
 
 Agents and the coordinator import from `aioc.contracts` and build on `aioc.llm`. Tool servers do neither.

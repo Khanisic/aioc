@@ -4,6 +4,8 @@ Carries the Domain 5 provenance shore-up: claim -> source mapping and coverage-g
 reporting.
 """
 
+import re
+
 from pydantic import Field, model_validator
 
 from ._common import StrictModel
@@ -23,8 +25,8 @@ class Claim(StrictModel):
     """One atomic assertion, individually sourced.
 
     Invariant: a claim with no sources cannot be ``supported``. Unsupported claims are
-    reported so the gap is visible, not so they can be used - the envelope validator keeps
-    them out of ``answer.value``.
+    reported so the gap is visible, not so they can be used - `DocsFindings` keeps them out
+    of ``answer.value``.
     """
 
     id: str
@@ -65,7 +67,33 @@ class Coverage(StrictModel):
         return self
 
 
+def _normalised(text: str) -> str:
+    """Case-folded, whitespace-collapsed, trailing punctuation dropped - so a statement
+    reused in the answer with a changed capital or a lost full stop is still recognised."""
+    return re.sub(r"\s+", " ", text).strip().rstrip(".;:!").casefold()
+
+
 class DocsFindings(StrictModel):
     answer: Assessment[str]  # synthesized from supported claims only
     claims: list[Claim] = Field(default_factory=list)
     coverage: Coverage
+
+    @model_validator(mode="after")
+    def _check(self) -> "DocsFindings":
+        # Sec 4.2: supported == false claims must not appear in answer.value. Checked the
+        # one way that can be checked mechanically - the claim's statement, normalised,
+        # inside the normalised answer. A paraphrase of an unsupported claim is beyond any
+        # validator; this catches the claim that was reported unsupported and then used
+        # word for word anyway.
+        if self.answer.value is None:
+            return self
+        answer = _normalised(self.answer.value)
+        for claim in self.claims:
+            statement = _normalised(claim.statement)
+            if not claim.supported and statement and statement in answer:
+                raise ValueError(
+                    f"unsupported claim {claim.id} appears in answer.value; an unsupported "
+                    "claim is reported so the gap is visible, not so it can be used "
+                    "(CONTRACTS.md sec 4.2)"
+                )
+        return self

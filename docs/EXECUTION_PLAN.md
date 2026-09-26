@@ -405,6 +405,23 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** All four agents on validated schemas — **nullable fields** (absent data returns
   `null`, never a fabricated value), enums using the `"other"` + detail-string pattern.
 - **B:** Human-in-the-loop approval gate for critical actions (rollback, restart, merge).
+- **Done (2026-09-25):** A: the `contract-audit` skill ran against all four agents' schemas and the
+  contract models, and every finding the contract already requires is now enforced - `schema_version`
+  read off every agent and coordinator payload with a major mismatch refused (sec 0), gap-to-field
+  matching on field boundaries rather than a string prefix, unsupported Docs claims kept out of the
+  answer and one gap per unanswered sub-question (sec 4.2), and the `suggested_agent` guidance that
+  contradicted its validator fixed in all four emit schemas (pinned identical across the four by
+  `tests/test_schemas_everywhere.py`). No shape moved and `schema_version` stays `1.1.0`; the six audit
+  findings that *would* be contract changes are listed in `docs/design-notes/contract-changes.md`.
+  HANDOFF item 22 landed first: every planned invocation's context carries a roster of its siblings
+  and why each was selected, so an agent no longer raises gaps for another agent's part. B:
+  `src/aioc/hitl/` - `policy.py` makes the sec 4.1 approval rule executable (a production-write
+  classifier ORed with the agent's flag and the risk rule; the Incident runtime stamps the flag
+  upward), and `gate.py` turns every recommendation in each agent's latest report into an
+  `ApprovalRequest` and an `ApprovalDecision` record, fail-closed (`DenyAll` by default; a broken or
+  anonymous approver denies). `scripts/gate_recorded_run.py` (free) replays it over the recorded live
+  responses: 15 recommendations, 7 needing a human, and three classifier misreadings found and pinned.
+  The live four-agent re-run that measures item 22 is not yet made.
 
 ### Day 17 — Retry loop + audit
 - **A:** **Validation-retry loop** — on schema failure, re-request with the specific error

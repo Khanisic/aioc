@@ -36,7 +36,7 @@ from aioc.contracts import (
 )
 from aioc.coordinator import Executor, SelectionPlan
 from aioc.coordinator.executor import respond
-from aioc.coordinator.handoff import HANDOFF_HEADER
+from aioc.coordinator.handoff import HANDOFF_HEADER, ROSTER_HEADER, ROSTER_RULE
 from aioc.llm import Usage
 
 # ------------------------------------------------------------------------- plan fixtures
@@ -410,6 +410,55 @@ def test_answer_cites_subagent_evidence_and_never_mints_ids():
     assert CoordinatorResponse.model_validate_json(resp.model_dump_json()) == resp
 
 
+# ---------------------------------------------- Day 16: each agent is told who its siblings are
+
+
+def test_a_parallel_agent_is_told_its_siblings_and_that_their_parts_are_not_its_gaps():
+    """HANDOFF item 22: on a multi-part query every agent saw the other agents' parts and
+    raised gaps for them. The executor states the roster - plumbing it already holds - after
+    the planner's block, and the response records the composed block verbatim."""
+    incident, docs = _RecordingRunner(), _RecordingRunner()
+    plan = _plan(
+        [
+            _invocation("incident", reason="diagnose the live 5xx spike from the metrics"),
+            _invocation(
+                "docs",
+                invocation_id="inv_docs",
+                reason="find precedent for this failure in past incidents",
+            ),
+        ]
+    )
+    resp = Executor({AgentName.INCIDENT: incident, AgentName.DOCS: docs}).execute(
+        plan, "Why is checkout failing, and has this happened before?"
+    )
+
+    (inc_call,) = incident.calls
+    (docs_call,) = docs.calls
+    for call, sibling, reason, own in (
+        (inc_call, "docs", "find precedent for this failure in past incidents", "incident"),
+        (docs_call, "incident", "diagnose the live 5xx spike from the metrics", "docs"),
+    ):
+        ctx = call["context"]
+        assert ctx.startswith(_CONTEXT)  # the planner's block, first and unchanged
+        assert ctx.index(_CONTEXT) < ctx.index(ROSTER_HEADER) < ctx.index(ROSTER_RULE)
+        assert f"- {sibling}: {reason}" in ctx
+        assert f"- {own}: " not in ctx  # an agent is not its own sibling
+        # Skipped agents are not on the request, so they are not listed as answering.
+        assert "- github: " not in ctx and "- deployment: " not in ctx
+        recorded = next(i for i in resp.selected_agents if i.invocation_id == call["invocation_id"])
+        assert recorded.context_passed == ctx  # recorded verbatim
+
+
+def test_a_single_agent_request_gets_no_roster():
+    runner = _RecordingRunner()
+    resp = Executor({AgentName.INCIDENT: runner}).execute(
+        _plan([_invocation("incident")]), "Why is checkout failing?"
+    )
+    (call,) = runner.calls
+    assert ROSTER_HEADER not in call["context"]
+    assert resp.selected_agents == _plan([_invocation("incident")]).selected_agents
+
+
 # ------------------------------------------------- missing agents produce gaps, not fakes
 
 
@@ -581,10 +630,16 @@ def test_dependent_receives_the_planner_block_plus_the_dependency_digest():
 
     (call,) = deployment.calls
     ctx = call["context"]
-    # The planner's block is kept, first and unchanged; the handoff is appended after it.
+    # The planner's block is kept, first and unchanged; the roster of its siblings follows
+    # it, and the handoff is appended last, closest to the query.
     assert ctx.startswith(_DEP_CONTEXT)
     assert HANDOFF_HEADER in ctx
-    assert ctx.index(_DEP_CONTEXT) < ctx.index(HANDOFF_HEADER) < ctx.index("<handoff")
+    assert (
+        ctx.index(_DEP_CONTEXT)
+        < ctx.index(ROSTER_HEADER)
+        < ctx.index(HANDOFF_HEADER)
+        < ctx.index("<handoff")
+    )
     # The facts a Deployment agent acts on are in it, from GitHub's report.
     assert '<handoff from="github" invocation_id="inv_gh"' in ctx
     assert "#412" in ctx and "9f3c2a1d4e5b6c7a8b9c0d1e2f3a4b5c6d7e8f90" in ctx
@@ -599,9 +654,11 @@ def test_dependent_receives_the_planner_block_plus_the_dependency_digest():
     dep_inv = next(i for i in resp.selected_agents if i.invocation_id == "inv_dep")
     assert dep_inv.context_passed == ctx
     assert dep_inv.mode.value == "sequential" and dep_inv.depends_on == ["inv_gh"]
-    # The parallel invocation is untouched - it had nothing handed to it.
+    # The parallel invocation had nothing handed to it: the planner's block and the roster.
     gh_inv = next(i for i in resp.selected_agents if i.invocation_id == "inv_gh")
-    assert gh_inv.context_passed == _CONTEXT
+    assert gh_inv.context_passed.startswith(_CONTEXT)
+    assert HANDOFF_HEADER not in gh_inv.context_passed
+    assert "- deployment: " in gh_inv.context_passed
     assert [i.invocation_id for i in resp.selected_agents] == ["inv_gh", "inv_dep"]
     assert resp.status is ResponseStatus.PARTIAL  # GitHub reported an honest gap
     # Round-trips the wire with the composed block in place.
@@ -1044,7 +1101,9 @@ def test_executor_traces_one_span_per_agent_and_sets_trace_id():
     assert set(by_name) == {"agent:incident", "agent:docs"}
     # Each span carries the context the agent actually saw and the tokens it actually spent.
     incident = by_name["agent:incident"]
-    assert incident.input_text == _CONTEXT
+    recorded = next(i for i in resp.selected_agents if i.agent is AgentName.INCIDENT)
+    assert incident.input_text == recorded.context_passed
+    assert incident.input_text.startswith(_CONTEXT)
     assert incident.metadata["invocation_id"] == "inv_incident"
     assert incident.ended is not None
     assert incident.ended["status"] == "complete"

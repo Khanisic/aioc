@@ -41,6 +41,12 @@ agent that raised it, and the ``suggested_query`` verbatim - then the digest of 
 response that raised one of those gaps, through `compose_dependent_context` exactly as a
 sequential dependent gets its dependency's digest. The re-delegated agent therefore sees
 what the earlier round found and what it could not establish, and nothing is inherited.
+
+**Every planned invocation is told who its siblings are (Day 16).** `roster_block` lists
+the other agents on the request with the planner's reason for each, and says a sibling's
+part is not a gap. It follows the planner's block in every context the executor composes
+for a planned agent - parallel, sequential, and refinement alike - and is recorded
+verbatim with the rest, so ``context_passed`` still shows everything the agent was told.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ from typing import Any
 
 from aioc.contracts import (
     AgentInvocation,
+    AgentName,
     AgentResponse,
     Assessment,
     DeploymentFindings,
@@ -81,6 +88,49 @@ REFINEMENT_HEADER = (
     "round could not establish the following. Close exactly these gaps; the handed-off "
     "results below are what that round found and must not be re-derived."
 )
+
+
+ROSTER_HEADER = (
+    "Other agents on this request. The coordinator asked each of them for its own part of "
+    "the query; they answer it themselves, and you will not see their reports unless one is "
+    "handed off below."
+)
+
+ROSTER_RULE = (
+    "Report on your part only. A gap is for something your part needed and you could not "
+    "establish. A part of the query assigned to an agent listed above is not a gap in your "
+    "report, even though you cannot answer it: that agent is already answering it."
+)
+
+
+def roster_block(agent: AgentName, planned: Sequence[AgentInvocation]) -> str | None:
+    """What an invocation is told about its siblings on the same request (Day 16).
+
+    Every agent receives the whole user query, so on a multi-part question each one sees
+    parts that belong to another agent - and, told nothing else, it reports them as gaps
+    pointing at the sibling that is already answering them (the Day 15 live run: a whole
+    refinement round of four agents spent re-asking for work the plan had already done).
+    Which agents are on the request and what each was asked for is plumbing the
+    coordinator knows, so it is stated, not left for the model to infer: one line per
+    sibling with the planner's ``reason`` for selecting it, then the rule.
+
+    ``None`` when the agent has no sibling in the plan - a single-agent request is told
+    nothing it could act on, so its context stays the planner's block unchanged.
+    """
+    siblings = [inv for inv in planned if inv.agent is not agent]
+    if not siblings:
+        return None
+    lines = [ROSTER_HEADER]
+    lines.extend(f"- {inv.agent.value}: {_text(inv.reason)}" for inv in siblings)
+    lines.append(ROSTER_RULE)
+    return "\n".join(lines)
+
+
+def with_roster(planner_block: str, roster: str | None) -> str:
+    """The planner's block with the roster appended, or unchanged when there is none."""
+    if roster is None:
+        return planner_block
+    return f"{planner_block.rstrip()}\n\n{roster}"
 
 
 def compose_dependent_context(

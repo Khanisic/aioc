@@ -242,6 +242,45 @@ def test_unanswered_sub_question_requires_a_matching_gap():
     DocsAgentResponse.model_validate(docs)
 
 
+def _docs_example() -> dict:
+    return next(r for r in _worked_example()["agent_responses"] if r["agent"] == "docs")
+
+
+def test_one_gap_cannot_stand_for_two_unanswered_sub_questions():
+    # Sec 4.2 says *every* entry needs a matching Gap. Day 16: counted, not just present.
+    docs = _docs_example()
+    coverage = docs["findings"]["coverage"]
+    coverage["sub_questions"].append("Who owns the checkout runbook?")
+    coverage["unanswered"].append("Who owns the checkout runbook?")
+    with pytest.raises(ValidationError, match="2 unanswered sub-question"):
+        DocsAgentResponse.model_validate(docs)
+    second = {
+        **docs["gaps"][0],
+        "id": "gap_owner",
+        "blocks_field": "findings.coverage.unanswered[1]",
+    }
+    docs["gaps"].append(second)
+    DocsAgentResponse.model_validate(docs)  # an indexed path names the same field
+
+
+def test_an_unsupported_claim_must_not_appear_in_the_answer():
+    docs = _docs_example()
+    unsupported = {
+        "id": "claim_x",
+        "statement": "Rolling back always fixes post-deploy latency",
+        "supported": False,
+        "sources": [],
+        "confidence": 0.1,
+    }
+    docs["findings"]["claims"].append(unsupported)
+    DocsAgentResponse.model_validate(docs)  # reported, not used: valid
+    answer = docs["findings"]["answer"]
+    # Reused word for word, with the capital and the full stop changed - still caught.
+    answer["value"] = answer["value"] + " rolling back always fixes post-deploy latency."
+    with pytest.raises(ValidationError, match="unsupported claim claim_x"):
+        DocsAgentResponse.model_validate(docs)
+
+
 # ------------------------------------------------------------- orchestration invariants
 
 
@@ -390,3 +429,77 @@ def test_unknown_field_is_rejected():
     data["surprise"] = True
     with pytest.raises(ValidationError):
         IncidentAgentResponse.model_validate(data)
+
+
+# ------------------------------------------------ Day 16: schema_version and gap paths
+
+
+@pytest.mark.parametrize("version", ["1.0.0", "1.1.0", "1.9.3"])
+def test_same_major_schema_version_is_accepted(version: str):
+    data = _incident_response()
+    data["schema_version"] = version
+    assert IncidentAgentResponse.model_validate(data).schema_version == version
+
+
+@pytest.mark.parametrize("version", ["2.0.0", "0.9.0", "1.1", "v1.1.0", "1.1.0-rc1", ""])
+def test_a_major_mismatch_or_malformed_schema_version_fails_loudly(version: str):
+    # CONTRACTS.md sec 0: consumers read schema_version off every payload and fail loudly on
+    # a major mismatch rather than best-effort parsing.
+    data = _incident_response()
+    data["schema_version"] = version
+    with pytest.raises(ValidationError, match="schema_version"):
+        IncidentAgentResponse.model_validate(data)
+
+
+def test_coordinator_refuses_a_major_mismatch_and_so_does_a_nested_agent_payload():
+    example = _worked_example()
+    example["schema_version"] = "2.0.0"
+    with pytest.raises(ValidationError, match="schema_version"):
+        CoordinatorResponse.model_validate(example)
+    example = _worked_example()
+    example["agent_responses"][0]["schema_version"] = "9.9.9"
+    with pytest.raises(ValidationError, match="schema_version"):
+        CoordinatorResponse.model_validate(example)
+
+
+@pytest.mark.parametrize(
+    "blocks_field", ["findings.root_cause_elsewhere", "findings.root_causes", "findings.root"]
+)
+def test_a_gap_must_reference_the_null_field_on_a_field_boundary(blocks_field: str):
+    data = _incident_response()
+    data["status"] = "partial"
+    data["findings"]["root_cause"] = _assessment(None, 0.2, [])
+    data["gaps"] = [
+        {
+            "id": "gap_1",
+            "description": "d",
+            "kind": "missing_data",
+            "kind_detail": None,
+            "blocks_field": blocks_field,
+            "suggested_agent": None,
+            "suggested_query": None,
+            "resolvable": False,
+        }
+    ]
+    with pytest.raises(ValidationError, match="requires a Gap"):
+        IncidentAgentResponse.model_validate(data)
+
+
+@pytest.mark.parametrize("blocks_field", ["findings.root_cause", "findings.root_cause.value"])
+def test_a_gap_on_the_field_or_inside_it_references_it(blocks_field: str):
+    data = _incident_response()
+    data["status"] = "partial"
+    data["findings"]["root_cause"] = _assessment(None, 0.2, [])
+    data["gaps"] = [
+        {
+            "id": "gap_1",
+            "description": "d",
+            "kind": "missing_data",
+            "kind_detail": None,
+            "blocks_field": blocks_field,
+            "suggested_agent": None,
+            "suggested_query": None,
+            "resolvable": False,
+        }
+    ]
+    assert IncidentAgentResponse.model_validate(data).status.value == "partial"

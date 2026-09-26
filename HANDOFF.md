@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 15** of 30, after all four agents ran live on one query
-(parallel and sequential paths in one request) and the cost review was done.
+Written at the end of **Day 16** of 30, after the schema audit was closed, every agent was
+told who its siblings are (item 22, offline), and the HITL approval gate landed.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 16.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 17.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 581-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 666-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -48,7 +48,9 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-Everything is merged. **Nothing is in flight** - `main` is the only branch that matters.
+**Two branches are in flight (2026-09-25).** Day 15 is PR #18 (`d15-four-agents-live`,
+open for review). Day 16 is `d16-schemas-hitl`, branched from Day 15's commit, so it rebases
+cleanly onto `main` once #18 merges. Merge #18 first, then rebase and open the Day 16 PR.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -87,7 +89,7 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
 | `coordinator/planner.py` | Day 6. `plan()` returns a validated `SelectionPlan`; now rejects cyclic `depends_on`, takes a `usage` accumulator, and stamps `round` itself rather than asking the model (war story #7). Selection measured **5/5**. **Day 15 corrected the agent roster** (`_AGENT_CAPABILITIES`): it claimed the Incident agent reads the incident corpus and called Docs a runbook corpus, and the first four-agent plan skipped Docs quoting that sentence (war story #11). Incident has no tools; the corpus of past incidents is the Docs agent's. `test_the_roster_claims_no_capability_an_agent_lacks` pins it - update the roster when an agent's capabilities change. |
 | `coordinator/executor.py` | Day 7, **parallel + traced Day 9, handoff Day 13, refinement loop + synthesis seam Day 14.** `Executor.execute(plan, query)` -> contract `CoordinatorResponse`. Explicit context passing proven by test; unrunnable agents produce `resolvable: false` gaps, never fabricated responses; cost measured, not estimated. The parallel group runs on a thread pool with per-runner `Usage` accumulators; the sequential chain composes each dependent's context from the planner's block plus `handoff.digest` of each direct dependency and records it verbatim. **The refinement loop** runs after the plan: every open gap that is `resolvable` and names a `suggested_agent` is re-delegated as a `round: 1+` invocation (query = `suggested_query` verbatim; context = planner's block + refinement block + the raising responses' digests; one invocation per agent per round; `max_refinement_rounds` default 2; an identical gap never asked twice; `resolvable: false` and unregistered agents never retried); a re-delegation that answers closes its gaps. **Synthesis is a seam**: `synthesiser=None` (default) is the deterministic Day 7 form; `ModelSynthesiser()` is opt-in at the entry point (like tracing), with a deterministic fallback recorded in `answer.reasoning`. `status` is `complete` only when nothing is open and each agent's latest report is complete. `respond()` = plan + execute in one call, and owns the request trace. |
-| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. **Day 15:** the evidence list is kept out of the ceiling's cut (the body gives up the room - the synthesiser cites from that list, and a cut list made it cite document ids) and Docs claim lines say `docs=doc_0005`, so brackets mean evidence ids everywhere. **Day 14** added `refinement_block` (the gaps a re-delegated invocation is closing, with the `suggested_query` verbatim) and `refinement_query`. |
+| `coordinator/handoff.py` | **Day 13.** The digest: one bounded plain-text block per dependency response (facts, judgements with confidence and evidence ids, gaps with `suggested_query`, evidence refs; lists capped `(+N more)`, values clipped, a 4,000-char ceiling that cuts on a line and says so). Plain text so a tool-driven agent can quote a line as evidence through its context grounding. Direct dependencies only - a two-hop chain never snowballs. **Day 15:** the evidence list is kept out of the ceiling's cut (the body gives up the room - the synthesiser cites from that list, and a cut list made it cite document ids) and Docs claim lines say `docs=doc_0005`, so brackets mean evidence ids everywhere. **Day 14** added `refinement_block` (the gaps a re-delegated invocation is closing, with the `suggested_query` verbatim) and `refinement_query`. **Day 16** added `roster_block`: every planned invocation's context is the planner's block, then the other agents on the request with the planner's reason for each and the rule that their parts are not this agent's gaps - in round 0 and every refinement round, recorded verbatim; none for a lone agent (item 22). |
 | `coordinator/synthesis.py` | **Day 14.** `SynthesisRequest` (query, intent, each response with its invocation, execution gaps, open gaps, rounds), `deterministic` (the Day 7 form), and `ModelSynthesiser`: one forced `emit_synthesis` call over the responses' digests, **flat schema** (`synthesis`, `answer`, `confidence`, `evidence`, `reasoning` - the nested `Assessment` form came back as XML-style text on the first live run, war story #10), `check_grounding` rejects an evidence id no agent carries or a confident uncited answer with `SynthesisError`. Verified live in one call over a recorded run. |
 | `agents/_status.py` | **Day 13.** `settle_status`: `complete` over a null findings judgement becomes `partial` in every agent's runtime, that direction only. The first live sequential run was refused for exactly this. |
 | `tools/incident/analyze_server.py` (+ `logs.py`, `patterns.py`) | **Day 13.** The `aioc-analyze` stdio server for the case study's two deliberately overlapping tools, now the **`1.0.0` baseline, kept runnable**. `analyze_logs` reads what a container printed through `docker compose logs`; `analyze_events` reads the seeded timeline. **Part 4 is the contract's v1.0.0 sentence verbatim and is pinned by `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative`** - never sharpen it; `check_tool_routing.py --variant v1` must keep measuring the "before". |
@@ -106,6 +108,8 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `scripts/check_day15_integration.py` | **Day 15.** The four-agent checkpoint: deploys the demo at PR #11's merge commit, injects a real fault, builds the situation from live metrics plus the Day 13 release note, and runs `respond()` on a four-part query. Asserts all four planned and answering, a parallel group that overlapped in measured time, and the Day 13 sequential assertions (imported from `check_day13_sequential.py`, whose multi-round bug it found). Records `transcript.json`; resets chaos itself. **PASS on attempt 2**, `docs/assets/day15-demo.gif`. |
 | `scripts/cost_review.py` | **Day 15.** Free. Prices every recorded live run by check and by day against the alert, and says what it cannot see (runs with no recorded usage, ad-hoc calls, Voyage). `--json`, `--since`, `--alert`. Prices are a table in the file, dated; no caching is assumed. |
 | `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript; `--title` / `--command` since Day 15 so it renders any recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
+| `hitl/` | **Day 16.** `policy.py`: `classify` (rollback, restart, scale, merge, config write, traffic shift, deploy, destructive - over the action line and its command, negation scoped to the clause, `deploy` the noun excluded) and `approval_reasons` (the agent's flag OR the risk rule OR the classifier). The Incident runtime stamps `requires_approval: true` from it, upward only. `gate.py`: `HitlGate(approver).review(CoordinatorResponse)` -> `GateResult` of `ApprovalDecision` records, one per recommendation in each agent's latest report, `not_required` included; Deployment `rollback_now`/`other` gated unconditionally. Fail-closed: `DenyAll` default, a raising or anonymous approver denies. `ScriptedApprover` (tests, scripts) and `ConsoleApprover` (asks at the terminal, only `y`/`yes` approves). **Not wired into `respond()`** on purpose - the records are not contract and the gate reads the response it is handed; `scripts/gate_recorded_run.py` (free) is the entry point today. |
+| `contracts/` enforcement (Day 16) | `schema_version` checked on `AgentResponse` and `CoordinatorResponse` (a different major or a malformed version is refused); gap-to-null matching on field boundaries; Docs: an unsupported claim's statement may not appear in `answer.value`, one gap per unanswered sub-question. No shape moved, still `1.1.0`; the record and the six deferred contract changes are in `docs/design-notes/contract-changes.md`. |
 | `demo-app/services/app.py` | **Day 12** added `service_build_info{service,git_sha} = 1` (the deployed version as a metric, next to `/version`). The image must be rebuilt for it to exist: `docker compose up -d --build --wait`. |
 
 ## 4. Environment traps - read before debugging anything
@@ -164,12 +168,13 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 581 passed
+uv run pytest -q                                                   # expect 666 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **581 passed** with the stack up (568 passed, 13 skipped without
-it), lint and mypy clean, at the end of Day 15. The suite took ~25-45s on this machine with the
+Costs nothing. Last run: **653 passed, 13 skipped** at the end of Day 16 - Docker Desktop
+was not running, so the 13 `integration`-marked tests skipped; with the stack up expect 666
+(not run with the stack on Day 16). Lint and mypy clean. The suite took ~25-45s on this machine with the
 stack up; the `test_mcp_toolset.py` tests launch the real GitHub, deployment, analyze, and
 search server subprocesses and are most of it.
 
@@ -209,9 +214,42 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 16 - schemas everywhere + HITL
+## 6. Next work: Day 17 - the validation-retry loop + the audit log
 
-**From the plan:** A: all four agents on validated schemas - nullable fields (absent data
+**From the plan:** A: validation-retry loop - on schema failure, re-request with the specific
+error attached; track retry-resolvable (format) vs not (info genuinely absent). B: audit log for
+every approved/denied action.
+
+**First, the one Day 16 thing still open:** item 22's live re-run. The roster block is built and
+tested offline, but whether it stops round 1 re-asking the siblings is only measurable live:
+`check_day15_integration.py --deploy --max-rounds 1` (~12-20 calls; the last two measured
+$1.10-1.16, and ~$0.60 is the expectation if the fix works - say both before running). Needs
+Docker Desktop up (it was down all of Day 16) and PR #18 plus the Day 16 PR merged.
+
+What already exists for Day 17:
+
+- **A:** three live-only agent refusals are waiting for exactly this loop (items 20 and 23):
+  the GitHub paraphrased excerpt (three times now), the Deployment health reply not covering
+  `to_version`, and the Docs invented field. Day 16 added two more refusals the loop will meet
+  (an unsupported claim used in the Docs answer; fewer gaps than unanswered sub-questions), and
+  both carry messages specific enough to re-request against. The agents raise their own error
+  types (`DocsAgentError`, `GitHubAgentError`, ...) or pydantic `ValidationError`; the retry
+  belongs inside each agent's forced-emit step, where the rejected payload and the error are
+  both in hand, not in the executor's refinement loop (which would re-run the whole agent).
+- **B:** the records are ready. `aioc.hitl.ApprovalDecision` is a frozen pydantic record
+  (decision id, the full request, decision, who, when, why) that round-trips JSON, and
+  `HitlGate.review` returns one for every recommendation, `not_required` included. The audit
+  log is an append-only store of those - Postgres is already in the stack, and an
+  `init/05-*.sql` file must stay additive and `IF NOT EXISTS` like `04-embeddings.sql`.
+  `scripts/gate_recorded_run.py` is the free end-to-end exercise.
+
+<!-- superseded Day 16 notes follow, kept for the record -->
+**Day 16 as planned:** A: all four agents on validated schemas. B: the HITL approval gate.
+Done; see §3, §7 items 19, 22, and 26, and decisions #28-29. The audit found five
+contract-stated rules nothing enforced (now enforced, no shape change) and six that would be
+contract changes (listed, not made, in `docs/design-notes/contract-changes.md`).
+
+**From the plan (Day 16):** A: all four agents on validated schemas - nullable fields (absent data
 returns `null`, never a fabricated value), enums using the `other` + detail-string pattern.
 B: human-in-the-loop approval gate for critical actions (rollback, restart, merge).
 
@@ -537,9 +575,9 @@ for github queries.
 19. **The `1.1.0` bump left the §0 step-3 tension on record, not resolved.** By the letter
    a rename is a removal (major); the pre-authorization fixed it at minor. The design-note
    entry says so. The §8 worked example still says `1.0.0` on purpose - a `1.0.0` payload
-   is valid under `1.1.0`, and nothing enforces "fail loudly on a major mismatch" yet
-   (no consumer reads `schema_version`). That enforcement is a small validator away and
-   belongs with the Day 16 schemas-everywhere pass.
+   is valid under `1.1.0`. **The enforcement half is done (Day 16):** `AgentResponse` and
+   `CoordinatorResponse` read `schema_version` and refuse a different major or a malformed
+   version; the step-3 tension itself stays on record.
 20. **Two live-only agent refusals the refinement loop cannot fix by retrying blind:** a
    GitHub excerpt paraphrase (retry worked once, by luck of sampling) and a Deployment
    report whose health reply did not cover `to_version` (retry would fail identically).
@@ -567,6 +605,9 @@ for github queries.
    (~$0.60 if it works) gives the before/after. The alternative (teach the loop to drop a
    gap whose `suggested_agent` already answered this round) is a judgement call the loop
    was designed not to make (decision #22).
+   **Built offline on Day 16, exactly as recommended** (`handoff.roster_block`, decision
+   #28), plus the same rule in every agent's `Gap.suggested_agent` guidance. **The live
+   re-run has not been made** - Docker Desktop was down, and it is the first thing in §6.
 23. **A third live-only agent refusal joined item 20's two:** the Docs agent's report was
    rejected for an extra field the model invented (`findings.coverage_answer_placeholder`,
    `extra_forbidden`) on a round-1 re-delegation with a 5k-char context. Day 17's
@@ -583,6 +624,18 @@ for github queries.
    that is a two-minute check only the account owner can do, and a Console number far
    above the floor means unrecorded spend worth finding. Prompt caching (item 4) stays on
    Day 19 by decision #27.
+26. **The Day 16 audit's six contract-level findings are listed, not made**
+   (`docs/design-notes/contract-changes.md`, the 2026-09-25 entry): `other` with no detail
+   field on three enums, the self-contradicting §2.1 evidence sentence, non-`Assessment`
+   nulls with no gap, `changed_config_keys` unable to say "not looked", §6.4 "must include"
+   error details unvalidated, and `Z` timestamps / id prefixes unvalidated. Each needs its
+   own §0 entry *before* code. None blocks anything; the first is a cheap patch bump.
+27. **The HITL classifier is a floor, measured on 15 live recommendations** (all Incident;
+   no recorded Deployment report ever recommended `rollback_now`). The replay found three
+   misreadings on its first run. Re-run `scripts/gate_recorded_run.py` after any live run
+   that produces recommendations - it is free and it is the only check against real
+   wording. The gate is not wired into `respond()` or any live script yet; Day 17's audit
+   log is the natural place to decide where it is called.
 
 ## 8. Where things are written down
 

@@ -38,6 +38,31 @@ The v1.0.0 definitions stay in CONTRACTS.md struck through, the v1 server module
 | What breaks | Nothing in the Reasoning Layer: no agent consumes either tool (the servers were only ever the routing check's subject), so no `default_runners()` entry, prompt, or toolset changes. The one consumer is `scripts/check_tool_routing.py`, which gains a `v1_1` variant that maps the query sets' v1 ground-truth names onto the new names; the query sets and their hashes do not change. `tests/test_analyze_tools.py` keeps pinning the v1 module's weak part 4 (the baseline must stay reproducible) and a new test pins the v1.1 module's part 4 to naming the alternative. `SCHEMA_VERSION` in `aioc` becomes `1.1.0`, so every agent and coordinator payload now stamps `1.1.0`; a `1.0.0` payload is still valid (minor = compatible), and the §8 worked example is left at `1.0.0` to demonstrate exactly that. |
 | What was considered instead | (a) Keep the names and only rewrite part 4 - rejected because the plan and §0 both say "split and rename", and because a name is the first routing signal a model reads; measuring only part 4 would understate the intervention. (b) Drop the v1 server module and keep only its descriptions in a test fixture - rejected because the "before" must be re-runnable over the same wire as the "after"; `check_tool_routing.py --variant v1` must keep working. (c) Call the rename a major bump, since by the letter of §0 step 3 a rename is a removal - rejected because §0 fixes the version at `1.1.0` in advance, the removed names have no consumer, and the v1 definitions remain in the document. The tension is recorded here rather than resolved silently. (d) Also split the inputs (a `level` filter only on logs, a `kind` filter only on events) - already the case in v1; nothing to change. |
 
+### 2026-09-25 - no version change - enforcement of invariants the contract already states (Day 16)
+
+Not a contract change, and recorded here so that the next reader can check that claim rather than take it on trust.
+No type, field, enum member, or stated invariant moved, `schema_version` stays `1.1.0`, and §9 gets no row.
+This entry was written after the code, which the process forbids for a change; it is acceptable only because nothing frozen changed, and the list below is how that can be verified.
+
+Day 16 ran the `contract-audit` skill against the models and closed what it found that the contract already requires:
+
+| Rule, as the contract states it | Before Day 16 | Now |
+|---|---|---|
+| §0: consumers read `schema_version` and fail loudly on a major mismatch | Nothing read it; a `9.9.9` agent payload inside a `2.0.0` coordinator payload validated | `AgentResponse` and `CoordinatorResponse` refuse a different major or a malformed version (`_common.check_schema_version`) |
+| §2.1: a null `Assessment.value` needs a `Gap` whose `blocks_field` references it | Bare string prefix, so `findings.root_cause_elsewhere` covered `findings.root_cause` | Matched on field boundaries (`_common.references_field`) |
+| §4.2: `supported == false` claims must not appear in `answer.value` | Not checked; the Docs agent's tool description told the model it was | `DocsFindings` rejects an unsupported claim's statement found in the answer (normalised case, whitespace, trailing punctuation). A paraphrase is beyond any validator, and the docstring says so |
+| §4.2: *every* `unanswered` entry has a matching `Gap` | One gap satisfied any number of entries | Counted: one matching gap per entry (an indexed `blocks_field` names the same field) |
+| §4.1: `requires_approval` is true when the action mutates production state | Enforced by prompt wording only; the model comment pointed at an empty `hitl/` package | `aioc.hitl.policy` classifies the action; the Incident runtime stamps the flag upward, and the HITL gate re-derives it. The contract model is unchanged - a prose heuristic does not belong in a validator that refuses whole reports |
+
+Found by the audit and deliberately **not** done, because each is a real contract change and needs its own entry before any code:
+
+1. **`other` without a detail field.** `CoordinatorResponse.status`, `AgentInvocation.mode`, and `TimelineEvent.severity` have an `other` member and no `*_detail` sibling, so the §1 pairing cannot be satisfied. Adding the fields is additive-optional (patch).
+2. **The evidence rule contradicts itself.** The §2.1 field table says `evidence` may be `[]` only when `value` is null; the invariant list requires evidence only at confidence >= 0.5; the §8 example is consistent with the invariant list, which therefore wins. Striking the table's sentence is a wording fix, but it is frozen wording.
+3. **Null outside an `Assessment` with no `Gap`.** §1 says every null carries a gap, but some nulls are legitimate without one (`incident_window.end` = ongoing, `from_version` = first release). This needs a per-field list in the contract, not a blanket validator.
+4. **`changed_config_keys` cannot say "not looked".** The field is non-nullable, so a Deployment report that never ran `diff_release` must carry `[]` plus a gap - the only legal form, and one that reads as "looked and found none" under §1. A nullable type would be a type change (major).
+5. **§6.4 "must include" details** (`details.field` / `details.expected` on `validation`, `details.required_scope` on `permission`) and the SCREAMING_SNAKE `code` format are unvalidated on `ToolError`. The tool servers are JSON Schema and do not import these models, so enforcement belongs in the servers' own tests first.
+6. **RFC 3339 `Z` timestamps and id prefixes** are stated conventions, not "(validated)" rules; a `+05:00` timestamp validates. Tightening them could refuse payloads the contract does not call invalid.
+
 ### Anticipated, not yet made
 
 1. **`TIMELINE_STORE_TIMEOUT` (patch).**

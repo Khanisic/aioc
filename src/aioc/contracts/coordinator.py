@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from .. import SCHEMA_VERSION
-from ._common import StrictModel
+from ._common import StrictModel, check_schema_version
 from .enums import AgentName, Intent, InvocationMode, ResponseStatus
 from .envelope import AnyAgentResponse
 from .primitives import Assessment, Gap
@@ -74,6 +74,11 @@ class CoordinatorResponse(StrictModel):
     cost: Cost
     trace_id: str | None = None
     completed_at: datetime
+
+    @field_validator("schema_version")
+    @classmethod
+    def _check_schema_version(cls, value: str) -> str:
+        return check_schema_version(value, SCHEMA_VERSION)
 
     @model_validator(mode="after")
     def _check(self) -> "CoordinatorResponse":
