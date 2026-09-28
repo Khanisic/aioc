@@ -29,7 +29,7 @@ from aioc.contracts import (
     ResponseStatus,
 )
 from aioc.coordinator import Executor
-from aioc.coordinator.handoff import HANDOFF_HEADER, REFINEMENT_HEADER
+from aioc.coordinator.handoff import HANDOFF_HEADER, REFINEMENT_HEADER, ROSTER_HEADER
 from aioc.coordinator.synthesis import Synthesis, SynthesisError, SynthesisRequest
 from aioc.llm import Usage
 from tests.test_executor import (
@@ -299,6 +299,13 @@ def test_gaps_from_two_agents_run_in_one_round():
     assert docs.calls[1]["query"] == "Which runbook covers this?"
     assert incident.calls[1]["query"] == LOOKBACK_QUERY
     assert resp.unresolved_gaps == [] and resp.status is ResponseStatus.COMPLETE
+    # A re-delegated planned agent opens with exactly what round 0 told it - the planner's
+    # block and the roster of its siblings - before the refinement block (Day 16).
+    for runner in (incident, docs):
+        first, again = runner.calls[0]["context"], runner.calls[1]["context"]
+        assert ROSTER_HEADER in first
+        assert again.startswith(first)
+        assert again.index(ROSTER_HEADER) < again.index(REFINEMENT_HEADER.format(round=1))
 
 
 def test_several_gaps_for_one_agent_share_one_invocation_with_their_queries_listed():
@@ -348,6 +355,8 @@ def test_a_cross_agent_gap_hands_the_raising_agents_digest_to_the_target():
     assert refined.agent is AgentName.DEPLOYMENT
     assert refined.mode is InvocationMode.SEQUENTIAL and refined.depends_on == ["inv_gh"]
     assert refined.context_passed.startswith(REFINEMENT_HEADER.format(round=1))
+    # Not a planned agent, so no roster: nothing in the plan assigned it a part.
+    assert ROSTER_HEADER not in refined.context_passed
     assert "(raised by github, invocation inv_gh)" in refined.context_passed
     assert '<handoff from="github" invocation_id="inv_gh"' in refined.context_passed
     assert "#412" in refined.context_passed  # GitHub's facts reached Deployment explicitly

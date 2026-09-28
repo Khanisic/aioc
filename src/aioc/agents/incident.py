@@ -42,6 +42,7 @@ from aioc.contracts import (
     ResponseStatus,
     StrictModel,
 )
+from aioc.hitl.policy import classify
 from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
 
 from ._annotate import ROOT, apply_guidance
@@ -196,7 +197,15 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "True only if another agent or more data could close this gap. False stops the "
             "coordinator's refinement loop, so set it honestly."
         ),
-        "suggested_query": "The question to ask next, when `resolvable` is true.",
+        "suggested_agent": (
+            "The agent that could close this gap (`incident`, `docs`, `github`, "
+            "`deployment`), or null. Not an agent already on this request for the part of "
+            "the query it was asked to answer - that part is its own, not a gap in yours."
+        ),
+        "suggested_query": (
+            "The exact question to put to `suggested_agent`. Required whenever "
+            "`suggested_agent` is set; null when it is null."
+        ),
     },
     "RecommendedAction": {
         "risk_detail": "Null unless `risk` is exactly `other`.",
@@ -390,10 +399,12 @@ class IncidentAgent:
 
         data: dict[str, Any] = dict(payload)
         # Plumbing the model does not own; schema_version, agent, and tool_calls take their
-        # contract defaults (1.0.0, "incident", []). Day 5 populates tool_calls from real calls.
+        # contract defaults (SCHEMA_VERSION, "incident", []); this path makes no tool calls.
         data["request_id"] = request_id or _new_id("req")
         data["invocation_id"] = invocation_id or _new_id("inv")
         data["generated_at"] = datetime.now(UTC)
+        if isinstance(data.get("findings"), dict):
+            _stamp_approval(data["findings"])
         # `complete` over a null judgement settles to `partial` (sec 3; agents/_status).
         # The findings are validated on their own first so the rule reads real
         # Assessments; if they do not validate, the full model below says why.
@@ -418,6 +429,23 @@ class IncidentAgent:
                 "pass everything it needs explicitly (CONTRACTS.md sec 5, context_passed)"
             )
         return f"<context>\n{context.strip()}\n</context>\n\nOperational query: {query.strip()}"
+
+
+def _stamp_approval(findings: dict[str, Any]) -> None:
+    """Sec 4.1's "mutates production state" half, settled by the runtime (Day 16): an
+    action the policy classifier reads as a production write gets ``requires_approval:
+    true``, whatever the model said. Upward only - a model that gated a read-only action
+    is believed, the `_status.py` shape. The HITL gate re-derives the requirement anyway;
+    this makes the report itself honest, so every consumer of it sees the gate."""
+    actions = findings.get("recommended_actions")
+    if not isinstance(actions, list):
+        return
+    for action in actions:
+        if not isinstance(action, dict) or not isinstance(action.get("action"), str):
+            continue
+        command = action.get("command")
+        if classify(action["action"], command if isinstance(command, str) else None):
+            action["requires_approval"] = True
 
 
 def _extract_tool_input(resp: Message, tool_name: str) -> dict[str, Any]:

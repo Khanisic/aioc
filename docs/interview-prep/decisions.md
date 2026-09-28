@@ -456,3 +456,38 @@ The fix belongs in context composition - an agent told which parts of the questi
 
 **What I would watch.** Both cost estimates given before the Day 15 runs were low by 2-3x.
 An estimate for a `respond()` run has to be made from the last measured run of the same shape, not from the size of the inputs.
+
+## 28. Each agent is told who its siblings are, because the gap it raises for them is the most expensive line in the run
+
+**Context.** Decision #27 named the lever: on a four-part query, each agent raised resolvable gaps for the parts that were other agents', and the refinement loop re-asked all four.
+Two fixes were on the table.
+The loop could drop a gap whose `suggested_agent` had already answered this round, or the agent could be told not to raise it.
+
+**Decision.** The executor appends a roster block to every planned invocation's context: the other agents on this request, each with the planner's reason for selecting it, and one rule - a part assigned to a listed agent is not a gap in your report.
+It is recorded verbatim in `context_passed` like the handoff digest, so the explicit-passing test still holds argument for argument, and a single-agent request is told nothing (its context is unchanged).
+
+**Why not the loop.** Dropping a gap because its target already answered means the loop judges whether that answer covered the gap - exactly the judgement decision #22 kept out of it.
+The roster is plumbing the coordinator already holds, and decisions #7, #17, and #21 all say the same thing about such values: state them, do not leave them for the model to infer.
+The `Gap.suggested_agent` guidance in all four emit schemas now carries the same rule, and a Day 16 test pins that the four copies agree.
+
+**What would prove it wrong.** A live four-agent re-run whose round 1 still re-delegates siblings' parts.
+That run costs about $0.60 if the fix works and has not been made yet (HANDOFF sec 7 item 22).
+
+## 29. The approval gate re-derives the requirement, fails closed, and records every decision
+
+**Context.** Day 16's Platform half is the HITL gate for rollback, restart, and merge.
+The contract's approval rule has a structural half (risk medium or above) that the model already enforced and a semantic half ("mutates production state") that was enforced by prompt wording alone.
+
+**Decision.** `aioc.hitl.policy.classify` reads the action line and its command for each production write the contract names; `approval_reasons` ORs it with the agent's own flag and the risk rule.
+The gate trusts none of the three alone - any one sends the action to a human - and the default approver is `DenyAll`, so a gate with no human wired in releases nothing that needs one.
+A broken approver, an anonymous approval, and an action missing from a script all deny.
+Every recommendation gets an `ApprovalDecision` record, including the ones released without asking, because Day 17's audit log needs the reason nobody was asked as much as the reason somebody was.
+The records sit alongside the frozen `CoordinatorResponse`, not inside it: a human's answer is not an agent report.
+
+**The check that mattered.** `scripts/gate_recorded_run.py` replays the gate over every recorded live response for free.
+Its first run found three misreadings that a fixture written to pass the classifier never would have: "after deploy" (a past event) read as a deploy, "Hold off on rolling back" read as a rollback, and "tighten a circuit breaker" was not recognised as a config write.
+All three are pinned verbatim in `tests/test_hitl.py`.
+
+**What I would watch.** The classifier is a floor, and it errs toward gating.
+A read-only action that says "restart" costs a human a click; a write it misses is still gated if the model flagged it or rated it risky.
+The replay is how to measure that trade on real output as the agents' recommendations change.

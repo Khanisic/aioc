@@ -419,6 +419,25 @@ Things to say plainly:
 
 ---
 
+## Day 16 - the approval gate over recorded live output (free)
+
+`scripts/gate_recorded_run.py` put every recorded `respond()` response through the HITL gate with the default fail-closed approver, 2026-09-25.
+Zero API calls.
+
+| | |
+|---|---|
+| Recorded responses gated | 9 (the Day 5 record predates the coordinator and is skipped, not coerced) |
+| Recommendations | 15, all from the Incident agent; no Deployment report recommended `rollback_now` |
+| Needing a human | 7 - every one flagged by the agent *and* rated medium risk; the classifier added the mutation kind to 5 of them |
+| Released without asking | 8, each recorded with the reason (not flagged, low risk, no production write recognised) |
+| Withheld under `DenyAll` | 7 of 7 |
+| Classifier misreadings the replay found | 3 of 15, all fixed and pinned verbatim in `tests/test_hitl.py` ("after deploy" read as a deploy, "Hold off on rolling back" read as a rollback, "tighten a circuit breaker" missed as a config write) |
+
+- **The agents were already gating honestly.** No recorded action was a production write the agent had left unflagged, so on this sample the classifier's job was confirmation, not rescue. It earns its place on the reports this sample does not contain, and the replay is how to keep checking that.
+- **Over-gating is visible in the record.** One action the agent flagged medium is read-only ("Investigate ... timeout configuration values"); the gate believes the agent's stricter judgement and says which signal gated it.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:

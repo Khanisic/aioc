@@ -59,9 +59,11 @@ class RecommendedAction(StrictModel):
     @model_validator(mode="after")
     def _check(self) -> "RecommendedAction":
         check_other_detail(self.risk, self.risk_detail, field="risk", detail_field="risk_detail")
-        # Approval rule (CONTRACTS.md sec 4.1). The "mutates production state" half of the
-        # rule is semantic and enforced by the agent prompt / HITL gate; the risk-based
-        # half is structural and enforced here.
+        # Approval rule (CONTRACTS.md sec 4.1). The risk-based half is structural and
+        # enforced here. The "mutates production state" half is semantic - the action is
+        # prose - and is enforced by `aioc.hitl.policy` (Day 16): the Incident agent's
+        # runtime stamps requires_approval on an action it classifies as a write, and the
+        # HITL gate re-derives the requirement rather than trusting the flag.
         needs_approval = self.risk in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.OTHER)
         if needs_approval and not self.requires_approval:
             raise ValueError(

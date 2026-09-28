@@ -5,7 +5,9 @@ list and the gaps are visible together with the findings:
 
   - every `Assessment.evidence` id resolves against this response's ``evidence[]``;
   - ``status`` is ``partial`` or weaker whenever any analytic ``Assessment.value`` is null;
-  - a null ``Assessment.value`` requires a `Gap` whose ``blocks_field`` references it;
+  - a null ``Assessment.value`` requires a `Gap` whose ``blocks_field`` references it
+    (on a field boundary - ``findings.root_cause_x`` does not reference ``findings.root_cause``);
+  - ``schema_version`` shares this code's major version, or the payload is refused (sec 0);
   - ``evidence`` may be empty only when ``status`` is ``insufficient_evidence`` or ``error``.
 """
 
@@ -13,10 +15,10 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import SCHEMA_VERSION
-from ._common import StrictModel, check_other_detail
+from ._common import StrictModel, check_other_detail, check_schema_version, references_field
 from .deployment import DeploymentFindings
 from .docs import DocsFindings
 from .enums import AgentName, ResponseStatus
@@ -24,6 +26,7 @@ from .github import GitHubFindings
 from .incident import IncidentFindings
 from .primitives import Assessment, Evidence, Gap, ToolCallRef
 
+_UNANSWERED = "findings.coverage.unanswered"
 _EVIDENCE_OPTIONAL_STATUSES = (ResponseStatus.INSUFFICIENT_EVIDENCE, ResponseStatus.ERROR)
 
 
@@ -58,6 +61,11 @@ class AgentResponse(StrictModel):
     tool_calls: list[ToolCallRef] = Field(default_factory=list)
     generated_at: datetime
 
+    @field_validator("schema_version")
+    @classmethod
+    def _check_schema_version(cls, value: str) -> str:
+        return check_schema_version(value, SCHEMA_VERSION)
+
     @model_validator(mode="after")
     def _check_envelope(self) -> "AgentResponse":
         check_other_detail(
@@ -91,7 +99,7 @@ class AgentResponse(StrictModel):
                     "confidence >= 0.5 (CONTRACTS.md sec 2.1)"
                 )
             if a.value is None and not any(
-                g.blocks_field and g.blocks_field.startswith(path) for g in self.gaps
+                references_field(g.blocks_field, path) for g in self.gaps
             ):
                 raise ValueError(
                     f"null Assessment at {path} requires a Gap whose blocks_field references it "
@@ -114,13 +122,16 @@ class DocsAgentResponse(AgentResponse):
         # Sec 4.2: every entry in coverage.unanswered must have a matching Gap in the
         # envelope. "Matching" is validated the way the sec 8 worked example expresses it -
         # a Gap whose blocks_field names findings.coverage.unanswered (the gap's prose
-        # describes the sub-question; prose cannot be matched mechanically).
-        if self.findings.coverage.unanswered and not any(
-            g.blocks_field == "findings.coverage.unanswered" for g in self.gaps
-        ):
+        # describes the sub-question; prose cannot be matched mechanically) - and counted:
+        # *every* entry has one, so one gap cannot stand for several unanswered questions.
+        # An indexed path (findings.coverage.unanswered[1]) names the same field.
+        unanswered = len(self.findings.coverage.unanswered)
+        matching = sum(1 for g in self.gaps if references_field(g.blocks_field, _UNANSWERED))
+        if matching < unanswered:
             raise ValueError(
-                "unanswered sub-questions require a matching Gap whose blocks_field is "
-                "'findings.coverage.unanswered' (CONTRACTS.md sec 4.2)"
+                f"{unanswered} unanswered sub-question(s) but {matching} Gap(s) whose "
+                f"blocks_field is '{_UNANSWERED}': every unanswered entry requires its own "
+                "matching Gap (CONTRACTS.md sec 4.2)"
             )
         return self
 

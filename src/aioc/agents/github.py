@@ -274,7 +274,15 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "this gap. False stops the coordinator's refinement loop, so set it honestly - "
             "a permission error is not resolvable by retrying."
         ),
-        "suggested_query": "The question to ask next, when `resolvable` is true.",
+        "suggested_agent": (
+            "The agent that could close this gap (`incident`, `docs`, `github`, "
+            "`deployment`), or null. Not an agent already on this request for the part of "
+            "the query it was asked to answer - that part is its own, not a gap in yours."
+        ),
+        "suggested_query": (
+            "The exact question to put to `suggested_agent`. Required whenever "
+            "`suggested_agent` is set; null when it is null."
+        ),
     },
 }
 
