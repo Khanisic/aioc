@@ -455,6 +455,26 @@ Zero API calls.
 
 ---
 
+## Day 18 - every recorded judgement by band, and the Docs chain (free)
+
+`scripts/confidence_report.py` read the 9 recorded `respond()` responses field by field, 2026-09-28.
+Zero API calls.
+
+| | |
+|---|---|
+| Judgements | 105 across 9 responses (every `Assessment`, plus the Docs claims); 7 null |
+| By band | 17 two-sources (0.90+), 50 single-source, 27 inferred, 10 hypothesis, 1 speculation |
+| Fields over-claiming their band | 0 - no 0.90+ field cites fewer than two evidence ids, no overall exceeds every field |
+| Unsupported claims above the floor | 5 (two at 0.90: "the corpus contains no document about PR #11", stated with two-source confidence and no source) |
+| Docs coverage | 6/11 sub-questions answered across 3 reports; every unanswered one carries its own gap |
+| Claim chain | 23/28 claims supported; all 23 trace to a document evidence entry and the `search_corpus` call behind it |
+
+- **Calibration floor, not a score.** No field claims more evidence than it cites, which is what the eval harness (Day 19) starts from; whether the confidences are *right* needs the injected ground truth.
+- **The flag the report invented.** `unsupported_claim_above_floor` did not exist until the first run showed the 0.90 negatives; the Docs emit guidance now puts an unsupported claim's confidence below 0.25.
+- **The Day 15 decomposition is the roster's case in numbers.** Three of the four unanswered sub-questions in that run were siblings' parts, each gapped and pointed at the sibling already answering it.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:

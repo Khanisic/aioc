@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 707 tests, no network, no API key; 16 skip without the Docker stack
+uv run pytest -q              # 749 tests, no network, no API key; 16 skip without the Docker stack
 ```
 
 Selecting a subset:
@@ -67,6 +67,8 @@ A type error in `scripts/runlog.py` will not fail `mypy`.
 | `tests/test_deployment_tool.py` | 73 | Day 12 deployment tools against a fake two-ref repository and a scripted Prometheus: the structural keys-only diff, every sec 7.3/7.4 code, the status rule, null-never-zero |
 | `tests/test_retry_loop.py` | 24 | Day 17 validation-retry loop: the error attached as an error `tool_result` on the refused `tool_use`, format and grounding feedback told apart, the cap and the identical-rejection stop, what is never retried, tokens charged per attempt, the record and its summary, the executor's gap keeping the loop's note |
 | `tests/test_audit_log.py` | 17 | Day 17 audit log: every decision written before it is returned, a release the log refused coming back denied, `respond(gate=...)` on its own span, the replay and read scripts, and the Postgres store's round trip and append-only triggers (3 need the stack) |
+| `tests/test_confidence.py` | 26 | Day 18 field-level confidence: the band table pinned to the contract's text and the agents' prompt, band boundaries, every judgement read with its path (assessments and Docs claims), the three flags each way, the intent's exemption, the request profile, rendering, and the digest line |
+| `tests/test_provenance.py` | 16 | Day 18 Docs provenance: the worked example's claim traced to its evidence and retrieval call, chunk match over document match, a source with no evidence shown as none, non-document evidence kept out, coverage gaps by index then in order with `None` for a question no gap reports, rendering, the digest pairing, and the free report script |
 
 The house rule from `.claude/rules/tests.md`: every validated invariant gets a negative test asserting the violation is rejected.
 A test that only proves the happy path does not prove the invariant is enforced.
@@ -100,6 +102,7 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `cost_review.py` | **0** | Free: prices every recorded live run by check and by day against the spend alert (`--alert`, `--since`, `--json`); a floor, and it says what it cannot see |
 | `gate_recorded_run.py` | **0** | Free: puts every recorded `respond()` response through the Day 16 HITL approval gate (fail-closed `DenyAll` by default; `--approver console --identity <who>` asks at the terminal, `--run` picks one run, `--json`); the gate exercised against what the agents actually recommended live. `--persist` (Day 17) writes the decisions to `hitl_audit_log` on the stack's Postgres instead of the in-memory log |
 | `audit_log.py` | **0** | Free: reads the append-only audit log back (`--request`, `--decision`, `--since`, `--limit`, `--json`); needs the stack |
+| `confidence_report.py` | **0** | Free: every recorded `respond()` response read field by field - each judgement with its band and flags, and each Docs report's claim -> source chain and coverage gaps (`--run`, `--json`); the calibration floor the Day 19 eval starts from |
 | `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between the two overlapping tools over 20 plain and 20 adversarially worded queries; `--variant v1` lists the `1.0.0` `analyze_*` server (the baseline), `--variant v1_1` the `1.1.0` `search_*` server (the split), the same ground truth mapped onto each server's names; prints and records the misrouting rate per set with the query-set hash, so before and after compare like with like; `--model` swaps the router |
 
 ```bash
@@ -158,6 +161,9 @@ uv run python scripts/cost_review.py
 uv run python scripts/gate_recorded_run.py
 uv run python scripts/gate_recorded_run.py --persist
 uv run python scripts/audit_log.py --limit 20
+
+# Every recorded judgement by band, the flags, and each Docs report's claim -> source chain. Free.
+uv run python scripts/confidence_report.py
 
 # The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
 # --variant v1 is the 1.0.0 baseline, --variant v1_1 the 1.1.0 split.

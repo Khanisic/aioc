@@ -13,6 +13,17 @@ round, up to a cap) and the synthesis seam (`synthesis.deterministic` by default
 fallback).
 """
 
+from .confidence import (
+    BANDS,
+    Band,
+    FieldConfidence,
+    Flag,
+    RequestProfile,
+    ResponseProfile,
+    band,
+    profile,
+    request_profile,
+)
 from .executor import (
     DEFAULT_MAX_REFINEMENT_ROUNDS,
     AgentRunner,
@@ -34,6 +45,15 @@ from .planner import (
     SelectionPlan,
     utcnow,
 )
+from .provenance import (
+    ClaimProvenance,
+    ClaimSource,
+    CoverageGap,
+    CoverageReport,
+    DocsProvenance,
+    coverage_gaps,
+    provenance,
+)
 from .synthesis import (
     ModelSynthesiser,
     Synthesis,
@@ -45,6 +65,22 @@ from .synthesis import (
 
 __all__ = [
     "ALL_AGENTS",
+    "BANDS",
+    "Band",
+    "ClaimProvenance",
+    "ClaimSource",
+    "CoverageGap",
+    "CoverageReport",
+    "DocsProvenance",
+    "FieldConfidence",
+    "Flag",
+    "RequestProfile",
+    "ResponseProfile",
+    "band",
+    "coverage_gaps",
+    "profile",
+    "provenance",
+    "request_profile",
     "DEFAULT_MAX_REFINEMENT_ROUNDS",
     "SELECTION_SYSTEM_PROMPT",
     "SELECT_TOOL_NAME",

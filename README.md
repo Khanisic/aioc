@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 17 of 30.** All four agents run live on one query. The coordinator plans
+> **Status: Day 18 of 30.** All four agents run live on one query. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -15,7 +15,10 @@ confidence-scored output through custom MCP tools.
 > rules refuse is re-requested with the error attached, and the outcome is recorded.
 > Every recommended production write passes a fail-closed human-in-the-loop approval gate
 > whose every decision is written to an append-only audit log before it is returned.
-> The confidence shore-up and the eval harness are next.
+> Every judgement in a response is read back with its band and flagged where the band
+> promises more evidence than the field cites; every Docs claim traces to the retrieval
+> behind it, and every unanswered sub-question to the gap that reports it.
+> The eval harness is next.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
@@ -94,6 +97,7 @@ uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # f
 uv run python scripts/gate_recorded_run.py         # free; every recorded recommendation through the HITL gate
 uv run python scripts/gate_recorded_run.py --persist   # free; the decisions written to the append-only audit log
 uv run python scripts/audit_log.py                 # free; read the audit log back (--request, --decision, --since)
+uv run python scripts/confidence_report.py         # free; every recorded judgement by band, flags, and the Docs claim -> source chain
 
 # one agent at a time over the real MCP wire (each ~3-5 calls; GitHub ones need GITHUB_TOKEN)
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py            # reads a real PR

@@ -43,7 +43,12 @@ from runlog import RunRecorder  # noqa: E402 - needs the sys.path insert above
 
 from aioc.agents import default_retry_log  # noqa: E402
 from aioc.contracts import DocsAgentResponse, IncidentAgentResponse  # noqa: E402
-from aioc.coordinator import Executor, ModelSynthesiser  # noqa: E402
+from aioc.coordinator import (  # noqa: E402
+    Executor,
+    ModelSynthesiser,
+    provenance,
+    request_profile,
+)
 from aioc.coordinator.executor import respond  # noqa: E402
 from aioc.hitl import DenyAll, HitlGate, default_audit_log  # noqa: E402
 from aioc.llm import LLMSettings  # noqa: E402
@@ -272,11 +277,24 @@ def main(argv: list[str] | None = None) -> int:
             say("  gate   no recommendation to gate")
         for line in default_retry_log().render_summary().splitlines():
             say(f"  {line}")
+        # Field by field (Day 18): every judgement with its band and flags, and the Docs
+        # claim -> source chain with the coverage gaps.
+        rp = request_profile(resp)
+        for line in rp.render():
+            say(f"  {line}")
+        docs_chain = [
+            provenance(r) for r in resp.agent_responses if isinstance(r, DocsAgentResponse)
+        ]
+        for p in docs_chain:
+            for line in p.render():
+                say(f"  {line}")
 
         parallel_agents = [inv.agent.value for inv in resp.selected_agents if not inv.depends_on]
         run.artifact(
             "gate.json", json.dumps([d.model_dump(mode="json") for d in decisions], indent=2)
         )
+        run.artifact("confidence.json", json.dumps(rp.to_dict(), indent=2))
+        run.artifact("provenance.json", json.dumps([p.to_dict() for p in docs_chain], indent=2))
         run.artifact(
             "retries.json",
             json.dumps([r.to_dict() for r in default_retry_log().records], indent=2),

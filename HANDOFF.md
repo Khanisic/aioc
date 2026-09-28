@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 17** of 30, after the validation-retry loop landed in every agent's
-emit step and the approval gate's decisions started going to an append-only audit log.
+Written at the end of **Day 18** of 30, after every judgement in a response got read back with
+its band and flags, and the Docs claim -> source chain and coverage gaps got resolved end to end.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 18.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 19.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 707-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 749-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -48,11 +48,12 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**Two branches are in flight (2026-09-28).** PR #18 (Day 15) is merged. Day 16 is PR #19
+**Three branches are in flight (2026-09-28).** PR #18 (Day 15) is merged. Day 16 is PR #19
 (`d16-schemas-hitl`, rebased onto `main` and open for review). Day 17 is PR #20
-(`d17-retry-loop-audit-log`), stacked on #19 with the Day 16 branch as its base, so GitHub
-retargets it to `main` when #19 merges. Merge #19 first, then #20. `khanisic/main` trails
-`origin/main` by three merges (Days 13-15); the mirror push below is due after the next merge.
+(`d17-retry-loop-audit-log`), stacked on #19; Day 18 is PR #21 (`d18-confidence-provenance`),
+stacked on #20. GitHub retargets each to `main` as its base merges. Merge #19, then #20, then
+#21. `khanisic/main` trails `origin/main` by three merges (Days 13-15); the mirror push below
+is due after the next merge.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -112,6 +113,8 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript; `--title` / `--command` since Day 15 so it renders any recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
 | `hitl/` | **Day 16.** `policy.py`: `classify` (rollback, restart, scale, merge, config write, traffic shift, deploy, destructive - over the action line and its command, negation scoped to the clause, `deploy` the noun excluded) and `approval_reasons` (the agent's flag OR the risk rule OR the classifier). The Incident runtime stamps `requires_approval: true` from it, upward only. `gate.py`: `HitlGate(approver).review(CoordinatorResponse)` -> `GateResult` of `ApprovalDecision` records, one per recommendation in each agent's latest report, `not_required` included; Deployment `rollback_now`/`other` gated unconditionally. Fail-closed: `DenyAll` default, a raising or anonymous approver denies. `ScriptedApprover` (tests, scripts) and `ConsoleApprover` (asks at the terminal, only `y`/`yes` approves). **Day 17:** the gate takes an `AuditLog` and writes every decision before returning it; `respond(gate=...)` is the opt-in entry point (a `hitl_gate` span, decisions read back from `gate.audit` by `request_id`, never from the response); `demo_day10.py` passes one, `scripts/gate_recorded_run.py --persist` replays into the durable log. |
 | `hitl/audit.py` + `docker/postgres/init/05-hitl-audit.sql` | **Day 17.** The audit log. `AuditLog` protocol (`append` or raise; `decisions` back in append order with `request_id` / `decision` / `since` / `limit`), `MemoryAuditLog` (the gate's default - the offline suite never touches Postgres), `PostgresAuditLog` (the `hitl_audit_log` table, applied from 05 on first use when missing, injectable connection for the rolled-back integration tests), `default_audit_log()` for live entry points. **Append-only at the database:** triggers refuse UPDATE, DELETE, and TRUNCATE - verified live at `psql` on 2026-09-28. Fail-closed: a decision the log refused comes back as a denial naming the failure, with the original answer kept in the note. **The table exists on the running stack** (the `--persist` run created it and wrote 15 rows); a fresh volume gets it from `init/`. |
+| `coordinator/confidence.py` | **Day 18.** Field-level confidence read back: `profile(AgentResponse)` / `request_profile(CoordinatorResponse)` walk every `Assessment` (the contract's `walk_assessments`, so new analytic fields need no edit) plus the Docs claims into `FieldConfidence`s (path, band, evidence, flags). `BANDS` is sec 2.1 verbatim, pinned by a test to `CONTRACTS.md` and to `_CONFIDENCE_BANDS` in the agents' prompt. Three flags, reported never validated: `two_sources_band_under_cited` (0.90+ with fewer than two evidence ids), `overall_above_every_field`, `unsupported_claim_above_floor` (found by the first run over recorded output). `digest_line` is the one line every handoff digest now carries after its summary. **No shape moved.** |
+| `coordinator/provenance.py` | **Day 18.** The Docs chain resolved once: `provenance(DocsAgentResponse)` joins each claim's `SourceRef` to the response's document evidence entries (chunk match first, document otherwise) and to the retrieval `tool_call_id` behind them, says whether the claim backs the answer, and pairs every unanswered sub-question with its gap (`coverage_gaps`: indexed `blocks_field` first, then in order, `None` rather than a guess). The Docs digest uses it for its `unanswered (n):` lines. `scripts/confidence_report.py` (free) prints both readings over every recorded response. |
 | `agents/_retry.py` | **Day 17.** The validation-retry loop, one function every agent's forced emit runs inside (`emit_with_retry`): a report pydantic or the agent's grounding rule refuses is answered in the same conversation with the rendered error as an error `tool_result` on the refused `tool_use` (a plain user turn when the model emitted on its own during the tool loop), and the emit tool is forced again; no tool re-runs. `format` (pydantic; the information is there, mis-shaped) and `grounding` (the agent's rule; the data may be absent, record a gap) get different feedback and are recorded apart. Stops: the cap (`AIOC_MAX_VALIDATION_RETRIES`, default 2, per-agent override `max_validation_retries=`) and an identical rejection. Never retried: truncation, no tool call, and errors with `kind=None` (no repository, a tool reply with no timestamp). Gives up by raising the last exception unchanged with a PEP 678 note, which `_error_summary` keeps in the executor's gap. Every emit is a `RetryRecord` in a `RetryLog` (`default_retry_log()` unless injected); `summary()` / `render_summary()` give the recovered-by-kind rate; the three `respond()` scripts clear it before the run, print it, and record `retries.json`. **No live numbers yet** - proven offline against refusals shaped like the three live ones. |
 | `contracts/` enforcement (Day 16) | `schema_version` checked on `AgentResponse` and `CoordinatorResponse` (a different major or a malformed version is refused); gap-to-null matching on field boundaries; Docs: an unsupported claim's statement may not appear in `answer.value`, one gap per unanswered sub-question. No shape moved, still `1.1.0`; the record and the six deferred contract changes are in `docs/design-notes/contract-changes.md`. |
 | `demo-app/services/app.py` | **Day 12** added `service_build_info{service,git_sha} = 1` (the deployed version as a metric, next to `/version`). The image must be rebuilt for it to exist: `docker compose up -d --build --wait`. |
@@ -177,13 +180,13 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 707 passed
+uv run pytest -q                                                   # expect 749 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **707 passed** with the stack up at the end of Day 17 (2026-09-28);
-without Docker Desktop the 16 `integration`-marked tests skip and it is 691. Lint and mypy
-clean. The suite took ~27s on this machine with the stack up; the `test_mcp_toolset.py`
+Costs nothing. Last run: **749 passed** with the stack up at the end of Day 18 (2026-09-28);
+without Docker Desktop the 16 `integration`-marked tests skip and it is 733. Lint and mypy
+clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
 most of it.
 
@@ -223,12 +226,14 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 18 - confidence + provenance shore-up
+## 6. Next work: Day 19 - evals + cost levers
 
-**From the plan:** A: field-level confidence scores on all agent outputs. B: Docs agent claim ->
-source mapping and coverage-gap reporting (the cheap Domain 5 shore-up from `BUILD_PLAN.md`).
+**From the plan:** A: an eval set of 15-20 cases from the seeded incidents plus a scoring harness
+(accuracy, hallucination rate, tool success rate). B: prompt caching on the shared system
+prompts; run the eval suite through the Batch API.
 
-**First, the two live things still open, one run each:**
+**First, the two live things still open, one run each** (unchanged from Day 17 - they need
+PRs #19-#21 merged so the demo deploys the right release):
 
 - **Item 22's live re-run** (the roster) and **the retry loop's first live numbers** come from
   the same command: `check_day15_integration.py --deploy --max-rounds 1` (~12-20 calls; the
@@ -241,7 +246,37 @@ source mapping and coverage-gap reporting (the cheap Domain 5 shore-up from `BUI
   recommendations join the audit log, and the classifier gets checked against new wording
   (item 27).
 
-What already exists for Day 18:
+What already exists for Day 19:
+
+- **The answer key and the corpus are the same rows.** `docker/postgres/init/03-seed-incidents.sql`
+  carries `true_severity`, `true_failure_mode`, `true_root_cause` on every incident (the columns
+  `scripts/ingest_embeddings.py` reads), and `tests/test_seed_corpus.py` already guarantees every
+  `FailureMode` has at least two rows. The chaos injector's four modes are the live half of the
+  key (`demo-app/chaos/inject.py`, 1:1 with the enum), and `chaos_knob_value` is guarded out of
+  every agent's context for exactly this reason (`observability/prometheus.py`).
+- **The scoring inputs are built.** `coordinator/confidence.py` gives every judgement with its
+  band (calibration is scored against the sec 2.1 bands, per the contract); `provenance.py`
+  gives the claim chain (a hallucination in Docs is a claim whose source no evidence names, or a
+  quote the grounding check would refuse - both already impossible in a validated response, so
+  the Docs hallucination rate is measured at the *refusal* count, which the Day 17 `RetryLog`
+  records per kind); tool success rate is `ToolCallRef.ok` over `tool_calls`, already on every
+  response. `check_day5_checkpoint.py` is the single-case preview of scoring a diagnosis against
+  injected truth.
+- **The record format is not frozen** (CLAUDE.md lists eval record formats as free to churn);
+  `test-results/` and `runlog.py` are where every run already lands, and `cost_review.py`
+  prices them. `evaluations/` exists for the committed eval sets and results.
+- **B is one measured decision away.** Item 4: the system prompt plus tool schema is byte-identical
+  on every call and sits at the front of the prefix; `scripts/cost_review.py` shows the
+  per-call input tokens it would save. The Batch API halves the price of the eval sweep and
+  changes nothing in the harness but the entry point.
+
+<!-- superseded Day 18 notes follow, kept for the record -->
+**Day 18 as planned:** A: field-level confidence scores on all agent outputs. B: Docs agent
+claim -> source mapping and coverage-gap reporting. Done; see §3 (`coordinator/confidence.py`,
+`coordinator/provenance.py`), §7 item 30, decisions #32-33, and the Day 18 table in
+`docs/interview-prep/numbers.md`. Both halves are readings of the frozen shapes; no shape moved.
+
+What already existed for Day 18:
 
 - **A is mostly a reading exercise.** Every analytic field is already an `Assessment` with
   its own `confidence` (CONTRACTS.md sec 2.1), the bands are quoted verbatim in every agent's
@@ -702,6 +737,14 @@ for github queries.
    retry re-sends the whole conversation (item 16), so on the tool-driven agents a retry
    costs roughly the PR read again; the identical-rejection rule keeps a model that cannot
    fix something from spending both retries.
+30. **The Docs agent stated negatives as unsupported claims at 0.90** (Day 15 run: "the corpus
+   contains no document describing PR #11", `supported: false`, `sources: []`, confidence
+   0.90). Correct by the contract (an unsupported claim never reaches the answer), wrong as a
+   confidence number, and the reason `unsupported_claim_above_floor` exists. The Docs emit
+   guidance for `Claim.confidence` now says an unsupported claim belongs below 0.25 and that
+   "the corpus says nothing about X" is a coverage gap, not a claim. **Prompt text, so the
+   fix is unmeasured until the next live Docs run** - `confidence_report.py` (free) after it
+   is the check; 5 of 28 recorded claims carry the flag today.
 
 ## 8. Where things are written down
 
@@ -713,7 +756,7 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33) |
 | Eleven debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's) |
 | The routing case study, before and after | `docs/case-study-tool-routing.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |

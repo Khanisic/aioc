@@ -525,3 +525,35 @@ The default log is in memory, so a gate always has one and the offline suite nev
 
 **What I would watch.** The log records what the gate decided, not what anyone did afterwards - AIOC recommends and never acts, so there is no action to log yet.
 When something does act on an approval, the act belongs in the same table as a row that references the decision it acted on.
+
+## 32. Field-level confidence is read back as a profile with flags, not enforced as new invariants
+
+**Context.** Day 18's Reasoning half: field-level confidence scores on all agent outputs.
+The contract already had them - every analytic field is an `Assessment` with its own `confidence`, the bands are normative, the 0.25 floor and the cited-at-0.5 rule are validated.
+Nothing read the numbers back as a whole.
+
+**Decision.** `src/aioc/coordinator/confidence.py` walks every `Assessment` in a response (through the contract's own `walk_assessments`, so a new analytic field is picked up without an edit) plus the Docs agent's claims, and produces one `FieldConfidence` per judgement with its path, band, and evidence; a `ResponseProfile` per report; a `RequestProfile` per request including the coordinator's `answer` and `intent`.
+The band table is read literally as flags rather than turned into validators: a 0.90+ field citing fewer than two sources has claimed a band its evidence does not show; an `overall_confidence` above every field it summarises is worth a reader's attention; an unsupported Docs claim above the speculation floor has a confidence number with nothing behind it.
+None of these becomes a validation error, because none is a rule the contract states as validated - `docs/design-notes/contract-changes.md` is where a stated rule becomes a validated one, and the Day 16 audit already listed the confidence sentence that would need rewording first.
+The band table itself is pinned by a test to the contract's text and to the prompt every agent carries, so the three cannot drift apart.
+Every handoff digest now carries one confidence line after its summary: the lowest stated judgement is what a dependent should not build on.
+
+**The check that mattered.** `scripts/confidence_report.py` (free) over the nine recorded live responses: 105 judgements and not one field over-claiming its band, which is the calibration floor the eval harness starts from - and five unsupported claims above the floor, two of them at 0.90, both "the corpus contains no document about X" stated with two-source confidence and no source.
+That flag did not exist until the report found the case; the Docs emit guidance now says where an unsupported claim's confidence belongs.
+
+**What I would watch.** "Independent sources" cannot be checked by counting evidence ids, so the top-band flag is a floor.
+The eval harness (Day 19) is where calibration becomes a score against injected ground truth; this profile is its input, not its verdict.
+
+## 33. Docs provenance is resolved once, from the claim to the retrieval call and from the unanswered question to its gap
+
+**Context.** Day 18's Platform half: the Docs agent's claim -> source mapping and coverage-gap reporting, which sec 4.2 says `DocsFindings` carries.
+The shapes were there since Day 1 and the Docs agent grounded them in code since Day 8; the Day 16 audit made every unanswered sub-question need its own gap.
+What nobody had was the chain read end to end.
+
+**Decision.** `src/aioc/coordinator/provenance.py` joins a claim's `SourceRef` to the response's document evidence entries (a chunk match when both name a chunk, the document otherwise) and through them to the `tool_call_id` of the retrieval that returned the document, so each source says which evidence ids and which call stand behind it.
+A source no evidence entry names is shown with none, which is the honest reading - the Docs agent cites documents in claims and metrics or context in evidence independently.
+Each unanswered sub-question is paired with the gap that reports it: an indexed `blocks_field` wins, the rest are assigned in report order, and a question no gap reports gets `None` rather than somebody else's gap.
+The Docs digest pairs them the same way, so a downstream agent and the synthesiser see the coverage gap and the gap record the coordinator acts on as one thing.
+
+**What I would watch.** The recorded Day 15 Docs report decomposed the whole four-part query into sub-questions, so three of its four "unanswered" questions were siblings' parts, each gapped and pointed at the right sibling - correct by the rules, and exactly the re-delegation cost item 22's roster is meant to remove.
+Coverage reporting is only as honest as the decomposition; the roster's live re-run is where that shows.

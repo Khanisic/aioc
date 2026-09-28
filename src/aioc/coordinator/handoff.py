@@ -68,6 +68,9 @@ from aioc.contracts import (
     walk_assessments,
 )
 
+from .confidence import digest_line
+from .provenance import coverage_gaps
+
 # Bounds. Every list in a digest is capped at MAX_ITEMS entries with a "(+N more)" marker,
 # every free-text value at MAX_TEXT characters, and the whole block at MAX_DIGEST_CHARS.
 # The ceiling is deliberately far below one tool reply's worth of tokens: a handoff should
@@ -193,6 +196,9 @@ def digest(response: AgentResponse) -> str:
         f'<handoff from="{response.agent.value}" invocation_id="{response.invocation_id}" '
         f'status="{response.status.value}" confidence="{response.overall_confidence:.2f}">',
         f"summary: {_text(response.summary)}",
+        # Field by field (Day 18): the lowest stated judgement is what a dependent should
+        # not build on, and a flag is a band the evidence does not show.
+        digest_line(response),
     ]
     findings = response.findings
     if isinstance(findings, GitHubFindings):
@@ -200,7 +206,7 @@ def digest(response: AgentResponse) -> str:
     elif isinstance(findings, IncidentFindings):
         lines.extend(_incident(findings))
     elif isinstance(findings, DocsFindings):
-        lines.extend(_docs(findings))
+        lines.extend(_docs(findings, response.gaps))
     elif isinstance(findings, DeploymentFindings):
         lines.extend(_deployment(findings))
     else:  # pragma: no cover - the four findings types are the closed set today
@@ -295,7 +301,7 @@ def _incident(f: IncidentFindings) -> list[str]:
     return out
 
 
-def _docs(f: DocsFindings) -> list[str]:
+def _docs(f: DocsFindings, gaps: Sequence[Gap] = ()) -> list[str]:
     out = [f"answer: {_assessment(f.answer)}"]
     supported = [c for c in f.claims if c.supported]
     unsupported = [c for c in f.claims if not c.supported]
@@ -315,8 +321,18 @@ def _docs(f: DocsFindings) -> list[str]:
         f"coverage: searched={cov.documents_searched} retrieved={cov.documents_retrieved} "
         f"cited={cov.documents_cited}"
     )
+    if cov.sub_questions:
+        out.append(f"coverage: {len(cov.answered)}/{len(cov.sub_questions)} sub-questions answered")
     if cov.unanswered:
-        out.append(f"unanswered: {_joined(cov.unanswered)}")
+        # Each unanswered sub-question with the gap that reports it (Day 18), so a reader
+        # sees the coverage gap and the gap record the coordinator acts on as one thing.
+        out.append(f"unanswered ({len(cov.unanswered)}):")
+        for g in _capped(coverage_gaps(cov.unanswered, list(gaps)), out):
+            gap = g.gap_id or "no gap reports it"
+            flag = (
+                "" if g.resolvable is None else (" resolvable" if g.resolvable else " unresolvable")
+            )
+            out.append(f"  - {_text(g.sub_question, 200)} gap={gap}{flag}")
     return out
 
 

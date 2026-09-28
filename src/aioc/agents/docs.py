@@ -199,7 +199,12 @@ _FIELD_GUIDANCE: dict[str, dict[str, str]] = {
             "the gap is visible, not so it can be used in the answer."
         ),
         "sources": "The retrieved documents that state this, each with a verbatim quote.",
-        "confidence": "Calibrated to the band table in the system prompt.",
+        "confidence": (
+            "Calibrated to the band table in the system prompt. An unsupported claim has no "
+            "source behind it, so its confidence belongs below 0.25 - 'the corpus says "
+            "nothing about X' is a coverage gap to report in `coverage.unanswered`, not a "
+            "claim to state with confidence."
+        ),
     },
     "SourceRef": {
         "document_id": "The `id` of a retrieved document, exactly as given. Never invent one.",

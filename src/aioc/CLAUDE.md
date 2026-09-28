@@ -49,6 +49,15 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   verbatim and whose context is the planner's block, the refinement block, and the raising
   response's digest. `synthesis.py` (Day 14) is the synthesis seam - deterministic by default,
   `ModelSynthesiser` opt-in at the entry point, grounded in code with a deterministic fallback.
+  `confidence.py` (Day 18) reads every judgement in a response back - each `Assessment` (through
+  the contract's `walk_assessments`) and each Docs claim, with its path, band, and evidence - as a
+  `ResponseProfile` / `RequestProfile`, and reads the band table literally as flags (a 0.90+ field
+  citing fewer than two sources, an overall above every field, an unsupported claim above the
+  floor); flags are never validators - a stated rule becomes a validated one only through
+  `contract-changes.md`. `provenance.py` (Day 18) joins each Docs claim's sources to the document
+  evidence and the retrieval call behind them, and each unanswered sub-question to the gap that
+  reports it. Every digest carries the one-line confidence profile after its summary, and the
+  Docs digest pairs unanswered questions with their gaps.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `github/`, `docs/`, `deployment/` (Phase 2).
   `deployment/` (Day 12) is the two contract-named tools: `release.py` diffs release manifests
   structurally with values hashed at parse time (keys and paths only, by construction), `health.py`

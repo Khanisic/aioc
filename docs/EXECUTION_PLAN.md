@@ -448,6 +448,22 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** Field-level confidence scores on all agent outputs.
 - **B:** Docs agent **claim → source mapping** and **coverage-gap reporting**
   (the cheap Domain 5 shore-up from `BUILD_PLAN.md`).
+- **Done (2026-09-28):** A: `src/aioc/coordinator/confidence.py` - the contract already made
+  confidence field-level (every analytic field is an `Assessment`; the floor and the cited-at-0.5
+  rule are validated), so Day 18 is the reading: every judgement in a response (every `Assessment`
+  via `walk_assessments`, plus the Docs agent's claims) with its path, band, and evidence, one
+  `ResponseProfile` per report and a `RequestProfile` per request, and the band table read
+  literally as flags - a 0.90+ field citing fewer than two sources, an overall above every field,
+  and (found by the first run over recorded output) an unsupported claim above the speculation
+  floor. Every digest now carries a one-line confidence profile after its summary. B:
+  `src/aioc/coordinator/provenance.py` - each claim's `SourceRef` joined to the response's
+  document evidence and the retrieval call behind it (chunk match first, document otherwise),
+  every unanswered sub-question paired with the gap that reports it (indexed `blocks_field`
+  first, then in order, `None` rather than a guess), and the Docs digest pairing them.
+  `scripts/confidence_report.py` (free) over the 9 recorded responses: 105 judgements, no field
+  over-claims its band, 5 unsupported claims above the floor (two at 0.90), 6/11 sub-questions
+  answered with every unanswered one gapped, 23/23 supported claims traced to an evidence entry.
+  The Docs emit guidance now tells the model an unsupported claim's confidence belongs below 0.25.
 
 ### Day 19 — Evals + cost levers
 - **A:** Eval set of 15–20 cases from the seeded incidents + a scoring harness
