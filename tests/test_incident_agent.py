@@ -66,7 +66,7 @@ def _agent(responses: list[Any]) -> tuple[IncidentAgent, _FakeMessages]:
     fake = _FakeAnthropic(responses)
     settings = LLMSettings(model="claude-opus-5", max_tokens=1024)
     client = LLMClient(settings, client=fake)  # type: ignore[arg-type]
-    return IncidentAgent(client), fake.messages
+    return IncidentAgent(client, max_validation_retries=0), fake.messages
 
 
 _CONTEXT = (

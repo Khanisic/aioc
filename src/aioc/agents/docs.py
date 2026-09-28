@@ -39,7 +39,6 @@ from time import monotonic
 from typing import Any, Protocol
 from uuid import uuid4
 
-from anthropic.types import ToolUseBlock
 from pydantic import Field
 
 from aioc.contracts import (
@@ -59,6 +58,7 @@ from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
 from aioc.retrieval import CorpusSearcher, RetrievalResult, default_embedder
 
 from ._annotate import ROOT, apply_guidance
+from ._retry import ReportRejected, RetryLog, default_retry_log, emit_with_retry
 from ._status import settle_status
 from .incident import _CONFIDENCE_BANDS
 
@@ -280,7 +280,7 @@ prose outside the tool call. Fill its fields as follows:
 Set `overall_confidence` to your confidence in the report as a whole."""
 
 
-class DocsAgentError(RuntimeError):
+class DocsAgentError(ReportRejected):
     """The model did not return usable structured output, or its output cited sources it
     was never given. A malformed-but-present payload raises pydantic's ``ValidationError``
     instead."""
@@ -328,9 +328,19 @@ class DocsAgent:
         self,
         client: LLMClient | None = None,
         retriever: CorpusRetriever | None = None,
+        *,
+        max_validation_retries: int | None = None,
+        retry_log: RetryLog | None = None,
     ) -> None:
         self._client = client or LLMClient()
         self._retriever = retriever or CorpusSearcher(default_embedder())
+        # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
+        self._max_retries = (
+            max_validation_retries
+            if max_validation_retries is not None
+            else self._client.settings.max_validation_retries
+        )
+        self._retry_log = retry_log if retry_log is not None else default_retry_log()
 
     def answer(
         self,
@@ -350,10 +360,10 @@ class DocsAgent:
         through ``emit_docs_report``; and the assembled response is validated against the
         full contract envelope plus this module's grounding checks.
 
-        Raises `DocsAgentError` for missing/ungrounded output and pydantic's
-        ``ValidationError`` for a payload that violates the contract. Re-requesting with
-        the error attached is the Day 17 validation-retry loop - deliberately not built
-        yet, so a bad payload surfaces loudly rather than being silently patched.
+        A refused payload is re-requested with the error attached (the Day 17
+        validation-retry loop); when that loop gives up, the last error is raised:
+        `DocsAgentError` for missing/ungrounded output, pydantic's ``ValidationError``
+        for a payload that violates the contract.
         """
         if not query.strip():
             raise ValueError("query must be non-empty")
@@ -380,60 +390,64 @@ class DocsAgent:
         )
 
         prompt = self._prompt(query.strip(), context.strip(), result)
-        resp = self._client.complete(
+        req = request_id or _new_id("req")
+        inv = invocation_id or _new_id("inv")
+
+        def build(payload: dict[str, Any]) -> DocsAgentResponse:
+            report = DocsReport.model_validate(payload)
+            _check_grounding(report, result)
+            findings = DocsFindings(
+                answer=report.findings.answer,
+                claims=report.findings.claims,
+                coverage=Coverage(
+                    sub_questions=report.findings.coverage.sub_questions,
+                    answered=report.findings.coverage.answered,
+                    unanswered=report.findings.coverage.unanswered,
+                    documents_searched=result.documents_searched,
+                    documents_retrieved=len(result.docs),
+                    documents_cited=_documents_cited(report.findings.claims),
+                    corpus_snapshot=result.corpus_snapshot,
+                ),
+            )
+            evidence = [
+                e.model_copy(update={"tool_call_id": search_ref.id})
+                if e.source_type is SourceType.DOCUMENT
+                else e
+                for e in report.evidence
+            ]
+            return DocsAgentResponse(
+                request_id=req,
+                invocation_id=inv,
+                # `complete` over a null answer settles to `partial` (sec 3; agents/_status).
+                status=settle_status(report.status, findings),
+                status_detail=report.status_detail,
+                summary=report.summary,
+                findings=findings,
+                evidence=evidence,
+                gaps=report.gaps,
+                overall_confidence=report.overall_confidence,
+                tool_calls=[search_ref],
+                generated_at=datetime.now(UTC),
+            )
+
+        # The forced emit, validated by `build`, re-requested on rejection with the error
+        # attached (agents/_retry). Truncation at max_tokens is raised there before any
+        # validation, for the reason the Incident agent gives: a cut-off report parses as
+        # "missing required field" and misdirects the debugging.
+        return emit_with_retry(
+            self._client,
+            agent=AGENT_NAME,
             messages=[{"role": "user", "content": prompt}],
             system=DOCS_STRUCTURED_SYSTEM_PROMPT,
             tools=[_EMIT_TOOL],
-            tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
-        )
-        if usage is not None:
-            usage.input_tokens += resp.usage.input_tokens
-            usage.output_tokens += resp.usage.output_tokens
-        # Same truncation-before-validation order as the Incident agent: a report cut off at
-        # max_tokens parses as "missing required field" and misdirects the debugging.
-        if resp.stop_reason == "max_tokens":
-            raise DocsAgentError(
-                f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
-                f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
-                "Raise AIOC_MAX_TOKENS or narrow the query."
-            )
-
-        payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
-        report = DocsReport.model_validate(payload)
-        _check_grounding(report, result)
-
-        findings = DocsFindings(
-            answer=report.findings.answer,
-            claims=report.findings.claims,
-            coverage=Coverage(
-                sub_questions=report.findings.coverage.sub_questions,
-                answered=report.findings.coverage.answered,
-                unanswered=report.findings.coverage.unanswered,
-                documents_searched=result.documents_searched,
-                documents_retrieved=len(result.docs),
-                documents_cited=_documents_cited(report.findings.claims),
-                corpus_snapshot=result.corpus_snapshot,
-            ),
-        )
-        evidence = [
-            e.model_copy(update={"tool_call_id": search_ref.id})
-            if e.source_type is SourceType.DOCUMENT
-            else e
-            for e in report.evidence
-        ]
-        return DocsAgentResponse(
-            request_id=request_id or _new_id("req"),
-            invocation_id=invocation_id or _new_id("inv"),
-            # `complete` over a null answer settles to `partial` (sec 3; agents/_status).
-            status=settle_status(report.status, findings),
-            status_detail=report.status_detail,
-            summary=report.summary,
-            findings=findings,
-            evidence=evidence,
-            gaps=report.gaps,
-            overall_confidence=report.overall_confidence,
-            tool_calls=[search_ref],
-            generated_at=datetime.now(UTC),
+            emit_tool=EMIT_TOOL_NAME,
+            build=build,
+            error_type=DocsAgentError,
+            usage=usage,
+            max_retries=self._max_retries,
+            log=self._retry_log,
+            request_id=req,
+            invocation_id=inv,
         )
 
     @staticmethod
@@ -506,15 +520,3 @@ def _check_grounding(report: DocsReport, result: RetrievalResult) -> None:
                     f"evidence {entry.id} excerpt does not appear verbatim in "
                     f"{entry.source_ref} - excerpts must never be paraphrased"
                 )
-
-
-def _extract_tool_input(resp: Any, tool_name: str) -> dict[str, Any]:
-    """Pull the forced tool call's input object out of the response, or fail clearly."""
-    for block in resp.content:
-        if isinstance(block, ToolUseBlock) and block.name == tool_name:
-            if not isinstance(block.input, dict):
-                raise DocsAgentError(f"{tool_name} input was not a JSON object")
-            return dict(block.input)
-    raise DocsAgentError(
-        f"model did not call {tool_name} (stop_reason={resp.stop_reason!r}); no structured output"
-    )

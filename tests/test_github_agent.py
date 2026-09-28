@@ -276,7 +276,9 @@ def _agent(
     def factory() -> Any:
         yield toolset
 
-    agent = GitHubAgent(client, toolset=factory, repository="m-misbahuddin/aioc")
+    agent = GitHubAgent(
+        client, toolset=factory, repository="m-misbahuddin/aioc", max_validation_retries=0
+    )
     return agent, fake.messages, toolset
 
 

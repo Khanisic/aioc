@@ -438,6 +438,23 @@ Zero API calls.
 
 ---
 
+## Day 17 - the audit log against the real database, and the retry loop offline (free)
+
+`scripts/gate_recorded_run.py --persist` wrote every recorded decision to `hitl_audit_log` on the stack's Postgres, 2026-09-28.
+Zero API calls.
+
+| | |
+|---|---|
+| Decisions written | 15 (9 recorded responses; the Day 5 record skipped as before) |
+| Read back by `scripts/audit_log.py` | 15, in append order; 8 `not_required`, 7 `denied` under `DenyAll` |
+| `UPDATE hitl_audit_log SET decision='approved'` at `psql` | refused by the trigger (`hitl_audit_log is append-only: UPDATE is not allowed`) |
+| Offline suite | 707 passed with the stack up (666 before Day 17; 24 retry-loop tests, 17 audit-log tests of which 3 need the stack) |
+
+- **The retry loop has no live numbers yet.** It is proven offline against scripted refusals shaped exactly like the three live ones (a paraphrased excerpt, a report about a version no tool returned, a null value with no gap), and every `respond()` script now prints and records the `RetryLog` summary (`retries.json`), so the first live run after Day 17 produces the recovered-by-kind rate for free.
+- **What a retry costs is known from Day 15:** one more model call carrying the whole conversation, so for the GitHub agent roughly the PR read again (item 16). The cap of 2 and the identical-rejection rule bound it.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:

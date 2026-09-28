@@ -491,3 +491,37 @@ All three are pinned verbatim in `tests/test_hitl.py`.
 **What I would watch.** The classifier is a floor, and it errs toward gating.
 A read-only action that says "restart" costs a human a click; a write it misses is still gated if the model flagged it or rated it risky.
 The replay is how to measure that trade on real output as the agents' recommendations change.
+
+## 30. The validation-retry loop lives in the emit step, tells the model which kind of wrong it was, and stops on an identical rejection
+
+**Context.** Day 17's Reasoning half.
+Three live-only refusals were waiting for it: a GitHub excerpt paraphrased (three times across Days 14-15), a Deployment report about a version no health reply covered, and a Docs report with a field the model invented.
+Each cost a whole agent run, and the refinement loop's blind retry of a failed invocation re-ran the whole agent with no reason to expect a different report.
+
+**Decision.** `src/aioc/agents/_retry.py` is one loop shared by all four agents, placed inside the forced-emit step because that is the only place the rejected payload and the error are both in hand.
+The conversation is kept: the model's `tool_use` turn is answered with a `tool_result` carrying `is_error: true` and the rendered error, and the emit tool is forced again.
+Nothing is re-investigated and no tool is re-run.
+The feedback tells the two kinds apart, because the honest fix differs: a `format` rejection (pydantic refusing the shape or a cross-field invariant) means the information is in the report and mis-shaped, so re-emit it; a `grounding` rejection (the agent's own rule refusing a claim about data the model was not given) means the information may be genuinely absent, so remove it, set the value null, and record a gap - a closer paraphrase is not the answer.
+Two stopping rules and no judgement call: the cap (`AIOC_MAX_VALIDATION_RETRIES`, default 2) and an identical rejection, the same rule the refinement loop applies to an identical gap.
+When the loop gives up, the last exception is raised unchanged with a PEP 678 note, so callers keep their error types and the executor's gap says how many attempts were made and why it stopped.
+Truncation, a model that never called the tool, and errors that are not the model's doing (no repository configured, a tool reply with no timestamp) carry `kind=None` and are raised on the first attempt.
+Every emit is recorded in a `RetryLog`, accepted-first-try included, so "retry-resolvable" is a measured rate per kind, not a claim.
+
+**What I would watch.** Every retry re-sends the whole conversation, and for a tool-driven agent that is the PR read and the diff reply again (HANDOFF item 16).
+The cap is 2 for the same reason the refinement cap is; the identical-rejection rule is what keeps a model that cannot fix something from spending both.
+The live numbers do not exist yet: the loop is proven offline against scripted refusals shaped like the live ones, and the next live run of any `respond()` script prints and records the summary.
+
+## 31. Every gate decision is written before it is returned, to a store that only appends
+
+**Context.** Day 17's Platform half: the audit log for every approved and denied action.
+Day 16's gate already produced an `ApprovalDecision` record for every recommendation; nothing persisted it.
+
+**Decision.** The gate takes an `AuditLog` and writes each decision as it makes it, `not_required` included, before returning it.
+The durable store is `hitl_audit_log` on the stack's Postgres (`docker/postgres/init/05-hitl-audit.sql`, additive and re-applicable like 04), and it is append-only at the database: triggers refuse UPDATE, DELETE, and TRUNCATE, so nothing in the code can rewrite a row because nothing anywhere can.
+Correcting a record means appending another that says so.
+The store is the second half of failing closed: a decision the log could not record is not one the gate made, so a release the log refused comes back as a denial that names the failure, and the human's original answer is kept in the note.
+The default log is in memory, so a gate always has one and the offline suite never touches Postgres; live entry points pass the Postgres log, the same opt-in shape as tracing.
+`respond(gate=...)` runs the gate on the finished response under a `hitl_gate` span; the decisions are read back from the log by `request_id`, never from the response, which is the frozen contract.
+
+**What I would watch.** The log records what the gate decided, not what anyone did afterwards - AIOC recommends and never acts, so there is no action to log yet.
+When something does act on an approval, the act belongs in the same table as a row that references the decision it acted on.

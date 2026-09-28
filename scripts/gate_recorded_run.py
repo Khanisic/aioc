@@ -15,6 +15,11 @@ The default approver is the gate's own default, `DenyAll`: the report shows what
 withheld with no human wired in. `--approver console` asks at the terminal for each
 request that needs a human - the approval flow as an operator would see it.
 
+Every decision is written to the gate's audit log before it is returned (Day 17). Without
+`--persist` that log is in memory and the run is a rehearsal; with it, the decisions go to
+`hitl_audit_log` on the stack's Postgres (append-only at the database) and
+`scripts/audit_log.py` reads them back.
+
 A record that no longer validates as a `CoordinatorResponse` (the Day 5 checkpoint
 predates the coordinator) is reported and skipped, not coerced.
 """
@@ -30,7 +35,17 @@ from typing import Any
 from pydantic import ValidationError
 
 from aioc.contracts import CoordinatorResponse
-from aioc.hitl import Approver, ConsoleApprover, Decision, DenyAll, GateResult, HitlGate
+from aioc.hitl import (
+    Approver,
+    AuditLog,
+    ConsoleApprover,
+    Decision,
+    DenyAll,
+    GateResult,
+    HitlGate,
+    MemoryAuditLog,
+    default_audit_log,
+)
 
 _RESULTS = Path(__file__).resolve().parents[1] / "test-results"
 
@@ -79,15 +94,22 @@ def _print(path: Path, result: GateResult) -> None:
         print(f"             decided by {d.decided_by}: {d.note}")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, audit: AuditLog | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run", type=Path, help="one run directory or response.json")
     parser.add_argument("--approver", choices=("deny_all", "console"), default="deny_all")
     parser.add_argument("--identity", help="who is approving (console approver)")
+    parser.add_argument(
+        "--persist",
+        action="store_true",
+        help="write the decisions to hitl_audit_log on the stack's Postgres",
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
 
-    gate = HitlGate(_approver(args.approver, args.identity))
+    if audit is None:
+        audit = default_audit_log() if args.persist else MemoryAuditLog()
+    gate = HitlGate(_approver(args.approver, args.identity), audit=audit)
     summaries: list[dict[str, Any]] = []
     skipped: list[str] = []
     for path in _responses(args.run):
@@ -103,16 +125,25 @@ def main(argv: list[str] | None = None) -> int:
         if not args.json:
             _print(path, result)
 
+    total = sum(s["requests"] for s in summaries)
     if args.json:
-        print(json.dumps({"runs": summaries, "skipped": skipped}, indent=2))
+        print(
+            json.dumps({"runs": summaries, "skipped": skipped, "persisted": args.persist}, indent=2)
+        )
     else:
-        total = sum(s["requests"] for s in summaries)
         human = sum(s["needs_human"] for s in summaries)
         withheld = sum(s["withheld"] for s in summaries)
         print(
             f"\n{len(summaries)} response(s), {total} recommendation(s), {human} needing a "
             f"human, {withheld} withheld."
         )
+        if args.persist:
+            print(f"{total} decision(s) written to the audit log (hitl_audit_log).")
+        else:
+            print(
+                f"{total} decision(s) recorded in memory only, not persisted "
+                "(pass --persist to write them to hitl_audit_log)."
+            )
         for line in skipped:
             print(f"skipped {line}")
     return 0

@@ -76,6 +76,7 @@ from check_day13_sequential import _evaluate as _evaluate_sequential  # noqa: E4
 from demo_day10 import _INJECTOR, _REPO_ROOT, _inject, _Transcript  # noqa: E402
 from runlog import RunRecorder  # noqa: E402
 
+from aioc.agents import default_retry_log  # noqa: E402
 from aioc.contracts import AgentName, InvocationMode  # noqa: E402
 from aioc.coordinator import (  # noqa: E402
     DEFAULT_MAX_REFINEMENT_ROUNDS,
@@ -327,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
         run.artifact("situation.txt", situation)
         start = time.monotonic()
         try:
+            default_retry_log().clear()
             resp = respond(query, situation=situation, executor=executor, tracer=tracer)
             wall_seconds = time.monotonic() - start
         except Exception as exc:
@@ -402,12 +404,18 @@ def main(argv: list[str] | None = None) -> int:
             f"refinement rounds {resp.refinement_rounds} | gaps {len(resp.unresolved_gaps)}"
         )
         say(f"  trace  {trace_url or resp.trace_id or 'not traced'}")
+        for line in default_retry_log().render_summary().splitlines():
+            say(f"  {line}")
         for complaint in complaints:
             say(f"  ! {complaint}")
         # The verdict goes out before the transcript is written, or the replay ends without it.
         say()
         say(f"--- four agents, parallel and sequential: {'PASS' if passed else 'FAIL'} ---")
 
+        run.artifact(
+            "retries.json",
+            json.dumps([r.to_dict() for r in default_retry_log().records], indent=2),
+        )
         run.artifact("response.json", resp.model_dump_json(indent=2))
         run.artifact("transcript.json", t.to_json())
         run.artifact(

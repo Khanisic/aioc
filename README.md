@@ -4,16 +4,18 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 16 of 30.** All four agents run live on one query. The coordinator plans
+> **Status: Day 17 of 30.** All four agents run live on one query. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
 > synthesis that is grounded in code against the agents' evidence. Six contract-named MCP
 > tools run as real stdio servers with a four-class error taxonomy, and every response is
 > a schema-validated `CoordinatorResponse` with measured cost and a trace id; a major
-> `schema_version` mismatch is refused. Every recommended production write passes a
-> fail-closed human-in-the-loop approval gate that records each decision.
-> The validation-retry loop, the audit log, and the eval harness are next.
+> `schema_version` mismatch is refused. A report the contract or an agent's grounding
+> rules refuse is re-requested with the error attached, and the outcome is recorded.
+> Every recommended production write passes a fail-closed human-in-the-loop approval gate
+> whose every decision is written to an append-only audit log before it is returned.
+> The confidence shore-up and the eval harness are next.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
@@ -90,6 +92,8 @@ uv run python scripts/check_agent_selection.py      # coordinator routing (2 of 
 PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free; the GIF
 uv run python scripts/gate_recorded_run.py         # free; every recorded recommendation through the HITL gate
+uv run python scripts/gate_recorded_run.py --persist   # free; the decisions written to the append-only audit log
+uv run python scripts/audit_log.py                 # free; read the audit log back (--request, --decision, --since)
 
 # one agent at a time over the real MCP wire (each ~3-5 calls; GitHub ones need GITHUB_TOKEN)
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day11_github.py            # reads a real PR

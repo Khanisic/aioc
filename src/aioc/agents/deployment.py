@@ -37,7 +37,7 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import Any
 
-from anthropic.types import ToolUseBlock
+from anthropic.types import MessageParam
 from pydantic import Field
 
 from aioc.contracts import (
@@ -60,6 +60,7 @@ from aioc.llm import LLMClient, ToolCallRecord, ToolResult, ToolSpec, Usage
 from aioc.llm.mcp import McpStdioToolset
 
 from ._annotate import ROOT, apply_guidance
+from ._retry import RejectionKind, ReportRejected, RetryLog, default_retry_log, emit_with_retry
 from ._status import settle_status
 from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
 from .incident import _CONFIDENCE_BANDS
@@ -364,23 +365,30 @@ _EMIT_INSTRUCTION = (
 )
 
 
-class DeploymentAgentError(RuntimeError):
+class DeploymentAgentError(ReportRejected):
     """The model did not return usable structured output, or its output referenced data it
     was never given. A malformed-but-present payload raises pydantic's ``ValidationError``
     instead.
 
     ``report`` carries the validated-but-ungrounded report when there is one, so a caller
-    (the check script today, the Day 17 validation-retry loop later) can see exactly what
-    the model wrote rather than only why it was refused."""
+    (the check scripts, the validation-retry loop) can see exactly what the model wrote
+    rather than only why it was refused. ``kind`` is the retry loop's: ``grounding`` by
+    default, ``None`` for a failure a retry cannot change (`agents._retry`)."""
 
-    def __init__(self, message: str, *, report: DeploymentReport | None = None) -> None:
-        super().__init__(message)
+    def __init__(
+        self,
+        message: str,
+        *,
+        report: DeploymentReport | None = None,
+        kind: RejectionKind | None = RejectionKind.GROUNDING,
+    ) -> None:
+        super().__init__(message, kind=kind)
         self.report = report
 
 
 def _emit_never_runs(_args: dict[str, Any]) -> ToolResult:
     raise DeploymentAgentError(
-        f"{EMIT_TOOL_NAME} is a structured-output tool; it is never executed"
+        f"{EMIT_TOOL_NAME} is a structured-output tool; it is never executed", kind=None
     )
 
 
@@ -464,10 +472,19 @@ class DeploymentAgent:
         *,
         toolset: ToolsetFactory | None = None,
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
+        max_validation_retries: int | None = None,
+        retry_log: RetryLog | None = None,
     ) -> None:
         self._client = client or LLMClient()
         self._toolset = toolset or default_toolset
         self._max_rounds = max_tool_rounds
+        # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
+        self._max_retries = (
+            max_validation_retries
+            if max_validation_retries is not None
+            else self._client.settings.max_validation_retries
+        )
+        self._retry_log = retry_log if retry_log is not None else default_retry_log()
 
     def assess(
         self,
@@ -486,9 +503,12 @@ class DeploymentAgent:
         ``emit_deployment_report``, and the assembled response is validated against the
         contract envelope plus this module's grounding checks.
 
-        Raises `DeploymentAgentError` for missing/ungrounded output, `McpToolsetError` if
-        the server cannot be started, and pydantic's ``ValidationError`` for a payload that
-        violates the contract. The validation-retry loop is Day 17, deliberately not here.
+        A refused report is re-requested with the error attached (the Day 17
+        validation-retry loop, `agents._retry`): the same conversation, the emit tool
+        forced again, no tool re-run. When the loop gives up the last error is raised:
+        `DeploymentAgentError` for missing/ungrounded output, pydantic's
+        ``ValidationError`` for a payload that violates the contract. `McpToolsetError`
+        if the server cannot be started.
         """
         if not query.strip():
             raise ValueError("query must be non-empty")
@@ -525,34 +545,39 @@ class DeploymentAgent:
         if usage is not None:
             usage.add(loop.usage)
 
-        if captured:
-            payload = captured[-1]
-        else:
-            resp = self._client.complete(
-                messages=[*loop.messages, {"role": "user", "content": _EMIT_INSTRUCTION}],
-                system=DEPLOYMENT_SYSTEM_PROMPT,
-                tools=[*data_tools, emit_tool],
-                tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
-            )
-            if usage is not None:
-                usage.input_tokens += resp.usage.input_tokens
-                usage.output_tokens += resp.usage.output_tokens
-            if resp.stop_reason == "max_tokens":
-                raise DeploymentAgentError(
-                    f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
-                    f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
-                    "Raise AIOC_MAX_TOKENS or narrow the query."
-                )
-            payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
-
-        report = DeploymentReport.model_validate(payload)
         wire_calls = [r for r in loop.tool_calls if r.name != EMIT_TOOL_NAME]
         ledger = _Ledger(wire_calls, server, context=context)
-        try:
-            return _assemble(report, ledger, request_id, invocation_id)
-        except DeploymentAgentError as exc:
-            exc.report = report
-            raise
+
+        def build(payload: dict[str, Any]) -> DeploymentAgentResponse:
+            report = DeploymentReport.model_validate(payload)
+            try:
+                return _assemble(report, ledger, request_id, invocation_id)
+            except DeploymentAgentError as exc:
+                exc.report = report
+                raise
+
+        # The same conversation forced through the emit tool - or, when the model emitted
+        # on its own during the loop, that payload validated directly. A refused report is
+        # re-requested with the error attached (agents/_retry); no tool is re-run.
+        messages: list[MessageParam] = list(loop.messages)
+        if not captured:
+            messages.append({"role": "user", "content": _EMIT_INSTRUCTION})
+        return emit_with_retry(
+            self._client,
+            agent=AGENT_NAME,
+            messages=messages,
+            system=DEPLOYMENT_SYSTEM_PROMPT,
+            tools=[*data_tools, emit_tool],
+            emit_tool=EMIT_TOOL_NAME,
+            build=build,
+            error_type=DeploymentAgentError,
+            usage=usage,
+            max_retries=self._max_retries,
+            log=self._retry_log,
+            request_id=request_id,
+            invocation_id=invocation_id,
+            captured=captured[-1] if captured else None,
+        )
 
     @staticmethod
     def _prompt(query: str, context: str) -> str:
@@ -723,16 +748,4 @@ def _ground_evidence(entry: Evidence, ledger: _Ledger) -> Evidence:
     raise DeploymentAgentError(
         f"evidence {entry.id} excerpt does not appear verbatim in any tool reply or in the "
         "context - excerpts must never be paraphrased"
-    )
-
-
-def _extract_tool_input(resp: Any, tool_name: str) -> dict[str, Any]:
-    """Pull the forced tool call's input object out of the response, or fail clearly."""
-    for block in resp.content:
-        if isinstance(block, ToolUseBlock) and block.name == tool_name:
-            if not isinstance(block.input, dict):
-                raise DeploymentAgentError(f"{tool_name} input was not a JSON object")
-            return dict(block.input)
-    raise DeploymentAgentError(
-        f"model did not call {tool_name} (stop_reason={resp.stop_reason!r}); no structured output"
     )

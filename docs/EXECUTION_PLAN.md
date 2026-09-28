@@ -427,6 +427,22 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** **Validation-retry loop** — on schema failure, re-request with the specific error
   attached. Track retry-resolvable (format) vs. not (info genuinely absent).
 - **B:** Audit log for every approved/denied action.
+- **Done (2026-09-28):** A: `src/aioc/agents/_retry.py` - every agent's forced emit runs inside
+  one loop: a refused report (pydantic's `ValidationError`, or the agent's own grounding error) is
+  answered in the same conversation with a `tool_result` carrying `is_error: true` and the rendered
+  error, and the emit tool is forced again; no tool is re-run. The two kinds are told apart in the
+  feedback and the record - `format` (the model has the information and mis-shaped it) and
+  `grounding` (it cited what it was not given; an honest gap is the answer) - and every emit is
+  recorded in a `RetryLog` with attempts, rejections, and whether the retry recovered, so
+  retry-resolvable is measured per run. Two stopping rules: the cap (`AIOC_MAX_VALIDATION_RETRIES`,
+  default 2) and an identical rejection; truncation and errors that are not the model's doing are
+  never retried; when the loop gives up the last error is raised unchanged with a note the
+  executor's gap keeps. B: `src/aioc/hitl/audit.py` + `docker/postgres/init/05-hitl-audit.sql` -
+  the gate writes every decision to an `AuditLog` before returning it (`not_required` included), a
+  decision the log refused comes back as a denial that says so, and the Postgres table is
+  append-only at the database (triggers refuse UPDATE, DELETE, and TRUNCATE; verified live).
+  `respond(gate=...)` is the opt-in entry point; `scripts/gate_recorded_run.py --persist` wrote the
+  15 recorded decisions and `scripts/audit_log.py` reads them back. 707 offline tests.
 
 ### Day 18 — Confidence + provenance shore-up
 - **A:** Field-level confidence scores on all agent outputs.

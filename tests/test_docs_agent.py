@@ -215,7 +215,7 @@ def _agent(
     settings = LLMSettings(model="claude-sonnet-5", max_tokens=4096)
     client = LLMClient(settings, client=fake)  # type: ignore[arg-type]
     retriever = _FakeRetriever(retrieval if retrieval is not None else _retrieval())
-    return DocsAgent(client, retriever), fake.messages, retriever
+    return DocsAgent(client, retriever, max_validation_retries=0), fake.messages, retriever
 
 
 _CONTEXT = "Investigating repeat memory pressure on payments-api after last week's incident."

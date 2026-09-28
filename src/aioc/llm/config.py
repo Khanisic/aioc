@@ -54,3 +54,11 @@ class LLMSettings(BaseSettings):
     # Backstop for the tool_use loop: how many assistant<->tool round trips before we give
     # up. A runaway loop is a bug, not a slow answer, so this stays low.
     max_tool_iterations: int = Field(default=8, gt=0, validation_alias="AIOC_MAX_TOOL_ITERATIONS")
+
+    # The validation-retry loop's cap (Day 17, `aioc.agents._retry`): how many times an
+    # agent re-requests a report the contract or its own grounding rules refused, with the
+    # error attached. 0 disables the loop. Two, like the refinement rounds - an identical
+    # rejection stops it earlier, and every retry re-sends the whole conversation.
+    max_validation_retries: int = Field(
+        default=2, ge=0, validation_alias="AIOC_MAX_VALIDATION_RETRIES"
+    )

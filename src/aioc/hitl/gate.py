@@ -30,6 +30,13 @@ untouched; the gate reads it and hands its decisions alongside.
 **Only each agent's latest report is gated.** A refinement round can supersede an earlier
 report from the same agent (the executor judges status the same way); gating the earlier
 one too would ask a human twice about a recommendation the agent has since revised.
+
+**Every decision is written before it is returned (Day 17).** The gate appends each
+record to an `aioc.hitl.audit.AuditLog` as it decides - ``not_required`` included - and
+a decision the log refused is not one the gate made: a release that could not be
+recorded comes back as a denial that says so. The default log is in memory, so a gate
+always has one; live entry points pass the Postgres log, which is append-only at the
+database.
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -54,6 +61,9 @@ from aioc.contracts import (
 )
 
 from .policy import MutationKind, approval_reasons, classify
+
+if TYPE_CHECKING:  # audit imports the records from here; the seam is typing-only this way
+    from .audit import AuditLog
 
 
 class _Record(BaseModel):
@@ -210,15 +220,31 @@ class HitlGate:
         self,
         approver: Approver | None = None,
         *,
+        audit: AuditLog | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        from .audit import MemoryAuditLog  # runtime import: audit.py imports the records above
+
         self._approver: Approver = approver if approver is not None else DenyAll()
+        self._audit: AuditLog = audit if audit is not None else MemoryAuditLog()
         self._clock = clock
+
+    @property
+    def approver(self) -> Approver:
+        return self._approver
+
+    @property
+    def audit(self) -> AuditLog:
+        """Where every decision this gate made was written - the record to read back."""
+        return self._audit
 
     def review(self, response: CoordinatorResponse) -> GateResult:
         return GateResult(decisions=[self.decide(r) for r in requests_for(response)])
 
     def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        return self._log(self._decide(request))
+
+    def _decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if not request.needs_human:
             return self._record(
                 request,
@@ -248,6 +274,28 @@ class HitlGate:
             verdict.decided_by,
             verdict.note,
         )
+
+    def _log(self, decision: ApprovalDecision) -> ApprovalDecision:
+        """Write the decision, or turn it into a denial that says it could not be written.
+        The other fail-closed rules deny when nobody answered; this one denies when the
+        answer would have left no trace."""
+        try:
+            self._audit.append(decision)
+        except Exception as exc:  # noqa: BLE001 - a broken log must deny, not crash
+            denied = self._record(
+                decision.request,
+                Decision.DENIED,
+                type(self._audit).__name__,
+                f"{decision.decision.value} by {decision.decided_by} ({decision.note}) could "
+                f"not be recorded - {type(exc).__name__}: {exc}; an unrecorded decision "
+                "releases nothing, so the gate fails closed",
+            )
+            try:
+                self._audit.append(denied)
+            except Exception:  # noqa: BLE001, S110 - the store is down; the denial still returns
+                pass
+            return denied
+        return decision
 
     def _record(
         self, request: ApprovalRequest, decision: Decision, by: str, note: str

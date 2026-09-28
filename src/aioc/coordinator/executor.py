@@ -117,6 +117,7 @@ from aioc.contracts import (
     InvocationMode,
     ResponseStatus,
 )
+from aioc.hitl import HitlGate
 from aioc.llm import Usage
 from aioc.observability.tracing import NullTracer, RequestTrace, Tracer
 
@@ -730,6 +731,7 @@ def respond(
     coordinator: Coordinator | None = None,
     executor: Executor | None = None,
     tracer: Tracer | None = None,
+    gate: HitlGate | None = None,
 ) -> CoordinatorResponse:
     """Plan and execute one request end to end - the Day 10 demo entry point.
 
@@ -739,6 +741,12 @@ def respond(
     the open trace to the executor for the agent spans. ``tracer`` defaults to
     `NullTracer`; live entry points pass `default_tracer()`. Model-written synthesis and
     the refinement cap are the executor's: pass ``executor=Executor(synthesiser=...)``.
+
+    ``gate`` (Day 17) is the HITL approval gate, opt-in at the entry point like tracing:
+    when given, every recommendation in the finished response is decided and written to
+    the gate's audit log before the response is returned, under a ``hitl_gate`` span. The
+    decisions are read back from ``gate.audit`` by ``request_id``; the response itself is
+    the frozen contract and carries none of them.
     """
     coordinator = coordinator or Coordinator()
     executor = executor or Executor()
@@ -786,6 +794,8 @@ def respond(
     response = executor.execute(
         plan, query, request_id=request_id, received_at=received_at, usage=usage, trace=trace
     )
+    if gate is not None:
+        _review(gate, response, trace)
     trace.end(
         output=response.answer.value if response.answer.value is not None else response.synthesis,
         status=response.status.value,
@@ -793,6 +803,36 @@ def respond(
         output_tokens=usage.output_tokens,
     )
     return response
+
+
+def _review(gate: HitlGate, response: CoordinatorResponse, trace: RequestTrace) -> None:
+    """Every recommendation through the gate, recorded on the trace. No tokens: the gate
+    is code and a human, never a model call."""
+    span = trace.start_span(
+        "hitl_gate",
+        input_text=response.synthesis,
+        metadata={"request_id": response.request_id, "approver": type(gate.approver).__name__},
+    )
+    try:
+        result = gate.review(response)
+    except Exception as exc:
+        span.end(
+            output=None,
+            status="error",
+            input_tokens=0,
+            output_tokens=0,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    span.end(
+        output=(
+            f"{len(result.decisions)} recommendation(s): {len(result.released)} released, "
+            f"{len(result.withheld)} withheld"
+        ),
+        status="ok",
+        input_tokens=0,
+        output_tokens=0,
+    )
 
 
 def _planned_context(inv: AgentInvocation, plan: SelectionPlan) -> str:
@@ -878,9 +918,17 @@ def _error_summary(exc: Exception, limit: int = 600) -> str:
     """The exception's text, whitespace-collapsed and capped. The whole message, not its
     first line: a pydantic `ValidationError` puts the one fact that matters (which field,
     which rule) on the second line, and the first live sequential run lost it to a
-    first-line-only cut - the response said "1 validation error" and nothing else."""
+    first-line-only cut - the response said "1 validation error" and nothing else.
+
+    Notes on the exception (PEP 678) follow the message and survive the cap: the Day 17
+    validation-retry loop attaches one saying how many attempts it made and why it
+    stopped, and that is the fact a reader of the gap needs next."""
+    notes = " | ".join(" ".join(str(n).split()) for n in getattr(exc, "__notes__", []) or [])
     text = " ".join(str(exc).split())
-    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+    room = limit - (len(notes) + 3 if notes else 0)
+    if len(text) > room:
+        text = text[: max(room - 3, 0)].rstrip() + "..."
+    return f"{text} | {notes}" if notes else text
 
 
 def _invocation_failed_gap(inv: AgentInvocation, query: str, exc: Exception) -> Gap:

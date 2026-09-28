@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 253 tests, no network, no API key; 10 skip without the Docker stack
+uv run pytest -q              # 707 tests, no network, no API key; 16 skip without the Docker stack
 ```
 
 Selecting a subset:
@@ -65,6 +65,8 @@ A type error in `scripts/runlog.py` will not fail `mypy`.
 | `tests/test_mcp_toolset.py` | 9 | Days 11-12 MCP client seam over the real stdio wire (server subprocesses with blanked credentials, so no network) |
 | `tests/test_deployment_agent.py` | 24 | Day 12 Deployment agent: fact stamping, grounding rejections, the not-looked-is-a-gap rules, `requires_approval` stamped |
 | `tests/test_deployment_tool.py` | 73 | Day 12 deployment tools against a fake two-ref repository and a scripted Prometheus: the structural keys-only diff, every sec 7.3/7.4 code, the status rule, null-never-zero |
+| `tests/test_retry_loop.py` | 24 | Day 17 validation-retry loop: the error attached as an error `tool_result` on the refused `tool_use`, format and grounding feedback told apart, the cap and the identical-rejection stop, what is never retried, tokens charged per attempt, the record and its summary, the executor's gap keeping the loop's note |
+| `tests/test_audit_log.py` | 17 | Day 17 audit log: every decision written before it is returned, a release the log refused coming back denied, `respond(gate=...)` on its own span, the replay and read scripts, and the Postgres store's round trip and append-only triggers (3 need the stack) |
 
 The house rule from `.claude/rules/tests.md`: every validated invariant gets a negative test asserting the violation is rejected.
 A test that only proves the happy path does not prove the invariant is enforced.
@@ -96,7 +98,8 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `check_day13_sequential.py` | ~8-15 | The sequential path end to end through `respond()`: the coordinator plans Deployment after GitHub on its own, the executor hands GitHub's digest to Deployment, and the recorded `context_passed` shows it; since Day 14 the refinement loop re-delegates the gaps the agents leave (`--max-rounds`, default 2; `0` reproduces the Day 13 form) and the model writes the synthesis (`--deterministic-synthesis` skips that call); `--deploy` recreates the demo at the PR's head commit first (needs the stack and the GitHub token) |
 | `check_day15_integration.py` | ~12-20 (**~$1.10 measured**, 343-348k input tokens) | The whole system on one query: all four agents, the parallel *and* the sequential path in one request. Deploys the demo at PR #11's merge commit (`--deploy`), injects a real fault, builds the situation from live Prometheus metrics, and asserts all four agents are planned and answer, that a parallel group of two or more overlapped in measured wall-clock time, and everything `check_day13_sequential.py` asserts about the sequential half; `--max-rounds` caps the refinement loop, `--deterministic-synthesis` skips the synthesis call; resets chaos itself and records a transcript `render_demo_gif.py` can replay |
 | `cost_review.py` | **0** | Free: prices every recorded live run by check and by day against the spend alert (`--alert`, `--since`, `--json`); a floor, and it says what it cannot see |
-| `gate_recorded_run.py` | **0** | Free: puts every recorded `respond()` response through the Day 16 HITL approval gate (fail-closed `DenyAll` by default; `--approver console --identity <who>` asks at the terminal, `--run` picks one run, `--json`); the gate exercised against what the agents actually recommended live |
+| `gate_recorded_run.py` | **0** | Free: puts every recorded `respond()` response through the Day 16 HITL approval gate (fail-closed `DenyAll` by default; `--approver console --identity <who>` asks at the terminal, `--run` picks one run, `--json`); the gate exercised against what the agents actually recommended live. `--persist` (Day 17) writes the decisions to `hitl_audit_log` on the stack's Postgres instead of the in-memory log |
+| `audit_log.py` | **0** | Free: reads the append-only audit log back (`--request`, `--decision`, `--since`, `--limit`, `--json`); needs the stack |
 | `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between the two overlapping tools over 20 plain and 20 adversarially worded queries; `--variant v1` lists the `1.0.0` `analyze_*` server (the baseline), `--variant v1_1` the `1.1.0` `search_*` server (the split), the same ground truth mapped onto each server's names; prints and records the misrouting rate per set with the query-set hash, so before and after compare like with like; `--model` swaps the router |
 
 ```bash
@@ -150,8 +153,11 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day15_integration.py --deploy
 # What every recorded live run has cost, by check and by day. Free.
 uv run python scripts/cost_review.py
 
-# Every recorded live recommendation through the HITL approval gate. Free.
+# Every recorded live recommendation through the HITL approval gate. Free. With --persist the
+# decisions are written to the append-only audit log on the stack's Postgres; audit_log.py reads it.
 uv run python scripts/gate_recorded_run.py
+uv run python scripts/gate_recorded_run.py --persist
+uv run python scripts/audit_log.py --limit 20
 
 # The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
 # --variant v1 is the 1.0.0 baseline, --variant v1_1 the 1.1.0 split.
