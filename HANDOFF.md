@@ -49,9 +49,9 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 ## 3. Where the code is
 
 **Two branches are in flight (2026-09-28).** PR #18 (Day 15) is merged. Day 16 is PR #19
-(`d16-schemas-hitl`, rebased onto `main` and open for review). Day 17 is
-`d17-retry-loop-audit-log`, branched from the Day 16 commit, so it rebases cleanly onto `main`
-once #19 merges. Merge #19 first, then rebase and open the Day 17 PR. `khanisic/main` trails
+(`d16-schemas-hitl`, rebased onto `main` and open for review). Day 17 is PR #20
+(`d17-retry-loop-audit-log`), stacked on #19 with the Day 16 branch as its base, so GitHub
+retargets it to `main` when #19 merges. Merge #19 first, then #20. `khanisic/main` trails
 `origin/main` by three merges (Days 13-15); the mirror push below is due after the next merge.
 
 | Remote | Repo | Role |
