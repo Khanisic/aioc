@@ -392,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
                 "parallel_agents": parallel_agents,
                 "agents_responded": [r.agent.value for r in resp.agent_responses],
                 "overlap_ms": overlap,
-                "cost": {"in": resp.cost.input_tokens, "out": resp.cost.output_tokens},
+                "cost": resp.cost.model_dump(),
                 "complaints": complaints,
             },
             message="; ".join(complaints) if complaints else "trace recorded with parallel agents",

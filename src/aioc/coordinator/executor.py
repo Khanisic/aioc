@@ -446,7 +446,13 @@ class Executor:
             refinement_rounds=rounds,
             unresolved_gaps=unresolved,
             status=status,
-            cost=Cost(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens),
+            cost=Cost(
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                # Null until a response reports them: not measured is not zero.
+                cache_read_tokens=usage.cache_read_tokens,
+                cache_write_tokens=usage.cache_write_tokens,
+            ),
             trace_id=trace.trace_id,
             completed_at=utcnow(),
         )

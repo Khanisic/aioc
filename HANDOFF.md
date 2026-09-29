@@ -1,12 +1,13 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 18** of 30, after every judgement in a response got read back with
-its band and flags, and the Docs claim -> source chain and coverage gaps got resolved end to end.
+Written at the end of **Day 19** of 30, after the eval harness, prompt caching, and the Batch
+API path were built and proven offline - and before any of them had met the real API, because
+the Anthropic key in `.env` is revoked (§4, §7 item 31). **Replacing the key is the first thing.**
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 19.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 20.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +17,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 749-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 918-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -48,12 +49,23 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**Three branches are in flight (2026-09-28).** PR #18 (Day 15) is merged. Day 16 is PR #19
-(`d16-schemas-hitl`, rebased onto `main` and open for review). Day 17 is PR #20
-(`d17-retry-loop-audit-log`), stacked on #19; Day 18 is PR #21 (`d18-confidence-provenance`),
-stacked on #20. GitHub retargets each to `main` as its base merges. Merge #19, then #20, then
-#21. `khanisic/main` trails `origin/main` by three merges (Days 13-15); the mirror push below
-is due after the next merge.
+**`origin/main` holds Day 16 and nothing after it (2026-09-29).** Read this paragraph before
+merging anything.
+
+- PR #19 (Day 16) is merged into `main`.
+- PR #20 (Day 17) was merged 26 seconds later, before GitHub had retargeted it, so it landed
+  on **`d16-schemas-hitl`**, not `main`. Day 17 is not on `main`. The merge commit
+  (`0358ff4`, on `origin/d16-schemas-hitl`) adds no content of its own.
+- PR #21 (Day 18, `d18-confidence-provenance`) did not exist until 2026-09-29; the previous
+  version of this file described it as open. It is open now, against `main`, and carries the
+  two Day 17 commits as its first two - **merging #21 puts Days 17 and 18 on `main`
+  together.** `origin/d16-schemas-hitl` can be deleted afterwards.
+- Day 19 is `d19-evals-cost-levers`, cut from `d18-confidence-provenance` and pushed, with
+  its PR stacked on #21. **Merge #21 first, then wait for the Day 19 PR's base to read
+  `main` before merging it** - the trap in §4 is exactly this.
+
+`khanisic/main` trails `origin/main` by four merges (Days 13-16); the mirror push below is
+due after the next merge.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -86,7 +98,12 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | Area | State |
 |---|---|
 | `contracts/` | Frozen at **`1.1.0`** since Day 14 (the pre-authorized split, §7.5/7.6; rationale in `docs/design-notes/contract-changes.md`), executable as Pydantic v2. Do not change a frozen shape. |
-| `llm/` | Harness: `complete`, `stream_text`, `run_tool_loop`. Defaults `claude-sonnet-5`, 8192 tokens - both from measurement. |
+| `llm/` | Harness: `complete`, `stream_text`, `run_tool_loop`. Defaults `claude-sonnet-5`, 8192 tokens - both from measurement. **Day 19:** every request is shaped by `request_params`, which is where prompt caching lives, and every response's usage is counted by `Usage.record`. |
+| `llm/` prompt caching | **Day 19. On by default (`AIOC_PROMPT_CACHING`), unmeasured live.** The system prompt goes as one text block carrying `cache_control`, which caches the tool schemas with it (render order is tools, system, messages); the tool loop also marks its tail (top-level `cache_control`), so round n reads what round n-1 wrote. A single forced call never marks its tail. `AIOC_PROMPT_CACHE_TTL` is `5m` or `1h`. `Usage` carries `cache_read_tokens` / `cache_write_tokens` (`None` until a response reports them) and `input_tokens` is the whole prompt, however billed; `CoordinatorResponse.cost` fills the contract's two cache fields, null since Day 1. Tests read the system prompt off a request with `aioc.llm.system_text`. |
+| `llm/batch.py` | **Day 19. Proven against a scripted batch endpoint, never against the real one.** `MessageBatcher` (submit, poll, results by `custom_id`), `request_key` (the hash of a request's arguments, also its `custom_id`), and `DeferredClient`: an `LLMClient` whose `complete` raises `PendingRequest` until a flushed batch has answered it, so the unmodified agents run through a batch by being replayed. The tool loop and streaming are refused there. |
+| `llm/pricing.py` | **Day 19.** The one price table (read 2026-09-25), the cache write multipliers (1.25x for 5m, 2x for 1h), the batch discount (0.5). `price` and `price_uncached`; an unlisted model is unpriced, not guessed. `scripts/cost_review.py` imports it. |
+| `evals/` + `evaluations/cases/` | **Day 19. No live score yet.** `seeded-incidents.json` is 20 cases, 38 items: each seeded incident as a diagnosis and as a recall, plus two no-precedent probes. A case selects verbatim seed lines; the expected values are read from the seed SQL at load; `check_leaks` refuses a context that carries its answer. Scoring is pure (`scoring.py`): accuracy with abstentions counted apart, every checkable statement in a diagnosis looked for in its context, tool success, calibration per band. `runner.py` is realtime or batch over the shipped agents, a `Usage` and `RetryLog` per item, and `EvalAborted` on a refused credential. |
+| `scripts/run_evals.py` | **Day 19.** `--list`, `--show <case>`, `--dry-run`, `--rescore <run-dir>`, `--recorded-tools` are free. Live: one call an item (38), `--mode batch`, `--no-cache`, `--cache-ttl`, `--tasks`, `--cases`, `--limit`, `--model`, `--write`. Records `report.md`, `eval.json`, `responses.json`. Exit 2 on no key or a refused one. |
 | `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated), with a `usage` accumulator (the Day 7 cost seam). The schema-annotation helper it pioneered now lives in `agents/_annotate.py`, shared with the Docs agent. |
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
@@ -151,13 +168,30 @@ the Postgres trap above: the error names the wrong cause). `.env` carries
 and `scripts/check_day9_trace.py` now fails fast with the region hint instead of silently
 losing spans on a background thread.
 
+**The Anthropic API key in `.env` is revoked (found 2026-09-29).** Every live script fails
+with `401 API key is invalid`, and so does the free `models.list` call, so it is the key and
+not a request. It was diagnosed without reading it, the way the port collision was: no
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_BASE_URL` in the shell, the loaded
+value is 108 characters and starts `sk-ant-`, with no stray quote or space. This is §7 item
+10 again (2026-08-23); only the account owner can rotate it at console.anthropic.com. One free
+call says whether the new key works:
+
+```bash
+uv run python -c "import anthropic; from aioc.llm import LLMSettings; k = LLMSettings().anthropic_api_key; print([m.id for m in anthropic.Anthropic(api_key=k.get_secret_value()).models.list(limit=1).data])"
+```
+
+**A stacked PR merged seconds after its base lands on the base's branch.** GitHub retargets a
+stacked PR to `main` when its base merges, but not instantly. PR #20 was merged 26 seconds
+after #19 and went into `d16-schemas-hitl`. Before merging a stacked PR, check that its base
+reads `main` on the PR page - or `gh pr view <n> --json baseRefName`.
+
 Other traps:
 
 - **Docker Desktop does not start itself.** When it is down, `docker compose ps` fails with
   `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified` and the
-  16 `integration`-marked tests skip. `Start-Process "C:\Program Files\Docker\Docker\Docker
+  17 `integration`-marked tests skip. `Start-Process "C:\Program Files\Docker\Docker\Docker
   Desktop.exe"` from PowerShell, wait ~30 s, then `docker compose up -d --wait` (about 20 s
-  more). Day 17 did exactly this.
+  more). Day 17 did exactly this, and so did Day 19.
 - **GNU Make is not installed.** Every `Makefile` recipe is a single pasteable command.
 - **`PYTHONIOENCODING=utf-8` is required** on any command that prints model output. The
   console is cp1252 and a Unicode arrow in a summary crashes the print.
@@ -180,12 +214,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 749 passed
+uv run pytest -q                                                   # expect 918 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **749 passed** with the stack up at the end of Day 18 (2026-09-28);
-without Docker Desktop the 16 `integration`-marked tests skip and it is 733. Lint and mypy
+Costs nothing. Last run: **918 passed** with the stack up at the end of Day 19 (2026-09-29);
+without Docker Desktop the 17 `integration`-marked tests skip and it is 901. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
 most of it.
@@ -226,11 +260,72 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 19 - evals + cost levers
+## 6. Next work: Day 20 - the baseline
 
-**From the plan:** A: an eval set of 15-20 cases from the seeded incidents plus a scoring harness
-(accuracy, hallucination rate, tool success rate). B: prompt caching on the shared system
-prompts; run the eval suite through the Batch API.
+**From the plan:** Checkpoint: full eval run, results committed to `evaluations/baseline.md`.
+Record cached vs. uncached and batch vs. realtime cost deltas - these are portfolio numbers.
+
+**Everything Day 20 needs is built; none of it has run live.** In order:
+
+1. **Replace the API key** (§4). Nothing below works until the free `models.list` call does.
+2. **Merge PR #21**, which puts Days 17 and 18 on `main` (§3), then the Day 19 PR once
+   its base reads `main`.
+3. **A four-item smoke test before the full set** - the first time caching and the harness
+   meet the real API, so spend a little to find out what breaks:
+   `run_evals.py --tasks diagnose --limit 4` (4 calls, about $0.12). What to read in the
+   report: `of which read from the cache` should be zero on the first item and about 4.4k on
+   the other three. If it is zero on all four, something in the prefix varies by request;
+   diff two recorded requests.
+4. **The three runs that give Day 20 its deltas**, each on the full set (38 calls):
+
+   | Run | Command | Projected |
+   |---|---|---|
+   | realtime, uncached (the baseline) | `run_evals.py --no-cache` | ~$1.13 |
+   | realtime, cached | `run_evals.py` | ~$0.87 |
+   | batch, cached | `run_evals.py --mode batch --cache-ttl 1h` | under $0.60 |
+
+   About $2.60 for all three, projected from `--dry-run` with 2,000 output tokens a report
+   assumed. **Say these numbers before running, and the measured ones after.** The scores
+   should be the same across the three within model noise; the cost is what differs.
+   `--write evaluations/results/<name>.md` puts each report where it can be committed.
+5. **`evaluations/baseline.md`** is the three reports' headline numbers side by side, with
+   the set's `sha256`, so Day 24's re-run compares like with like.
+
+**What to expect, so a surprise is recognisable as one:**
+
+- Failure-mode accuracy will be well below 100%, by design. `case_07` (an ORM upgrade that
+  looks like latency) and `case_13` (a deploy in a dependency, scored as downstream latency)
+  are hard on purpose, and `case_08` has one event and no metrics - the calibrated answer
+  there is low confidence or a null, and the harness counts an abstention apart from a wrong
+  answer.
+- Severity accuracy will be worse than failure mode. The recorded severities are withheld
+  and the contract does not define the levels, so the agent is judging from impact alone.
+  "Within one level" is the number to quote.
+- The Incident agent's hallucination rate is the number nobody knows. It has no in-code
+  grounding check (the other three agents do), so invented excerpts have never been counted.
+  If it is high, the fix is the Docs agent's pattern: ground in code, refuse, and let the
+  retry loop ask again.
+- Whether a batch's requests read each other's cache is unknown. They are processed
+  concurrently, and a cache entry is readable only once its writer has started streaming,
+  so the first batch may be all writes. `--cache-ttl 1h` costs 2x per write; if the batch
+  report shows no reads, run it with `--no-cache` instead and say so.
+
+**Still open from before Day 19, unchanged, and also blocked on the key:**
+
+- **Item 22's live re-run** (the roster) and **the retry loop's first live numbers**:
+  `check_day15_integration.py --deploy --max-rounds 1` (~12-20 calls; the last two measured
+  $1.10-1.16, ~$0.60 expected if the roster works, and less again now that the tool loop
+  caches its tail - say all three before running). It prints and records the `RetryLog`
+  summary (`retries.json`) and now the cache counters.
+- **Re-run `scripts/gate_recorded_run.py --persist` after it** (free).
+- **`scripts/confidence_report.py`** (free) after any live Docs run is the check on item 30.
+
+<!-- superseded Day 19 notes follow, kept for the record -->
+**Day 19 as planned:** A: an eval set of 15-20 cases from the seeded incidents plus a scoring
+harness (accuracy, hallucination rate, tool success rate). B: prompt caching on the shared system
+prompts; run the eval suite through the Batch API. Done offline; see §3 (`llm/` prompt caching,
+`llm/batch.py`, `llm/pricing.py`, `evals/`, `scripts/run_evals.py`), §7 items 31-35, decisions
+#34-36, war story #12, and the Day 19 table in `docs/interview-prep/numbers.md`.
 
 **First, the two live things still open, one run each** (unchanged from Day 17 - they need
 PRs #19-#21 merged so the demo deploys the right release):
@@ -498,8 +593,9 @@ for github queries.
    so patch level under §0: one dated entry in `docs/design-notes/contract-changes.md`, a §9
    row, and a bump to `1.0.1` would clear all three at once. Each is flagged in its module
    docstring; none is done silently.
-4. **Prompt caching not enabled.** The system prompt plus tool schema is byte-identical on
-   every call and sits at the front of the prefix. Obvious win, not yet taken.
+4. ~~**Prompt caching not enabled.**~~ **Enabled on Day 19, unmeasured live** (§3, item 33).
+   The system prompt plus tool schema is byte-identical on every call and sits at the front
+   of the prefix; a test now holds it to that.
 5. **Haiku is now an open measurement, not a blocked one.** It scored 1/3 on contract-valid
    structured output where Sonnet scored 3/3, and blind retry made it no cheaper than Sonnet.
    The retry loop that re-sends *with the validation error attached* exists as of Day 17
@@ -745,6 +841,34 @@ for github queries.
    "the corpus says nothing about X" is a coverage gap, not a claim. **Prompt text, so the
    fix is unmeasured until the next live Docs run** - `confidence_report.py` (free) after it
    is the check; 5 of 28 recorded claims carry the flag today.
+31. **The Anthropic API key is revoked (2026-09-29).** `401 API key is invalid` on every
+   call including the free `models.list`; diagnosed without reading the key (§4). Everything
+   live is blocked on it: the Day 20 baseline, item 22's re-run, the retry loop's first
+   numbers. The WIF notes in item 10 are still the keyless path for CI and still do not help
+   on this laptop. **Nothing was spent finding this out** - the refusal comes before billing.
+32. **Day 19 has no live numbers at all.** The harness, caching, and the batch path are
+   proven against scripted clients; 918 tests, zero model calls. Three things are therefore
+   claims until measured: that a request's prefix is actually served from the cache, that
+   the Batch API accepts these requests (a forced `tool_choice` with a cache marker on the
+   system block), and every score. §6 is the order to find out in.
+33. **Forcing the emit tool after a tool loop invalidates the messages cache** - by the
+   API's documented invalidation rules, not yet by measurement here. A changed `tool_choice`
+   keeps the tools and system caches and drops the messages one, so the GitHub and Deployment
+   agents' final emit call re-reads its whole conversation at full price; only the tools-and-system prefix is read
+   from the cache there. The tool loop's own rounds do read each other. If the measured cost
+   says it matters, the restructure is to let the model emit on its own during the loop
+   (it already can - the capture path) and force only when it did not.
+34. **The Incident agent does not ground its evidence in code.** The Docs, GitHub, and
+   Deployment agents refuse a paraphrased excerpt; the Incident agent's guidance asks for a
+   verbatim one and nothing checks. The eval measures it (`ground_diagnosis`) and is the
+   first thing that ever has. Whether to add the check is a decision for after the first
+   score, not before it.
+35. **The eval scores two agents of four.** The seeded incidents carry no answer key for a
+   PR or a release, and the tool loop cannot be batched (its tools would run again on every
+   replay). GitHub and Deployment are covered by the live checks and by tool success over
+   recorded runs (30/30 across 19 reports, a survivor's number). An eval for them needs
+   recorded tool replies and its own answer key; `check_agent_selection.py`'s missing case
+   (item 24) is the same kind of gap for the planner.
 
 ## 8. Where things are written down
 
@@ -756,8 +880,9 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33) |
-| Eleven debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36) |
+| Twelve debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's, #12 Day 19's) |
+| The eval set, and the rule that a case selects and never authors | `evaluations/README.md` |
 | The routing case study, before and after | `docs/case-study-tool-routing.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |

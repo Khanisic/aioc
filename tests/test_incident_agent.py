@@ -31,7 +31,7 @@ from aioc.agents import (
 # thing that must have a test, so it is imported directly rather than through the package API.
 from aioc.agents.incident import _EMIT_SCHEMA, _apply_guidance
 from aioc.contracts import AgentName, FailureMode, IncidentAgentResponse, ResponseStatus, Severity
-from aioc.llm import LLMClient, LLMSettings
+from aioc.llm import LLMClient, LLMSettings, system_text
 
 # --------------------------------------------------------------------------- fakes
 
@@ -101,7 +101,7 @@ def test_context_is_passed_explicitly_in_the_prompt():
 def test_system_prompt_carries_the_graded_behaviours():
     agent, messages = _agent([_message("ok")])
     agent.investigate("What broke?", context=_CONTEXT)
-    system = messages.calls[0]["system"]
+    system = system_text(messages.calls[0]["system"])
     assert system == INCIDENT_SYSTEM_PROMPT
     # The three behaviours Day 3 is graded on: SRE persona, evidence citation, confidence.
     assert "Site" in system and "Reliability" in system
@@ -301,7 +301,7 @@ def test_diagnose_forces_the_emit_tool_with_the_structured_prompt():
     agent.diagnose("What broke?", context=_CONTEXT)
     call = messages.calls[0]
 
-    assert call["system"] == INCIDENT_STRUCTURED_SYSTEM_PROMPT
+    assert system_text(call["system"]) == INCIDENT_STRUCTURED_SYSTEM_PROMPT
     assert call["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
     assert [t["name"] for t in call["tools"]] == [EMIT_TOOL_NAME]
     # Context is still passed explicitly - the Day 3 invariant holds on the structured path.

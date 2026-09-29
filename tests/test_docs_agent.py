@@ -24,7 +24,7 @@ from aioc.agents import (
 )
 from aioc.agents.docs import _EMIT_SCHEMA, DEFAULT_TOP_K, _apply_guidance
 from aioc.contracts import AgentName, DocsAgentResponse, ResponseStatus
-from aioc.llm import LLMClient, LLMSettings, Usage
+from aioc.llm import LLMClient, LLMSettings, Usage, system_text
 from aioc.retrieval import RetrievalResult, RetrievedDoc
 
 # --------------------------------------------------------------------------- fakes
@@ -270,7 +270,7 @@ def test_prompt_carries_context_documents_and_query_explicitly():
     assert 'retrieved="2" searched="18" mode="hybrid"' in prompt
     assert prompt.endswith(f"Documentation query: {_QUERY}")
 
-    system = call["system"]
+    system = system_text(call["system"])
     assert system == DOCS_STRUCTURED_SYSTEM_PROMPT
     assert "ONLY from the retrieved documents" in system
     assert "0.90-1.00" in system  # the CONTRACTS.md sec 2.1 band table, verbatim

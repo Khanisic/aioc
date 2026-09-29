@@ -10,6 +10,12 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   `ToolSpec`/`ToolResult`, and per-call `ToolCallRecord` audit records. The agents and the
   coordinator build on it. Deliberately decoupled from `contracts/` - it mirrors `ToolCallRef`
   in spirit without importing it (the contract describes the MCP boundary, which lands in Phase 2).
+  Day 19: `request_params` is the one place a request is shaped, and it is where prompt caching
+  lives (the marker on the system block, plus the tool loop's tail). Count a response's usage with
+  `Usage.record`, never by adding `input_tokens` yourself - the API splits the prompt three ways
+  once caching is on. Nothing that varies by request may go in a system prompt: it fails no test
+  and makes every call a cache write. `batch.py` runs code written for `complete` through the
+  Batch API unchanged (`DeferredClient`); `pricing.py` is the one price table.
 - `agents/` - the four subagents (Incident, Docs, GitHub, Deployment). Phase 1. Each returns a
   schema-validated `aioc.contracts.AgentResponse`. Incident is live (Days 3-4): `investigate`
   returns prose, `diagnose` returns a validated `IncidentAgentResponse` by forcing a single
@@ -68,6 +74,12 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   the module is the routing case study's baseline. `incident/search_server.py` (Day 14) is the
   `1.1.0` split: the same tools as `search_container_logs` / `search_recorded_events`, the v1
   implementation under new names, and a part 4 that names the alternative.
+- `evals/` - the eval harness (Day 19). The seed SQL is the only answer key (`seed.py`); a case
+  file selects verbatim seed lines and never authors them (`cases.py`, with the leak guard enforced
+  at load); scoring is pure functions over contract models (`scoring.py`); the runner calls the
+  shipped agents with an explicit context, realtime or through a batch (`runner.py`); the report
+  prices the run three ways (`report.py`). An agent that raised is a scored item, a refused
+  credential aborts the run. The case and record formats are not frozen; the answer key is.
 - `hitl/` - the human-in-the-loop approval gate (Day 16). `policy.py` is the contract's approval rule as
   code (a production-write classifier ORed with the agent's flag and the risk rule; the Incident runtime
   stamps `requires_approval` from it, upward only). `gate.py` decides every recommendation in each

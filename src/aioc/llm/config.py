@@ -14,6 +14,8 @@ Nothing here is frozen - model selection and retrieval parameters churn freely (
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -61,4 +63,17 @@ class LLMSettings(BaseSettings):
     # rejection stops it earlier, and every retry re-sends the whole conversation.
     max_validation_retries: int = Field(
         default=2, ge=0, validation_alias="AIOC_MAX_VALIDATION_RETRIES"
+    )
+
+    # Prompt caching (Day 19). On by default: every agent's system prompt and tool schema
+    # are byte-identical on every call and sit at the front of the prefix, so a marker on
+    # the system block caches both. A write costs 1.25x the input rate and a read 0.1x, so
+    # a prefix read back once has already paid for itself; a prefix below the model's
+    # minimum (1024 tokens on Sonnet 5) is silently not cached and costs nothing extra.
+    prompt_caching: bool = Field(default=True, validation_alias="AIOC_PROMPT_CACHING")
+
+    # 5m unless the calls that share a prefix start more than five minutes apart - the one
+    # case here is a batch, which may sit in the queue longer than that. A 1h write costs 2x.
+    prompt_cache_ttl: Literal["5m", "1h"] = Field(
+        default="5m", validation_alias="AIOC_PROMPT_CACHE_TTL"
     )

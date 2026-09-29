@@ -27,7 +27,7 @@ from aioc.coordinator.synthesis import (
     deterministic,
     render_prompt,
 )
-from aioc.llm import LLMClient, LLMSettings, Usage
+from aioc.llm import LLMClient, LLMSettings, Usage, system_text
 from tests.test_executor import _CONTEXT, _github_response, _incident_response
 
 # ------------------------------------------------------------------------------ fixtures
@@ -245,7 +245,7 @@ def test_the_model_form_is_one_forced_call_over_the_digests_and_counts_its_token
     assert result.synthesis.startswith("payments-api latency")
     assert (usage.input_tokens, usage.output_tokens) == (640, 120)
     (call,) = messages.calls
-    assert call["system"] == SYNTHESIS_SYSTEM_PROMPT
+    assert system_text(call["system"]) == SYNTHESIS_SYSTEM_PROMPT
     assert call["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
     assert [t["name"] for t in call["tools"]] == [EMIT_TOOL_NAME]
     assert call["messages"][0]["content"] == render_prompt(_request())

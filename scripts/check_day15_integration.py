@@ -471,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
                     ]
                     for r in resp.agent_responses
                 },
-                "usage": {"in": resp.cost.input_tokens, "out": resp.cost.output_tokens},
+                "usage": resp.cost.model_dump(),
                 "wall_seconds": round(wall_seconds, 1),
                 "trace_id": resp.trace_id,
                 "trace_url": trace_url,

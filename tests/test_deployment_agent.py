@@ -32,7 +32,7 @@ from aioc.contracts import (
     ResponseStatus,
     RolloutStatus,
 )
-from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage
+from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage, system_text
 
 # --------------------------------------------------------------------------- fakes
 
@@ -356,7 +356,7 @@ def test_context_is_passed_explicitly_and_the_emit_call_is_forced():
     agent.assess(_QUERY, context=_CONTEXT)
 
     first = messages.calls[0]
-    assert first["system"] == DEPLOYMENT_SYSTEM_PROMPT
+    assert system_text(first["system"]) == DEPLOYMENT_SYSTEM_PROMPT
     user_text = first["messages"][0]["content"]
     assert _CONTEXT in user_text and _QUERY in user_text
     assert {t["name"] for t in first["tools"]} == {

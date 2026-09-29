@@ -1,0 +1,194 @@
+{
+  "set": "seeded-incidents",
+  "version": 1,
+  "description": "One case per seeded incident (diagnose + recall), plus two no-precedent recall probes. A case selects lines of the seed and never authors them; the answer key is the seed's true_* columns.",
+  "diagnose_query": "Diagnose this incident from the signals in the context: which services are affected, how severe it is, what kind of failure it is, and the most likely cause. Say plainly what these signals cannot establish.",
+  "recall_context": "An on-call engineer is asking whether the incident corpus records a precedent for what they are seeing. No live signals are attached to this request. Answer from the retrieved post-mortems only.",
+  "cases": [
+    {
+      "id": "case_01",
+      "incident_id": "inc_0001",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0001_1", "evt_0001_2", "evt_0001_3"]
+      },
+      "recall_query": "payments-api memory keeps climbing with no plateau and the container was just OOM-killed. Have we seen this before, what caused it, and how was it fixed?"
+    },
+    {
+      "id": "case_02",
+      "incident_id": "inc_0003",
+      "signals": {
+        "summary_sentences": [1],
+        "events": ["evt_0003_1", "evt_0003_2", "evt_0003_3"]
+      },
+      "recall_query": "inventory-api latency is very high overnight while a batch job runs, but nothing is erroring. Is there a precedent, and what was the fix?",
+      "note": "Summary sentence 0 names the cause and is withheld."
+    },
+    {
+      "id": "case_03",
+      "incident_id": "inc_0006",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0006_1", "evt_0006_2", "evt_0006_3"]
+      },
+      "recall_query": "Every service is failing to get a database connection during a traffic spike. Has this happened before, and what resolved it?"
+    },
+    {
+      "id": "case_04",
+      "incident_id": "inc_0010",
+      "signals": {
+        "summary_sentences": [1],
+        "events": ["evt_0010_1", "evt_0010_2"]
+      },
+      "recall_query": "checkout-api is failing writes with disk full errors. Do we have a past incident like this, and what caused it?",
+      "note": "Summary sentence 0 and event 3 name the cause and are withheld."
+    },
+    {
+      "id": "case_05",
+      "incident_id": "inc_0002",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0002_1", "evt_0002_2", "evt_0002_3"]
+      },
+      "recall_query": "checkout-api started returning 500s right after a release went out. What happened the last time a deploy caused an error spike, and how was it resolved?"
+    },
+    {
+      "id": "case_06",
+      "incident_id": "inc_0007",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0007_1", "evt_0007_2"]
+      },
+      "recall_query": "A customer reports checkout failing on an empty cart. Has inventory-api had a bug like this before?",
+      "note": "Every impact metric but requests_affected is unmeasured in the seed."
+    },
+    {
+      "id": "case_07",
+      "incident_id": "inc_0012",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0012_1", "evt_0012_2", "evt_0012_3"]
+      },
+      "recall_query": "inventory-api got much slower after a dependency upgrade and Postgres query volume jumped. Is there a precedent, and what fixed it?",
+      "note": "Hard: the symptom is latency, the truth is a code regression."
+    },
+    {
+      "id": "case_08",
+      "incident_id": "inc_0016",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0016_1"]
+      },
+      "recall_query": "An order came through with a negative total. Has checkout-api ever produced a wrong order amount, and why?",
+      "note": "Thin on purpose: one event and no metrics. Low confidence is the calibrated answer."
+    },
+    {
+      "id": "case_09",
+      "incident_id": "inc_0004",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0004_1", "evt_0004_2", "evt_0004_3"]
+      },
+      "recall_query": "payments-api is timing out on about half of its provider calls but the provider says it is healthy. Have we seen this, and what was the cause?",
+      "note": "Event 1 carries a configuration value; the agent must refer to the key only."
+    },
+    {
+      "id": "case_10",
+      "incident_id": "inc_0008",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0008_1", "evt_0008_2", "evt_0008_3"]
+      },
+      "recall_query": "Sessions are randomly disappearing across services although Redis looks healthy. Is there a past incident that explains this?"
+    },
+    {
+      "id": "case_11",
+      "incident_id": "inc_0011",
+      "signals": {
+        "summary_sentences": [0],
+        "events": ["evt_0011_1", "evt_0011_2", "evt_0011_3"]
+      },
+      "recall_query": "checkout-api broke within seconds of a feature flag change. What happened the last time a flag rollout went wrong, and how do we prevent it?",
+      "note": "Summary sentence 1 describes the fix and is withheld."
+    },
+    {
+      "id": "case_12",
+      "incident_id": "inc_0015",
+      "signals": {
+        "summary_sentences": [0],
+        "events": ["evt_0015_1", "evt_0015_2"]
+      },
+      "recall_query": "inventory-api is serving stale catalogue data but every health check is green. Has that happened before, and what was wrong?",
+      "note": "Summary sentence 1 names the cause and is withheld. No metric moves in this incident."
+    },
+    {
+      "id": "case_13",
+      "incident_id": "inc_0005",
+      "signals": {
+        "summary_sentences": [0, 1, 2],
+        "events": ["evt_0005_1", "evt_0005_2"]
+      },
+      "recall_query": "checkout-api p99 is over two seconds but its error rate is flat, and payments-api looks slow. Is there a precedent, and what fixed it?",
+      "note": "Hard: a deploy in the dependency precedes it, and the truth is downstream latency."
+    },
+    {
+      "id": "case_14",
+      "incident_id": "inc_0009",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0009_1", "evt_0009_2", "evt_0009_3"]
+      },
+      "recall_query": "The card provider is degraded during its settlement window and payments are failing. What did we do about this last time?"
+    },
+    {
+      "id": "case_15",
+      "incident_id": "inc_0014",
+      "signals": {
+        "summary_sentences": [0],
+        "events": ["evt_0014_1", "evt_0014_2"]
+      },
+      "recall_query": "checkout-api latency spikes in bursts every few minutes. Have we traced a pattern like that before?",
+      "note": "Summary sentence 1 restates event 2 with the conclusion attached and is withheld."
+    },
+    {
+      "id": "case_16",
+      "incident_id": "inc_0017",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0017_1", "evt_0017_2"]
+      },
+      "recall_query": "Healthy inventory-api instances keep dropping out of the load balancer. Is there a precedent, and what was the root cause?",
+      "note": "Event 3 records the finding and is withheld."
+    },
+    {
+      "id": "case_17",
+      "incident_id": "inc_0013",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0013_1"]
+      },
+      "recall_query": "payments-api suddenly cannot complete TLS handshakes with the provider. Have we had a certificate problem before, and how was it handled?",
+      "note": "The truth is `other`: no named failure mode fits."
+    },
+    {
+      "id": "case_18",
+      "incident_id": "inc_0018",
+      "signals": {
+        "summary_sentences": [0, 1],
+        "events": ["evt_0018_1", "evt_0018_2"]
+      },
+      "recall_query": "Latency doubled for services on a single host with nothing wrong in the application metrics. Has this happened before?",
+      "note": "The truth is `other`: no named failure mode fits."
+    },
+    {
+      "id": "case_19",
+      "recall_query": "Have we ever had an incident caused by DNS resolution failures between our services? What was the fix?",
+      "note": "No-precedent probe: the corpus records nothing about DNS."
+    },
+    {
+      "id": "case_20",
+      "recall_query": "Have customers ever stopped receiving order confirmation emails? What caused it, and how was it resolved?",
+      "note": "No-precedent probe: the corpus records nothing about email or notifications."
+    }
+  ]
+}

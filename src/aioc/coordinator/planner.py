@@ -413,8 +413,7 @@ class Coordinator:
             tool_choice={"type": "tool", "name": SELECT_TOOL_NAME},
         )
         if usage is not None:
-            usage.input_tokens += resp.usage.input_tokens
-            usage.output_tokens += resp.usage.output_tokens
+            usage.record(resp.usage)
         if resp.stop_reason == "max_tokens":
             raise CoordinatorError(
                 f"{SELECT_TOOL_NAME} output was truncated at the max_tokens limit "
