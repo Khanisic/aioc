@@ -427,11 +427,43 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** **Validation-retry loop** — on schema failure, re-request with the specific error
   attached. Track retry-resolvable (format) vs. not (info genuinely absent).
 - **B:** Audit log for every approved/denied action.
+- **Done (2026-09-28):** A: `src/aioc/agents/_retry.py` - every agent's forced emit runs inside
+  one loop: a refused report (pydantic's `ValidationError`, or the agent's own grounding error) is
+  answered in the same conversation with a `tool_result` carrying `is_error: true` and the rendered
+  error, and the emit tool is forced again; no tool is re-run. The two kinds are told apart in the
+  feedback and the record - `format` (the model has the information and mis-shaped it) and
+  `grounding` (it cited what it was not given; an honest gap is the answer) - and every emit is
+  recorded in a `RetryLog` with attempts, rejections, and whether the retry recovered, so
+  retry-resolvable is measured per run. Two stopping rules: the cap (`AIOC_MAX_VALIDATION_RETRIES`,
+  default 2) and an identical rejection; truncation and errors that are not the model's doing are
+  never retried; when the loop gives up the last error is raised unchanged with a note the
+  executor's gap keeps. B: `src/aioc/hitl/audit.py` + `docker/postgres/init/05-hitl-audit.sql` -
+  the gate writes every decision to an `AuditLog` before returning it (`not_required` included), a
+  decision the log refused comes back as a denial that says so, and the Postgres table is
+  append-only at the database (triggers refuse UPDATE, DELETE, and TRUNCATE; verified live).
+  `respond(gate=...)` is the opt-in entry point; `scripts/gate_recorded_run.py --persist` wrote the
+  15 recorded decisions and `scripts/audit_log.py` reads them back. 707 offline tests.
 
 ### Day 18 — Confidence + provenance shore-up
 - **A:** Field-level confidence scores on all agent outputs.
 - **B:** Docs agent **claim → source mapping** and **coverage-gap reporting**
   (the cheap Domain 5 shore-up from `BUILD_PLAN.md`).
+- **Done (2026-09-28):** A: `src/aioc/coordinator/confidence.py` - the contract already made
+  confidence field-level (every analytic field is an `Assessment`; the floor and the cited-at-0.5
+  rule are validated), so Day 18 is the reading: every judgement in a response (every `Assessment`
+  via `walk_assessments`, plus the Docs agent's claims) with its path, band, and evidence, one
+  `ResponseProfile` per report and a `RequestProfile` per request, and the band table read
+  literally as flags - a 0.90+ field citing fewer than two sources, an overall above every field,
+  and (found by the first run over recorded output) an unsupported claim above the speculation
+  floor. Every digest now carries a one-line confidence profile after its summary. B:
+  `src/aioc/coordinator/provenance.py` - each claim's `SourceRef` joined to the response's
+  document evidence and the retrieval call behind it (chunk match first, document otherwise),
+  every unanswered sub-question paired with the gap that reports it (indexed `blocks_field`
+  first, then in order, `None` rather than a guess), and the Docs digest pairing them.
+  `scripts/confidence_report.py` (free) over the 9 recorded responses: 105 judgements, no field
+  over-claims its band, 5 unsupported claims above the floor (two at 0.90), 6/11 sub-questions
+  answered with every unanswered one gapped, 23/23 supported claims traced to an evidence entry.
+  The Docs emit guidance now tells the model an unsupported claim's confidence belongs below 0.25.
 
 ### Day 19 — Evals + cost levers
 - **A:** Eval set of 15–20 cases from the seeded incidents + a scoring harness

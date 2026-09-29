@@ -98,6 +98,14 @@ test: ## Run unit tests (skips integration)
 test-all: ## Run everything, including tests that need the stack up
 	uv run pytest
 
+.PHONY: gate
+gate: ## Free: every recorded response through the HITL gate, decisions written to hitl_audit_log
+	uv run python scripts/gate_recorded_run.py --persist
+
+.PHONY: audit-log
+audit-log: ## Free: read the append-only audit log of approval decisions (Day 17)
+	uv run python scripts/audit_log.py
+
 # -----------------------------------------------------------------------------
 # Chaos injection  (Day 4)
 # -----------------------------------------------------------------------------

@@ -25,7 +25,13 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   images, and health signals stamped from the replies and a gap required for any tool not run.
   `_toolset.py` is the shared `Toolset` seam and grounding ledger for the tool-driven agents.
   `_status.py` (Day 13) settles `complete` over a null judgement to `partial` for every agent - a
-  value the runtime can derive is never asked of the model.
+  value the runtime can derive is never asked of the model. `_retry.py` (Day 17) is the
+  validation-retry loop every agent's forced emit runs inside: a refused report is answered in the
+  same conversation with the rendered error as an error `tool_result` and the emit tool forced again,
+  `format` and `grounding` rejections told apart in the feedback, a cap and an identical-rejection
+  rule as the only stops, the last error raised unchanged with a note when it gives up, and every
+  emit recorded in a `RetryLog`. Truncation and errors that are not the model's doing (`kind=None`
+  on the agent's error) are never retried.
 - `retrieval/` - Day 8 ingestion and hybrid search over the incident corpus (pg_trgm + pgvector,
   RRF fusion, Voyage embeddings behind the `Embedder` protocol, lexical-only without a key).
   Consumed by the Docs agent through the `CorpusRetriever` seam.
@@ -43,6 +49,15 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   verbatim and whose context is the planner's block, the refinement block, and the raising
   response's digest. `synthesis.py` (Day 14) is the synthesis seam - deterministic by default,
   `ModelSynthesiser` opt-in at the entry point, grounded in code with a deterministic fallback.
+  `confidence.py` (Day 18) reads every judgement in a response back - each `Assessment` (through
+  the contract's `walk_assessments`) and each Docs claim, with its path, band, and evidence - as a
+  `ResponseProfile` / `RequestProfile`, and reads the band table literally as flags (a 0.90+ field
+  citing fewer than two sources, an overall above every field, an unsupported claim above the
+  floor); flags are never validators - a stated rule becomes a validated one only through
+  `contract-changes.md`. `provenance.py` (Day 18) joins each Docs claim's sources to the document
+  evidence and the retrieval call behind them, and each unanswered sub-question to the gap that
+  reports it. Every digest carries the one-line confidence profile after its summary, and the
+  Docs digest pairs unanswered questions with their gaps.
 - `tools/` - Platform Layer MCP tools, grouped `incident/`, `github/`, `docs/`, `deployment/` (Phase 2).
   `deployment/` (Day 12) is the two contract-named tools: `release.py` diffs release manifests
   structurally with values hashed at parse time (keys and paths only, by construction), `health.py`
@@ -57,7 +72,12 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   code (a production-write classifier ORed with the agent's flag and the risk rule; the Incident runtime
   stamps `requires_approval` from it, upward only). `gate.py` decides every recommendation in each
   agent's latest report and returns an `ApprovalDecision` record for each, fail-closed (`DenyAll` by
-  default). The records sit alongside the frozen `CoordinatorResponse`, never inside it.
+  default). The records sit alongside the frozen `CoordinatorResponse`, never inside it. `audit.py`
+  (Day 17) is where they go: the gate writes every decision to an `AuditLog` before returning it, a
+  decision the log refused comes back as a denial that says so, and `PostgresAuditLog` is the
+  `hitl_audit_log` table (`docker/postgres/init/05-hitl-audit.sql`), append-only at the database.
+  `MemoryAuditLog` is the default, so the offline suite never touches Postgres; `respond(gate=...)`
+  is the opt-in entry point.
 - `memory/`, `observability/` - Redis/Postgres/pgvector memory tiers (later phases) and Langfuse tracing.
 
 Agents and the coordinator import from `aioc.contracts` and build on `aioc.llm`. Tool servers do neither.

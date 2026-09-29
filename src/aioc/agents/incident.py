@@ -19,9 +19,9 @@ Why force a tool instead of asking for JSON: ``tool_choice`` guarantees the mode
 value that matches a JSON Schema, and that schema is generated straight from the frozen
 Pydantic models, so the wire shape cannot drift from the contract. The final validation still
 runs the response-scoped envelope invariants (evidence resolution, null-value-needs-a-Gap,
-``status`` vs null analytic values); a payload that violates them raises here. Re-requesting on
-that failure with the error attached is the Day 17 validation-retry loop - deliberately not
-built yet, so a bad payload surfaces loudly rather than being silently patched.
+``status`` vs null analytic values). A payload that violates them is re-requested with the
+error attached - the Day 17 validation-retry loop in `aioc.agents._retry`, shared by all
+four agents - and raises here only when that loop gives up, never silently patched.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from anthropic.types import Message, TextBlock, ToolUseBlock
+from anthropic.types import TextBlock
 from pydantic import Field, ValidationError
 
 from aioc.contracts import (
@@ -46,6 +46,7 @@ from aioc.hitl.policy import classify
 from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
 
 from ._annotate import ROOT, apply_guidance
+from ._retry import ReportRejected, RetryLog, default_retry_log, emit_with_retry
 from ._status import settle_status
 
 AGENT_NAME = "incident"
@@ -280,7 +281,7 @@ prose outside the tool call. Fill its fields as follows:
 Set `overall_confidence` to your confidence in the diagnosis as a whole."""
 
 
-class IncidentAgentError(RuntimeError):
+class IncidentAgentError(ReportRejected):
     """The model did not return usable structured output (no forced tool call, or non-object
     input). A malformed-but-present payload raises pydantic's ``ValidationError`` instead."""
 
@@ -288,7 +289,9 @@ class IncidentAgentError(RuntimeError):
 def _emit_never_runs(_args: dict[str, Any]) -> ToolResult:
     # `diagnose` forces this tool with tool_choice and reads the tool_use block directly, so the
     # handler is never invoked. Raise loudly if some future caller routes it through a tool loop.
-    raise IncidentAgentError(f"{EMIT_TOOL_NAME} is a structured-output tool; it is never executed")
+    raise IncidentAgentError(
+        f"{EMIT_TOOL_NAME} is a structured-output tool; it is never executed", kind=None
+    )
 
 
 _EMIT_TOOL = ToolSpec(
@@ -325,8 +328,21 @@ class IncidentAgent:
 
     name = AGENT_NAME
 
-    def __init__(self, client: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        client: LLMClient | None = None,
+        *,
+        max_validation_retries: int | None = None,
+        retry_log: RetryLog | None = None,
+    ) -> None:
         self._client = client or LLMClient()
+        # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
+        self._max_retries = (
+            max_validation_retries
+            if max_validation_retries is not None
+            else self._client.settings.max_validation_retries
+        )
+        self._retry_log = retry_log if retry_log is not None else default_retry_log()
 
     def investigate(self, query: str, *, context: str) -> IncidentProse:
         """Answer one operational query from the given context, in prose (Day 3).
@@ -372,52 +388,29 @@ class IncidentAgent:
         than estimated. Token counts are added even when the call fails validation later -
         a rejected report still cost real tokens.
 
-        Raises `IncidentAgentError` if the model does not emit the forced tool, and pydantic's
+        A payload the contract refuses is re-requested with the error attached (the Day 17
+        validation-retry loop). When that loop gives up, the last error is raised:
+        `IncidentAgentError` if the model does not emit the forced tool, pydantic's
         ``ValidationError`` if the payload is present but violates the contract.
         """
         prompt = self._prompt(query, context)
-        resp = self._client.complete(
+        req = request_id or _new_id("req")
+        inv = invocation_id or _new_id("inv")
+        return emit_with_retry(
+            self._client,
+            agent=AGENT_NAME,
             messages=[{"role": "user", "content": prompt}],
             system=INCIDENT_STRUCTURED_SYSTEM_PROMPT,
             tools=[_EMIT_TOOL],
-            tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
+            emit_tool=EMIT_TOOL_NAME,
+            build=lambda payload: _assemble(payload, req, inv),
+            error_type=IncidentAgentError,
+            usage=usage,
+            max_retries=self._max_retries,
+            log=self._retry_log,
+            request_id=req,
+            invocation_id=inv,
         )
-        if usage is not None:
-            usage.input_tokens += resp.usage.input_tokens
-            usage.output_tokens += resp.usage.output_tokens
-        # Check truncation before validating. A report cut off mid-JSON still yields a tool_use
-        # block holding whatever parsed, so pydantic reports it as a missing required field -
-        # which reads as "the model forgot `overall_confidence`" when the real cause is the token
-        # budget. Measured: Opus fills 4096 output tokens on this schema without finishing.
-        if resp.stop_reason == "max_tokens":
-            raise IncidentAgentError(
-                f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
-                f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
-                "Raise AIOC_MAX_TOKENS or narrow the query."
-            )
-        payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
-
-        data: dict[str, Any] = dict(payload)
-        # Plumbing the model does not own; schema_version, agent, and tool_calls take their
-        # contract defaults (SCHEMA_VERSION, "incident", []); this path makes no tool calls.
-        data["request_id"] = request_id or _new_id("req")
-        data["invocation_id"] = invocation_id or _new_id("inv")
-        data["generated_at"] = datetime.now(UTC)
-        if isinstance(data.get("findings"), dict):
-            _stamp_approval(data["findings"])
-        # `complete` over a null judgement settles to `partial` (sec 3; agents/_status).
-        # The findings are validated on their own first so the rule reads real
-        # Assessments; if they do not validate, the full model below says why.
-        if data.get("status") == ResponseStatus.COMPLETE.value and isinstance(
-            data.get("findings"), dict
-        ):
-            try:
-                findings = IncidentFindings.model_validate(data["findings"])
-            except ValidationError:
-                findings = None
-            if findings is not None:
-                data["status"] = settle_status(ResponseStatus.COMPLETE, findings).value
-        return IncidentAgentResponse.model_validate(data)
 
     @staticmethod
     def _prompt(query: str, context: str) -> str:
@@ -429,6 +422,35 @@ class IncidentAgent:
                 "pass everything it needs explicitly (CONTRACTS.md sec 5, context_passed)"
             )
         return f"<context>\n{context.strip()}\n</context>\n\nOperational query: {query.strip()}"
+
+
+def _assemble(
+    payload: dict[str, Any], request_id: str, invocation_id: str
+) -> IncidentAgentResponse:
+    """The model's payload plus the plumbing it does not own, validated as the full
+    response. Raises pydantic's ``ValidationError`` on a contract violation - which the
+    retry loop turns into a re-request before it reaches the caller."""
+    data: dict[str, Any] = dict(payload)
+    # schema_version, agent, and tool_calls take their contract defaults (SCHEMA_VERSION,
+    # "incident", []); this path makes no tool calls.
+    data["request_id"] = request_id
+    data["invocation_id"] = invocation_id
+    data["generated_at"] = datetime.now(UTC)
+    if isinstance(data.get("findings"), dict):
+        _stamp_approval(data["findings"])
+    # `complete` over a null judgement settles to `partial` (sec 3; agents/_status).
+    # The findings are validated on their own first so the rule reads real
+    # Assessments; if they do not validate, the full model below says why.
+    if data.get("status") == ResponseStatus.COMPLETE.value and isinstance(
+        data.get("findings"), dict
+    ):
+        try:
+            findings = IncidentFindings.model_validate(data["findings"])
+        except ValidationError:
+            findings = None
+        if findings is not None:
+            data["status"] = settle_status(ResponseStatus.COMPLETE, findings).value
+    return IncidentAgentResponse.model_validate(data)
 
 
 def _stamp_approval(findings: dict[str, Any]) -> None:
@@ -446,15 +468,3 @@ def _stamp_approval(findings: dict[str, Any]) -> None:
         command = action.get("command")
         if classify(action["action"], command if isinstance(command, str) else None):
             action["requires_approval"] = True
-
-
-def _extract_tool_input(resp: Message, tool_name: str) -> dict[str, Any]:
-    """Pull the forced tool call's input object out of the response, or fail clearly."""
-    for block in resp.content:
-        if isinstance(block, ToolUseBlock) and block.name == tool_name:
-            if not isinstance(block.input, dict):
-                raise IncidentAgentError(f"{tool_name} input was not a JSON object")
-            return dict(block.input)
-    raise IncidentAgentError(
-        f"model did not call {tool_name} (stop_reason={resp.stop_reason!r}); no structured output"
-    )

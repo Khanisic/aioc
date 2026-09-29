@@ -491,3 +491,69 @@ All three are pinned verbatim in `tests/test_hitl.py`.
 **What I would watch.** The classifier is a floor, and it errs toward gating.
 A read-only action that says "restart" costs a human a click; a write it misses is still gated if the model flagged it or rated it risky.
 The replay is how to measure that trade on real output as the agents' recommendations change.
+
+## 30. The validation-retry loop lives in the emit step, tells the model which kind of wrong it was, and stops on an identical rejection
+
+**Context.** Day 17's Reasoning half.
+Three live-only refusals were waiting for it: a GitHub excerpt paraphrased (three times across Days 14-15), a Deployment report about a version no health reply covered, and a Docs report with a field the model invented.
+Each cost a whole agent run, and the refinement loop's blind retry of a failed invocation re-ran the whole agent with no reason to expect a different report.
+
+**Decision.** `src/aioc/agents/_retry.py` is one loop shared by all four agents, placed inside the forced-emit step because that is the only place the rejected payload and the error are both in hand.
+The conversation is kept: the model's `tool_use` turn is answered with a `tool_result` carrying `is_error: true` and the rendered error, and the emit tool is forced again.
+Nothing is re-investigated and no tool is re-run.
+The feedback tells the two kinds apart, because the honest fix differs: a `format` rejection (pydantic refusing the shape or a cross-field invariant) means the information is in the report and mis-shaped, so re-emit it; a `grounding` rejection (the agent's own rule refusing a claim about data the model was not given) means the information may be genuinely absent, so remove it, set the value null, and record a gap - a closer paraphrase is not the answer.
+Two stopping rules and no judgement call: the cap (`AIOC_MAX_VALIDATION_RETRIES`, default 2) and an identical rejection, the same rule the refinement loop applies to an identical gap.
+When the loop gives up, the last exception is raised unchanged with a PEP 678 note, so callers keep their error types and the executor's gap says how many attempts were made and why it stopped.
+Truncation, a model that never called the tool, and errors that are not the model's doing (no repository configured, a tool reply with no timestamp) carry `kind=None` and are raised on the first attempt.
+Every emit is recorded in a `RetryLog`, accepted-first-try included, so "retry-resolvable" is a measured rate per kind, not a claim.
+
+**What I would watch.** Every retry re-sends the whole conversation, and for a tool-driven agent that is the PR read and the diff reply again (HANDOFF item 16).
+The cap is 2 for the same reason the refinement cap is; the identical-rejection rule is what keeps a model that cannot fix something from spending both.
+The live numbers do not exist yet: the loop is proven offline against scripted refusals shaped like the live ones, and the next live run of any `respond()` script prints and records the summary.
+
+## 31. Every gate decision is written before it is returned, to a store that only appends
+
+**Context.** Day 17's Platform half: the audit log for every approved and denied action.
+Day 16's gate already produced an `ApprovalDecision` record for every recommendation; nothing persisted it.
+
+**Decision.** The gate takes an `AuditLog` and writes each decision as it makes it, `not_required` included, before returning it.
+The durable store is `hitl_audit_log` on the stack's Postgres (`docker/postgres/init/05-hitl-audit.sql`, additive and re-applicable like 04), and it is append-only at the database: triggers refuse UPDATE, DELETE, and TRUNCATE, so nothing in the code can rewrite a row because nothing anywhere can.
+Correcting a record means appending another that says so.
+The store is the second half of failing closed: a decision the log could not record is not one the gate made, so a release the log refused comes back as a denial that names the failure, and the human's original answer is kept in the note.
+The default log is in memory, so a gate always has one and the offline suite never touches Postgres; live entry points pass the Postgres log, the same opt-in shape as tracing.
+`respond(gate=...)` runs the gate on the finished response under a `hitl_gate` span; the decisions are read back from the log by `request_id`, never from the response, which is the frozen contract.
+
+**What I would watch.** The log records what the gate decided, not what anyone did afterwards - AIOC recommends and never acts, so there is no action to log yet.
+When something does act on an approval, the act belongs in the same table as a row that references the decision it acted on.
+
+## 32. Field-level confidence is read back as a profile with flags, not enforced as new invariants
+
+**Context.** Day 18's Reasoning half: field-level confidence scores on all agent outputs.
+The contract already had them - every analytic field is an `Assessment` with its own `confidence`, the bands are normative, the 0.25 floor and the cited-at-0.5 rule are validated.
+Nothing read the numbers back as a whole.
+
+**Decision.** `src/aioc/coordinator/confidence.py` walks every `Assessment` in a response (through the contract's own `walk_assessments`, so a new analytic field is picked up without an edit) plus the Docs agent's claims, and produces one `FieldConfidence` per judgement with its path, band, and evidence; a `ResponseProfile` per report; a `RequestProfile` per request including the coordinator's `answer` and `intent`.
+The band table is read literally as flags rather than turned into validators: a 0.90+ field citing fewer than two sources has claimed a band its evidence does not show; an `overall_confidence` above every field it summarises is worth a reader's attention; an unsupported Docs claim above the speculation floor has a confidence number with nothing behind it.
+None of these becomes a validation error, because none is a rule the contract states as validated - `docs/design-notes/contract-changes.md` is where a stated rule becomes a validated one, and the Day 16 audit already listed the confidence sentence that would need rewording first.
+The band table itself is pinned by a test to the contract's text and to the prompt every agent carries, so the three cannot drift apart.
+Every handoff digest now carries one confidence line after its summary: the lowest stated judgement is what a dependent should not build on.
+
+**The check that mattered.** `scripts/confidence_report.py` (free) over the nine recorded live responses: 105 judgements and not one field over-claiming its band, which is the calibration floor the eval harness starts from - and five unsupported claims above the floor, two of them at 0.90, both "the corpus contains no document about X" stated with two-source confidence and no source.
+That flag did not exist until the report found the case; the Docs emit guidance now says where an unsupported claim's confidence belongs.
+
+**What I would watch.** "Independent sources" cannot be checked by counting evidence ids, so the top-band flag is a floor.
+The eval harness (Day 19) is where calibration becomes a score against injected ground truth; this profile is its input, not its verdict.
+
+## 33. Docs provenance is resolved once, from the claim to the retrieval call and from the unanswered question to its gap
+
+**Context.** Day 18's Platform half: the Docs agent's claim -> source mapping and coverage-gap reporting, which sec 4.2 says `DocsFindings` carries.
+The shapes were there since Day 1 and the Docs agent grounded them in code since Day 8; the Day 16 audit made every unanswered sub-question need its own gap.
+What nobody had was the chain read end to end.
+
+**Decision.** `src/aioc/coordinator/provenance.py` joins a claim's `SourceRef` to the response's document evidence entries (a chunk match when both name a chunk, the document otherwise) and through them to the `tool_call_id` of the retrieval that returned the document, so each source says which evidence ids and which call stand behind it.
+A source no evidence entry names is shown with none, which is the honest reading - the Docs agent cites documents in claims and metrics or context in evidence independently.
+Each unanswered sub-question is paired with the gap that reports it: an indexed `blocks_field` wins, the rest are assigned in report order, and a question no gap reports gets `None` rather than somebody else's gap.
+The Docs digest pairs them the same way, so a downstream agent and the synthesiser see the coverage gap and the gap record the coordinator acts on as one thing.
+
+**What I would watch.** The recorded Day 15 Docs report decomposed the whole four-part query into sub-questions, so three of its four "unanswered" questions were siblings' parts, each gapped and pointed at the right sibling - correct by the rules, and exactly the re-delegation cost item 22's roster is meant to remove.
+Coverage reporting is only as honest as the decomposition; the roster's live re-run is where that shows.

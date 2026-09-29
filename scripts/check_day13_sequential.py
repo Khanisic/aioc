@@ -66,6 +66,7 @@ from check_day12_deployment import (  # noqa: E402 - needs the sys.path insert a
 )
 from runlog import RunRecorder  # noqa: E402
 
+from aioc.agents import default_retry_log  # noqa: E402
 from aioc.agents.github import GITHUB_SERVER_MODULE  # noqa: E402
 from aioc.contracts import AgentName, AgentResponse, InvocationMode  # noqa: E402
 from aioc.coordinator import (  # noqa: E402
@@ -370,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         },
     ) as run:
         try:
+            default_retry_log().clear()
             resp = respond(query, situation=situation, executor=executor, tracer=tracer)
         except Exception as exc:
             tracer.flush()
@@ -428,7 +430,13 @@ def main(argv: list[str] | None = None) -> int:
                     indent=2,
                 ),
             )
+        run.artifact(
+            "retries.json",
+            json.dumps([r.to_dict() for r in default_retry_log().records], indent=2),
+        )
         run.artifact("response.json", resp.model_dump_json(indent=2))
+        for line in default_retry_log().render_summary().splitlines():
+            print(f"  {line}")
         run.event(
             "sequential",
             outcome="passed" if passed else "failed",

@@ -1,12 +1,12 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 16** of 30, after the schema audit was closed, every agent was
-told who its siblings are (item 22, offline), and the HITL approval gate landed.
+Written at the end of **Day 18** of 30, after every judgement in a response got read back with
+its band and flags, and the Docs claim -> source chain and coverage gaps got resolved end to end.
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 17.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 19.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +16,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 666-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 749-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -48,9 +48,12 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**Two branches are in flight (2026-09-25).** Day 15 is PR #18 (`d15-four-agents-live`,
-open for review). Day 16 is `d16-schemas-hitl`, branched from Day 15's commit, so it rebases
-cleanly onto `main` once #18 merges. Merge #18 first, then rebase and open the Day 16 PR.
+**Three branches are in flight (2026-09-28).** PR #18 (Day 15) is merged. Day 16 is PR #19
+(`d16-schemas-hitl`, rebased onto `main` and open for review). Day 17 is PR #20
+(`d17-retry-loop-audit-log`), stacked on #19; Day 18 is PR #21 (`d18-confidence-provenance`),
+stacked on #20. GitHub retargets each to `main` as its base merges. Merge #19, then #20, then
+#21. `khanisic/main` trails `origin/main` by three merges (Days 13-15); the mirror push below
+is due after the next merge.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -108,7 +111,11 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `scripts/check_day15_integration.py` | **Day 15.** The four-agent checkpoint: deploys the demo at PR #11's merge commit, injects a real fault, builds the situation from live metrics plus the Day 13 release note, and runs `respond()` on a four-part query. Asserts all four planned and answering, a parallel group that overlapped in measured time, and the Day 13 sequential assertions (imported from `check_day13_sequential.py`, whose multi-round bug it found). Records `transcript.json`; resets chaos itself. **PASS on attempt 2**, `docs/assets/day15-demo.gif`. |
 | `scripts/cost_review.py` | **Day 15.** Free. Prices every recorded live run by check and by day against the alert, and says what it cannot see (runs with no recorded usage, ad-hoc calls, Voyage). `--json`, `--since`, `--alert`. Prices are a table in the file, dated; no caching is assumed. |
 | `scripts/demo_day10.py` + `render_demo_gif.py` | **Day 10.** The end-to-end demo (inject -> live metrics -> `respond()` traced; ~3 calls, `--skip-inject` and `--query` to vary) and the GIF renderer (free; PEP 723 inline pillow, replays the run's recorded transcript; `--title` / `--command` since Day 15 so it renders any recorded transcript). The checkpoint asset is committed at `docs/assets/day10-demo.gif`. |
-| `hitl/` | **Day 16.** `policy.py`: `classify` (rollback, restart, scale, merge, config write, traffic shift, deploy, destructive - over the action line and its command, negation scoped to the clause, `deploy` the noun excluded) and `approval_reasons` (the agent's flag OR the risk rule OR the classifier). The Incident runtime stamps `requires_approval: true` from it, upward only. `gate.py`: `HitlGate(approver).review(CoordinatorResponse)` -> `GateResult` of `ApprovalDecision` records, one per recommendation in each agent's latest report, `not_required` included; Deployment `rollback_now`/`other` gated unconditionally. Fail-closed: `DenyAll` default, a raising or anonymous approver denies. `ScriptedApprover` (tests, scripts) and `ConsoleApprover` (asks at the terminal, only `y`/`yes` approves). **Not wired into `respond()`** on purpose - the records are not contract and the gate reads the response it is handed; `scripts/gate_recorded_run.py` (free) is the entry point today. |
+| `hitl/` | **Day 16.** `policy.py`: `classify` (rollback, restart, scale, merge, config write, traffic shift, deploy, destructive - over the action line and its command, negation scoped to the clause, `deploy` the noun excluded) and `approval_reasons` (the agent's flag OR the risk rule OR the classifier). The Incident runtime stamps `requires_approval: true` from it, upward only. `gate.py`: `HitlGate(approver).review(CoordinatorResponse)` -> `GateResult` of `ApprovalDecision` records, one per recommendation in each agent's latest report, `not_required` included; Deployment `rollback_now`/`other` gated unconditionally. Fail-closed: `DenyAll` default, a raising or anonymous approver denies. `ScriptedApprover` (tests, scripts) and `ConsoleApprover` (asks at the terminal, only `y`/`yes` approves). **Day 17:** the gate takes an `AuditLog` and writes every decision before returning it; `respond(gate=...)` is the opt-in entry point (a `hitl_gate` span, decisions read back from `gate.audit` by `request_id`, never from the response); `demo_day10.py` passes one, `scripts/gate_recorded_run.py --persist` replays into the durable log. |
+| `hitl/audit.py` + `docker/postgres/init/05-hitl-audit.sql` | **Day 17.** The audit log. `AuditLog` protocol (`append` or raise; `decisions` back in append order with `request_id` / `decision` / `since` / `limit`), `MemoryAuditLog` (the gate's default - the offline suite never touches Postgres), `PostgresAuditLog` (the `hitl_audit_log` table, applied from 05 on first use when missing, injectable connection for the rolled-back integration tests), `default_audit_log()` for live entry points. **Append-only at the database:** triggers refuse UPDATE, DELETE, and TRUNCATE - verified live at `psql` on 2026-09-28. Fail-closed: a decision the log refused comes back as a denial naming the failure, with the original answer kept in the note. **The table exists on the running stack** (the `--persist` run created it and wrote 15 rows); a fresh volume gets it from `init/`. |
+| `coordinator/confidence.py` | **Day 18.** Field-level confidence read back: `profile(AgentResponse)` / `request_profile(CoordinatorResponse)` walk every `Assessment` (the contract's `walk_assessments`, so new analytic fields need no edit) plus the Docs claims into `FieldConfidence`s (path, band, evidence, flags). `BANDS` is sec 2.1 verbatim, pinned by a test to `CONTRACTS.md` and to `_CONFIDENCE_BANDS` in the agents' prompt. Three flags, reported never validated: `two_sources_band_under_cited` (0.90+ with fewer than two evidence ids), `overall_above_every_field`, `unsupported_claim_above_floor` (found by the first run over recorded output). `digest_line` is the one line every handoff digest now carries after its summary. **No shape moved.** |
+| `coordinator/provenance.py` | **Day 18.** The Docs chain resolved once: `provenance(DocsAgentResponse)` joins each claim's `SourceRef` to the response's document evidence entries (chunk match first, document otherwise) and to the retrieval `tool_call_id` behind them, says whether the claim backs the answer, and pairs every unanswered sub-question with its gap (`coverage_gaps`: indexed `blocks_field` first, then in order, `None` rather than a guess). The Docs digest uses it for its `unanswered (n):` lines. `scripts/confidence_report.py` (free) prints both readings over every recorded response. |
+| `agents/_retry.py` | **Day 17.** The validation-retry loop, one function every agent's forced emit runs inside (`emit_with_retry`): a report pydantic or the agent's grounding rule refuses is answered in the same conversation with the rendered error as an error `tool_result` on the refused `tool_use` (a plain user turn when the model emitted on its own during the tool loop), and the emit tool is forced again; no tool re-runs. `format` (pydantic; the information is there, mis-shaped) and `grounding` (the agent's rule; the data may be absent, record a gap) get different feedback and are recorded apart. Stops: the cap (`AIOC_MAX_VALIDATION_RETRIES`, default 2, per-agent override `max_validation_retries=`) and an identical rejection. Never retried: truncation, no tool call, and errors with `kind=None` (no repository, a tool reply with no timestamp). Gives up by raising the last exception unchanged with a PEP 678 note, which `_error_summary` keeps in the executor's gap. Every emit is a `RetryRecord` in a `RetryLog` (`default_retry_log()` unless injected); `summary()` / `render_summary()` give the recovered-by-kind rate; the three `respond()` scripts clear it before the run, print it, and record `retries.json`. **No live numbers yet** - proven offline against refusals shaped like the three live ones. |
 | `contracts/` enforcement (Day 16) | `schema_version` checked on `AgentResponse` and `CoordinatorResponse` (a different major or a malformed version is refused); gap-to-null matching on field boundaries; Docs: an unsupported claim's statement may not appear in `answer.value`, one gap per unanswered sub-question. No shape moved, still `1.1.0`; the record and the six deferred contract changes are in `docs/design-notes/contract-changes.md`. |
 | `demo-app/services/app.py` | **Day 12** added `service_build_info{service,git_sha} = 1` (the deployed version as a metric, next to `/version`). The image must be rebuilt for it to exist: `docker compose up -d --build --wait`. |
 
@@ -146,6 +153,11 @@ losing spans on a background thread.
 
 Other traps:
 
+- **Docker Desktop does not start itself.** When it is down, `docker compose ps` fails with
+  `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified` and the
+  16 `integration`-marked tests skip. `Start-Process "C:\Program Files\Docker\Docker\Docker
+  Desktop.exe"` from PowerShell, wait ~30 s, then `docker compose up -d --wait` (about 20 s
+  more). Day 17 did exactly this.
 - **GNU Make is not installed.** Every `Makefile` recipe is a single pasteable command.
 - **`PYTHONIOENCODING=utf-8` is required** on any command that prints model output. The
   console is cp1252 and a Unicode arrow in a summary crashes the print.
@@ -168,15 +180,15 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 666 passed
+uv run pytest -q                                                   # expect 749 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **653 passed, 13 skipped** at the end of Day 16 - Docker Desktop
-was not running, so the 13 `integration`-marked tests skipped; with the stack up expect 666
-(not run with the stack on Day 16). Lint and mypy clean. The suite took ~25-45s on this machine with the
-stack up; the `test_mcp_toolset.py` tests launch the real GitHub, deployment, analyze, and
-search server subprocesses and are most of it.
+Costs nothing. Last run: **749 passed** with the stack up at the end of Day 18 (2026-09-28);
+without Docker Desktop the 16 `integration`-marked tests skip and it is 733. Lint and mypy
+clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
+tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
+most of it.
 
 The whole system has now been proven live end to end - the Day 10 demo (**~4 Claude
 calls** per run since Day 14 added the synthesis call, needs the stack; `--skip-inject`
@@ -214,19 +226,88 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 17 - the validation-retry loop + the audit log
+## 6. Next work: Day 19 - evals + cost levers
 
-**From the plan:** A: validation-retry loop - on schema failure, re-request with the specific
+**From the plan:** A: an eval set of 15-20 cases from the seeded incidents plus a scoring harness
+(accuracy, hallucination rate, tool success rate). B: prompt caching on the shared system
+prompts; run the eval suite through the Batch API.
+
+**First, the two live things still open, one run each** (unchanged from Day 17 - they need
+PRs #19-#21 merged so the demo deploys the right release):
+
+- **Item 22's live re-run** (the roster) and **the retry loop's first live numbers** come from
+  the same command: `check_day15_integration.py --deploy --max-rounds 1` (~12-20 calls; the
+  last two measured $1.10-1.16, ~$0.60 expected if the roster works - say both before running).
+  It now prints and records the `RetryLog` summary (`retries.json`), so one run gives the
+  roster's before/after *and* the recovered-by-kind rate for whatever the agents refuse. Needs
+  Docker Desktop up (it is, as of Day 17) and PR #19 plus the Day 17 PR merged first, so the
+  demo deploys the right release.
+- **Re-run `scripts/gate_recorded_run.py --persist` after it** (free): the new response's
+  recommendations join the audit log, and the classifier gets checked against new wording
+  (item 27).
+
+What already exists for Day 19:
+
+- **The answer key and the corpus are the same rows.** `docker/postgres/init/03-seed-incidents.sql`
+  carries `true_severity`, `true_failure_mode`, `true_root_cause` on every incident (the columns
+  `scripts/ingest_embeddings.py` reads), and `tests/test_seed_corpus.py` already guarantees every
+  `FailureMode` has at least two rows. The chaos injector's four modes are the live half of the
+  key (`demo-app/chaos/inject.py`, 1:1 with the enum), and `chaos_knob_value` is guarded out of
+  every agent's context for exactly this reason (`observability/prometheus.py`).
+- **The scoring inputs are built.** `coordinator/confidence.py` gives every judgement with its
+  band (calibration is scored against the sec 2.1 bands, per the contract); `provenance.py`
+  gives the claim chain (a hallucination in Docs is a claim whose source no evidence names, or a
+  quote the grounding check would refuse - both already impossible in a validated response, so
+  the Docs hallucination rate is measured at the *refusal* count, which the Day 17 `RetryLog`
+  records per kind); tool success rate is `ToolCallRef.ok` over `tool_calls`, already on every
+  response. `check_day5_checkpoint.py` is the single-case preview of scoring a diagnosis against
+  injected truth.
+- **The record format is not frozen** (CLAUDE.md lists eval record formats as free to churn);
+  `test-results/` and `runlog.py` are where every run already lands, and `cost_review.py`
+  prices them. `evaluations/` exists for the committed eval sets and results.
+- **B is one measured decision away.** Item 4: the system prompt plus tool schema is byte-identical
+  on every call and sits at the front of the prefix; `scripts/cost_review.py` shows the
+  per-call input tokens it would save. The Batch API halves the price of the eval sweep and
+  changes nothing in the harness but the entry point.
+
+<!-- superseded Day 18 notes follow, kept for the record -->
+**Day 18 as planned:** A: field-level confidence scores on all agent outputs. B: Docs agent
+claim -> source mapping and coverage-gap reporting. Done; see §3 (`coordinator/confidence.py`,
+`coordinator/provenance.py`), §7 item 30, decisions #32-33, and the Day 18 table in
+`docs/interview-prep/numbers.md`. Both halves are readings of the frozen shapes; no shape moved.
+
+What already existed for Day 18:
+
+- **A is mostly a reading exercise.** Every analytic field is already an `Assessment` with
+  its own `confidence` (CONTRACTS.md sec 2.1), the bands are quoted verbatim in every agent's
+  system prompt, and the emit schemas describe them per field (`_annotate.py`). What Day 18
+  can add without a contract change is enforcement of what the bands say: a `value` with
+  `confidence` below 0.25 is a contract violation today only by prose. Check
+  `docs/design-notes/contract-changes.md` "Anticipated" before touching anything - the
+  self-contradicting sec 2.1 evidence sentence is on that list, not to be fixed by accident.
+- **B is largely built (Day 8).** `Claim.sources` with verbatim quotes and `Coverage`
+  (sub-questions answered/unanswered, documents searched/retrieved/cited) are stamped by the
+  Docs runtime and grounded in code; the sec 4.2 unanswered-needs-a-gap rule is enforced
+  since Day 16. What is left is reporting: the digest and the synthesis already carry
+  `docs=` ids; a coverage line in the digest and the unanswered sub-questions surfacing as
+  the coordinator's `unresolved_gaps` are the visible half.
+- **Haiku is now a real question (item 5).** The retry loop exists; re-run
+  `check_structured_output.py --model claude-haiku-4-5-20251001` (1 call per repeat, default
+  3) *with* retries on and compare against the Day 4 1/3. Only if asked - the standing rule.
+
+<!-- superseded Day 17 notes follow, kept for the record -->
+**Day 17 as planned:** A: validation-retry loop - on schema failure, re-request with the
+specific error attached; track retry-resolvable (format) vs not (info genuinely absent). B:
+audit log for every approved/denied action. Done; see §3 (`agents/_retry.py`, `hitl/audit.py`),
+§7 items 5, 17, 20, 23, and 27, and decisions #30-31. The live re-run of item 22 was not made
+(PR #19 was still open, so the demo would have deployed the wrong release); it is the first
+thing above.
+
+**From the plan (Day 17):** A: validation-retry loop - on schema failure, re-request with the specific
 error attached; track retry-resolvable (format) vs not (info genuinely absent). B: audit log for
 every approved/denied action.
 
-**First, the one Day 16 thing still open:** item 22's live re-run. The roster block is built and
-tested offline, but whether it stops round 1 re-asking the siblings is only measurable live:
-`check_day15_integration.py --deploy --max-rounds 1` (~12-20 calls; the last two measured
-$1.10-1.16, and ~$0.60 is the expectation if the fix works - say both before running). Needs
-Docker Desktop up (it was down all of Day 16) and PR #18 plus the Day 16 PR merged.
-
-What already exists for Day 17:
+What already existed for Day 17:
 
 - **A:** three live-only agent refusals are waiting for exactly this loop (items 20 and 23):
   the GitHub paraphrased excerpt (three times now), the Deployment health reply not covering
@@ -419,10 +500,13 @@ for github queries.
    docstring; none is done silently.
 4. **Prompt caching not enabled.** The system prompt plus tool schema is byte-identical on
    every call and sits at the front of the prefix. Obvious win, not yet taken.
-5. **Haiku is a Day 17 question, not a closed one.** It scored 1/3 on contract-valid
+5. **Haiku is now an open measurement, not a blocked one.** It scored 1/3 on contract-valid
    structured output where Sonnet scored 3/3, and blind retry made it no cheaper than Sonnet.
-   A retry loop that re-sends *with the validation error attached* should change that. The
-   user wants Haiku; the answer is "once Day 17 exists".
+   The retry loop that re-sends *with the validation error attached* exists as of Day 17
+   (`agents/_retry.py`, on by default with a cap of 2), so the question is one
+   `check_structured_output.py --model claude-haiku-4-5-20251001` run away (3 calls plus
+   retries). The user wants Haiku; run it when asked, and read the `RetryLog` summary as
+   well as the validity count - a Haiku that passes only on attempt 3 is not cheaper.
 6. **Delegation is verified live on one query, not a set.** `scripts/check_day7_delegation.py`
    passes (2 calls: one plan, one diagnose) and is worth re-running after any coordinator
    prompt change, but the routing check has five cases and this has one. Adding cases costs
@@ -541,7 +625,7 @@ for github queries.
    `complete` over a null judgement becomes `partial`. This is a behaviour change in all
    four agents, covered by a Deployment test and the existing envelope tests. A reported
    `partial` / `insufficient_evidence` / `error` is never raised. The general fix for a
-   report the contract refuses is still the Day 17 validation-retry loop.
+   report the contract refuses is the Day 17 validation-retry loop, now built.
 18. **The Day 14 live sequential run, three attempts (2026-09-17).** Attempt 1 exercised the
    loop end to end and failed the check honestly: GitHub refused its own report in round 0
    (a paraphrased excerpt), the loop retried it in round 1 and it answered with a gap
@@ -578,12 +662,14 @@ for github queries.
    is valid under `1.1.0`. **The enforcement half is done (Day 16):** `AgentResponse` and
    `CoordinatorResponse` read `schema_version` and refuse a different major or a malformed
    version; the step-3 tension itself stays on record.
-20. **Two live-only agent refusals the refinement loop cannot fix by retrying blind:** a
-   GitHub excerpt paraphrase (retry worked once, by luck of sampling) and a Deployment
-   report whose health reply did not cover `to_version` (retry would fail identically).
-   Both are the Day 17 validation-retry loop's job - re-request *with the error attached* -
-   and the refinement loop's identical-gap rule already stops it spending a second round
-   on them.
+20. ~~**Two live-only agent refusals the refinement loop cannot fix by retrying blind.**~~
+   **Built on Day 17 (`agents/_retry.py`), live numbers pending.** A GitHub excerpt
+   paraphrase (retry worked once, by luck of sampling) and a Deployment report whose
+   health reply did not cover `to_version` (retry would fail identically) are both
+   `grounding` rejections now: the model is shown the agent's own refusal and told that
+   removing the claim and recording a gap is the answer, not a closer paraphrase. Offline
+   tests reproduce both shapes; the first live `respond()` run after Day 17 records what
+   the real model does with the feedback (`retries.json`).
 21. **The Day 10 GIF predates the model-written synthesis.** `demo_day10.py` now passes
    `ModelSynthesiser()` and prints the synthesis; re-running it (~4 calls) and re-rendering
    the GIF is a Day 15 nicety, not a blocker.
@@ -608,12 +694,14 @@ for github queries.
    **Built offline on Day 16, exactly as recommended** (`handoff.roster_block`, decision
    #28), plus the same rule in every agent's `Gap.suggested_agent` guidance. **The live
    re-run has not been made** - Docker Desktop was down, and it is the first thing in §6.
-23. **A third live-only agent refusal joined item 20's two:** the Docs agent's report was
-   rejected for an extra field the model invented (`findings.coverage_answer_placeholder`,
-   `extra_forbidden`) on a round-1 re-delegation with a 5k-char context. Day 17's
-   validation-retry loop owns all three; the GitHub paraphrase refusal has now happened three
-   times in live runs (Day 14 attempt 1, then round 0 of Day 15 attempt 1 and round 1 of
-   attempt 2), each costing a whole agent run.
+23. ~~**A third live-only agent refusal joined item 20's two.**~~ **Covered by the Day 17
+   loop, live numbers pending.** The Docs agent's report was rejected for an extra field the
+   model invented (`findings.coverage_answer_placeholder`, `extra_forbidden`) on a round-1
+   re-delegation with a 5k-char context - a `format` rejection now, fed back as
+   `findings.coverage_answer_placeholder: Extra inputs are not permitted` with the shape
+   advice. The GitHub paraphrase refusal happened three times in live runs (Day 14 attempt
+   1, then round 0 of Day 15 attempt 1 and round 1 of attempt 2), each costing a whole agent
+   run; a retry costs one more call on the same conversation instead.
 24. **The selection check has no case shaped like the one that broke.**
    `check_agent_selection.py`'s five cases never ask for precedent and a live diagnosis in
    one query, which is why a wrong roster survived from Day 6 to Day 15 at 5/5. One more
@@ -634,8 +722,29 @@ for github queries.
    no recorded Deployment report ever recommended `rollback_now`). The replay found three
    misreadings on its first run. Re-run `scripts/gate_recorded_run.py` after any live run
    that produces recommendations - it is free and it is the only check against real
-   wording. The gate is not wired into `respond()` or any live script yet; Day 17's audit
-   log is the natural place to decide where it is called.
+   wording. **Decided on Day 17:** the gate is called at the entry point, never inside the
+   executor - `respond(gate=...)` reviews the finished response under a `hitl_gate` span
+   and the decisions live in the gate's audit log, not the response. `demo_day10.py` passes
+   `HitlGate(DenyAll(), audit=default_audit_log())`; the two check scripts do not (they are
+   the item-22 measurement and should not be perturbed), so run
+   `gate_recorded_run.py --persist` after them.
+28. **The audit log's live table has 15 rows from the Day 17 `--persist` run** (the nine
+   recorded responses, all `DenyAll`). They are real records of a replay, not of a human
+   decision - `decided_by` says `deny_all` or `policy`. The table is append-only, so they
+   stay; a `make db-reset` (destructive) is the only thing that removes them, and it also
+   destroys the corpus.
+29. **`AIOC_MAX_VALIDATION_RETRIES` is a new `.env` knob** (default 2, 0 disables). Every
+   retry re-sends the whole conversation (item 16), so on the tool-driven agents a retry
+   costs roughly the PR read again; the identical-rejection rule keeps a model that cannot
+   fix something from spending both retries.
+30. **The Docs agent stated negatives as unsupported claims at 0.90** (Day 15 run: "the corpus
+   contains no document describing PR #11", `supported: false`, `sources: []`, confidence
+   0.90). Correct by the contract (an unsupported claim never reaches the answer), wrong as a
+   confidence number, and the reason `unsupported_claim_above_floor` exists. The Docs emit
+   guidance for `Claim.confidence` now says an unsupported claim belongs below 0.25 and that
+   "the corpus says nothing about X" is a coverage gap, not a claim. **Prompt text, so the
+   fix is unmeasured until the next live Docs run** - `confidence_report.py` (free) after it
+   is the check; 5 of 28 recorded claims carry the flag today.
 
 ## 8. Where things are written down
 
@@ -647,7 +756,7 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33) |
 | Eleven debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's) |
 | The routing case study, before and after | `docs/case-study-tool-routing.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |

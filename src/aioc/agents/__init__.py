@@ -4,11 +4,21 @@ Days 3-4: the Incident agent - prose (``investigate``) and schema-validated outp
 (``diagnose``). Day 8: the Docs agent - retrieval-grounded, schema-validated ``answer``.
 Day 11: the GitHub agent - tool-driven over the `aioc-github` MCP server, schema-validated
 ``analyze``. Day 12: the Deployment agent - tool-driven over the `aioc-deployment` MCP
-server, schema-validated ``assess``. All four agents now exist.
+server, schema-validated ``assess``. All four agents now exist. Day 17: every agent's
+forced emit runs inside the validation-retry loop (`_retry`) - a refused report is
+re-requested with the error attached, and the outcome is recorded in a `RetryLog`.
 """
 
 from __future__ import annotations
 
+from ._retry import (
+    Rejection,
+    RejectionKind,
+    ReportRejected,
+    RetryLog,
+    RetryRecord,
+    default_retry_log,
+)
 from .deployment import (
     DEPLOYMENT_SYSTEM_PROMPT,
     DeploymentAgent,
@@ -63,4 +73,10 @@ __all__ = [
     "IncidentAgentError",
     "IncidentProse",
     "IncidentReport",
+    "Rejection",
+    "RejectionKind",
+    "ReportRejected",
+    "RetryLog",
+    "RetryRecord",
+    "default_retry_log",
 ]

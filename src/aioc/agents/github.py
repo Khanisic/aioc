@@ -38,7 +38,7 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import Any
 
-from anthropic.types import ToolUseBlock
+from anthropic.types import MessageParam
 from pydantic import Field
 
 from aioc.contracts import (
@@ -61,6 +61,7 @@ from aioc.llm.mcp import McpStdioToolset
 from aioc.tools.github.api import GitHubSettings
 
 from ._annotate import ROOT, apply_guidance
+from ._retry import RejectionKind, ReportRejected, RetryLog, default_retry_log, emit_with_retry
 from ._status import settle_status
 from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
 from .incident import _CONFIDENCE_BANDS
@@ -332,22 +333,31 @@ _EMIT_INSTRUCTION = (
 )
 
 
-class GitHubAgentError(RuntimeError):
+class GitHubAgentError(ReportRejected):
     """The model did not return usable structured output, or its output referenced data it
     was never given. A malformed-but-present payload raises pydantic's ``ValidationError``
     instead.
 
     ``report`` carries the validated-but-ungrounded report when there is one, so a caller
-    (the check script today, the Day 17 validation-retry loop later) can see exactly what
-    the model wrote rather than only why it was refused."""
+    (the check scripts, the validation-retry loop) can see exactly what the model wrote
+    rather than only why it was refused. ``kind`` is the retry loop's: ``grounding`` by
+    default, ``None`` for a failure a retry cannot change (`agents._retry`)."""
 
-    def __init__(self, message: str, *, report: GitHubReport | None = None) -> None:
-        super().__init__(message)
+    def __init__(
+        self,
+        message: str,
+        *,
+        report: GitHubReport | None = None,
+        kind: RejectionKind | None = RejectionKind.GROUNDING,
+    ) -> None:
+        super().__init__(message, kind=kind)
         self.report = report
 
 
 def _emit_never_runs(_args: dict[str, Any]) -> ToolResult:
-    raise GitHubAgentError(f"{EMIT_TOOL_NAME} is a structured-output tool; it is never executed")
+    raise GitHubAgentError(
+        f"{EMIT_TOOL_NAME} is a structured-output tool; it is never executed", kind=None
+    )
 
 
 _EMIT_TOOL = ToolSpec(
@@ -437,11 +447,20 @@ class GitHubAgent:
         toolset: ToolsetFactory | None = None,
         repository: str | None = None,
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
+        max_validation_retries: int | None = None,
+        retry_log: RetryLog | None = None,
     ) -> None:
         self._client = client or LLMClient()
         self._toolset = toolset or default_toolset
         self._repository = repository
         self._max_rounds = max_tool_rounds
+        # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
+        self._max_retries = (
+            max_validation_retries
+            if max_validation_retries is not None
+            else self._client.settings.max_validation_retries
+        )
+        self._retry_log = retry_log if retry_log is not None else default_retry_log()
 
     def analyze(
         self,
@@ -460,9 +479,12 @@ class GitHubAgent:
         and the assembled response is validated against the contract envelope plus this
         module's grounding checks.
 
-        Raises `GitHubAgentError` for missing/ungrounded output, `McpToolsetError` if the
-        server cannot be started, and pydantic's ``ValidationError`` for a payload that
-        violates the contract. The validation-retry loop is Day 17, deliberately not here.
+        A refused report is re-requested with the error attached (the Day 17
+        validation-retry loop, `agents._retry`): the same conversation, the emit tool
+        forced again, no tool re-run. When the loop gives up the last error is raised:
+        `GitHubAgentError` for missing/ungrounded output, pydantic's ``ValidationError``
+        for a payload that violates the contract. `McpToolsetError` if the server cannot
+        be started.
         """
         if not query.strip():
             raise ValueError("query must be non-empty")
@@ -501,37 +523,41 @@ class GitHubAgent:
         if usage is not None:
             usage.add(loop.usage)
 
-        if captured:
-            payload = captured[-1]
-        else:
-            # Phase 2: the same conversation, now forced through the emit tool. The data
-            # tools stay defined so the prior tool_use blocks in the history stay valid.
-            resp = self._client.complete(
-                messages=[*loop.messages, {"role": "user", "content": _EMIT_INSTRUCTION}],
-                system=GITHUB_SYSTEM_PROMPT,
-                tools=[*data_tools, emit_tool],
-                tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
-            )
-            if usage is not None:
-                usage.input_tokens += resp.usage.input_tokens
-                usage.output_tokens += resp.usage.output_tokens
-            if resp.stop_reason == "max_tokens":
-                raise GitHubAgentError(
-                    f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
-                    f"({resp.usage.output_tokens} output tokens); the report is incomplete. "
-                    "Raise AIOC_MAX_TOKENS or narrow the query."
-                )
-            payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
-
-        report = GitHubReport.model_validate(payload)
         # Only wire calls are tool calls. The emit capture is this process's own bookkeeping.
         wire_calls = [r for r in loop.tool_calls if r.name != EMIT_TOOL_NAME]
         ledger = _Ledger(wire_calls, server)
-        try:
-            return self._assemble(report, ledger, request_id, invocation_id)
-        except GitHubAgentError as exc:
-            exc.report = report
-            raise
+
+        def build(payload: dict[str, Any]) -> GitHubAgentResponse:
+            report = GitHubReport.model_validate(payload)
+            try:
+                return self._assemble(report, ledger, request_id, invocation_id)
+            except GitHubAgentError as exc:
+                exc.report = report
+                raise
+
+        # Phase 2: the same conversation, forced through the emit tool - or, when the
+        # model emitted on its own during the loop, that payload validated directly. The
+        # data tools stay defined so the prior tool_use blocks in the history stay valid.
+        # A refused report is re-requested with the error attached (agents/_retry).
+        messages: list[MessageParam] = list(loop.messages)
+        if not captured:
+            messages.append({"role": "user", "content": _EMIT_INSTRUCTION})
+        return emit_with_retry(
+            self._client,
+            agent=AGENT_NAME,
+            messages=messages,
+            system=GITHUB_SYSTEM_PROMPT,
+            tools=[*data_tools, emit_tool],
+            emit_tool=EMIT_TOOL_NAME,
+            build=build,
+            error_type=GitHubAgentError,
+            usage=usage,
+            max_retries=self._max_retries,
+            log=self._retry_log,
+            request_id=request_id,
+            invocation_id=invocation_id,
+            captured=captured[-1] if captured else None,
+        )
 
     @staticmethod
     def _prompt(query: str, context: str) -> str:
@@ -565,7 +591,8 @@ class GitHubAgent:
         repository = ledger.repository or self._repository or GitHubSettings().repository
         if repository is None:
             raise GitHubAgentError(
-                "no repository is known - set GITHUB_REPO or pass repository= to the agent"
+                "no repository is known - set GITHUB_REPO or pass repository= to the agent",
+                kind=None,
             )
         findings = GitHubFindings(
             repository=repository,
@@ -644,12 +671,14 @@ def _parse_timestamp(raw: Any, sha: str) -> datetime:
     """GitHub stamps every commit's author date; a missing or unparsable one is a tool
     fault, not a fact to fabricate."""
     if not isinstance(raw, str):
-        raise GitHubAgentError(f"commit {sha!r} carries no authored_at timestamp")
+        raise GitHubAgentError(f"commit {sha!r} carries no authored_at timestamp", kind=None)
     text = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError as exc:
-        raise GitHubAgentError(f"commit {sha!r} has an unparsable authored_at {raw!r}") from exc
+        raise GitHubAgentError(
+            f"commit {sha!r} has an unparsable authored_at {raw!r}", kind=None
+        ) from exc
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
@@ -673,15 +702,3 @@ def _ground_evidence(entry: Evidence, ledger: _Ledger) -> Evidence:
             "excerpts must never be paraphrased"
         )
     return entry.model_copy(update={"tool_call_id": tc_id})
-
-
-def _extract_tool_input(resp: Any, tool_name: str) -> dict[str, Any]:
-    """Pull the forced tool call's input object out of the response, or fail clearly."""
-    for block in resp.content:
-        if isinstance(block, ToolUseBlock) and block.name == tool_name:
-            if not isinstance(block.input, dict):
-                raise GitHubAgentError(f"{tool_name} input was not a JSON object")
-            return dict(block.input)
-    raise GitHubAgentError(
-        f"model did not call {tool_name} (stop_reason={resp.stop_reason!r}); no structured output"
-    )

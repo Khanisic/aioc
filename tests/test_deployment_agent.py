@@ -284,7 +284,7 @@ def _agent(
     def factory() -> Any:
         yield toolset
 
-    agent = DeploymentAgent(client, toolset=factory)
+    agent = DeploymentAgent(client, toolset=factory, max_validation_retries=0)
     return agent, fake.messages, toolset
 
 
