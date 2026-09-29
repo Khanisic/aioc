@@ -493,6 +493,17 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 ### Day 20 — Integration: baseline
 - **Checkpoint:** Full eval run, results committed to `evaluations/baseline.md`.
   Record cached vs. uncached and batch vs. realtime cost deltas — these are portfolio numbers.
+- **Not done (2026-09-29): the checkpoint is built and tested, the run has not been made.** The
+  API key is revoked, so no eval has ever run live and `evaluations/baseline.md` does not exist.
+  What exists is the checkpoint as one command, `scripts/check_day20_baseline.py`: a four-call
+  smoke test that stops the run if the wire or the cache is not working, then the whole set once
+  each realtime and uncached (the reference), realtime and cached, and batch and cached, then the
+  baseline written from what was measured - 118 calls, ~$2.95 projected before caching.
+  `src/aioc/evals/baseline.py` puts the runs side by side, refuses runs that are not comparable,
+  keeps the lever's delta (a run's own tokens priced both ways) apart from the measured one (one
+  run's bill against another's), and names every item the runs scored differently; `compare`
+  reads a later run against it, which is Day 24's token reduction. Every report carries a cache
+  verdict. 970 offline tests. **The done-when is the committed baseline, and it is still open.**
 
 ---
 

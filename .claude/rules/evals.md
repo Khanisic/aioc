@@ -30,3 +30,9 @@ the rules below are about those two things.
   with an explicit context, exactly as the executor does. Do not build an eval-only prompt.
 - Every live run costs money. Say the call count and quote `--dry-run` before running one; do not
   run a model matrix unasked.
+- Runs are comparable only on the same set, the same model, and the same items. Refuse the rest
+  (`baseline.build_baseline`); an average over runs that differ is a number about the difference.
+- Two cost deltas, never mixed: a run's own tokens priced both ways is the lever, one run's bill
+  against another's is the lever plus what the model happened to write. Say which one a number is.
+- A baseline on part of the set is a rehearsal. Nothing on a selection is written under
+  `evaluations/`, because a committed baseline is compared with as if it were the whole.

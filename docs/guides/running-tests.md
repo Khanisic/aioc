@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 918 tests, no network, no API key; 17 skip without the Docker stack
+uv run pytest -q              # 970 tests, no network, no API key; 17 skip without the Docker stack
 ```
 
 Selecting a subset:
@@ -72,7 +72,8 @@ A type error in `scripts/runlog.py` will not fail `mypy`.
 | `tests/test_prompt_caching.py` | 27 | Day 19 caching and pricing: where the cache marker goes and where it does not, the prefix byte-identical across requests that differ in everything else, no system prompt carrying a date or an id, the three-part prompt count put back together, the executor's cost carrying the counters, and the price of a read, a write, and a batch |
 | `tests/test_batch.py` | 22 | Day 19 Batch API against a scripted batch endpoint: request keys, the wire (polling on an injected clock, results read by id from a reversed list), `DeferredClient`, and the shipped Incident agent run unchanged through a batch, including a refused report retried as a second batch |
 | `tests/test_evals.py` | 98 | Day 19 eval harness: the seed parser, the committed set and eleven case files that must be refused, the leak guard, scoring each way with the denominators checked, calibration per band, the runner realtime and batched, the report and its three prices (1 needs the stack) |
-| `tests/test_eval_scripts.py` | 22 | Day 19 dev tooling: `run_evals.py` end to end with a scripted model, corpus, and batch endpoint, a recorded run re-scored from disk, a revoked key aborting with no item blamed, and the cost review pricing cache and batch usage |
+| `tests/test_baseline.py` | 51 | Day 20 baseline, against a scripted model that bills like the real one: the cache verdict each way, runs side by side with the two cost deltas computed by hand, the refusals, a later run compared, and `check_day20_baseline.py`, `eval_baseline.py`, and `run_evals.py --smoke` end to end |
+| `tests/test_eval_scripts.py` | 23 | Day 19 dev tooling (and, since Day 20, two runs in one second keeping their own records): `run_evals.py` end to end with a scripted model, corpus, and batch endpoint, a recorded run re-scored from disk, a revoked key aborting with no item blamed, and the cost review pricing cache and batch usage |
 
 The house rule from `.claude/rules/tests.md`: every validated invariant gets a negative test asserting the violation is rejected.
 A test that only proves the happy path does not prove the invariant is enforced.
@@ -108,6 +109,9 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `audit_log.py` | **0** | Free: reads the append-only audit log back (`--request`, `--decision`, `--since`, `--limit`, `--json`); needs the stack |
 | `confidence_report.py` | **0** | Free: every recorded `respond()` response read field by field - each judgement with its band and flags, and each Docs report's claim -> source chain and coverage gaps (`--run`, `--json`); the calibration floor the Day 19 eval starts from |
 | `run_evals.py` | 38 on the full set, one per item, plus one per validation retry (+1 Voyage query embed per recall with a key); **0** with `--list`, `--show`, `--dry-run`, `--rescore`, `--recorded-tools` | The Day 19 eval: the shipped Incident and Docs agents scored against the seeded incidents' recorded truth - accuracy, hallucination rate, tool success, calibration per band - and the run priced three ways from its measured tokens. `--mode batch` sends the same requests through the Batch API (half price, usually minutes, up to an hour); `--no-cache` is the uncached baseline; `--tasks diagnose` needs no stack. Projected ~$1.13 for a full realtime run before caching (`--dry-run` prints it). A refused credential aborts the run with exit 2 |
+| `run_evals.py --smoke` | 4 | Day 20: the first four diagnoses and a verdict. Fails when an item got no response, or when prompt caching is on and the later requests did not read the prefix the first one wrote. About $0.12. Run it after anything changes the wire: a new key, a prompt edit, an SDK upgrade |
+| `check_day20_baseline.py` | 118: the smoke test, then 38 for each of three configurations (**~$2.95 projected before caching**); **0** with `--plan` | The Day 20 checkpoint: the whole eval set realtime and uncached (the reference), realtime and cached, and batch and cached, and `evaluations/baseline.md` with `baseline.json` written from what was measured. Stops after the smoke test if it fails. `--limit 6` is a 22-call rehearsal that writes nothing under `evaluations/`; `--configs` chooses the runs; the batch run waits on the Batch API, usually minutes |
+| `eval_baseline.py` | **0** | Free: recorded eval runs side by side (`--latest` picks the newest complete run of each configuration), `--write PATH.md` with `PATH.json` beside it, and `--against baseline.json <run-dir>` to read a later run against a committed baseline |
 | `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between the two overlapping tools over 20 plain and 20 adversarially worded queries; `--variant v1` lists the `1.0.0` `analyze_*` server (the baseline), `--variant v1_1` the `1.1.0` `search_*` server (the split), the same ground truth mapped onto each server's names; prints and records the misrouting rate per set with the query-set hash, so before and after compare like with like; `--model` swaps the router |
 
 ```bash
@@ -184,6 +188,19 @@ PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --tasks diagnose --lim
 PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py
 PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --no-cache
 PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --mode batch --cache-ttl 1h
+
+# Is the wire working, and is the cache reading? 4 calls, a verdict.
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --smoke
+
+# The Day 20 baseline. --plan is free and prints the calls and the projected price.
+# Live it is 118 calls: a smoke test, then the whole set three ways. Needs the stack.
+uv run python scripts/check_day20_baseline.py --plan
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day20_baseline.py --limit 6   # a rehearsal
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day20_baseline.py
+
+# Recorded eval runs side by side, and a later run against the committed baseline. Free.
+uv run python scripts/eval_baseline.py --latest
+uv run python scripts/eval_baseline.py --against evaluations/baseline.json test-results/runs/<date>/<run-dir>
 
 # The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
 # --variant v1 is the 1.0.0 baseline, --variant v1_1 the 1.1.0 split.

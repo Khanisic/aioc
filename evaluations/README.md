@@ -8,7 +8,8 @@ Committed eval sets and committed eval results.
 | Path | What it is |
 |---|---|
 | `cases/seeded-incidents.json` | The eval set: 20 cases, 38 items. One case for each of the 18 seeded incidents, each with a diagnose task and a recall task, plus two no-precedent recall probes. |
-| `results/` | Reports promoted from `test-results/` with `scripts/run_evals.py --write`. Empty until Day 20's baseline. |
+| `baseline.md`, `baseline.json` | The Day 20 baseline: the whole set run once for each configuration of the two cost levers, side by side. The Markdown is for reading; the JSON is what a later run is compared against. **Neither exists yet** - the run has not been made. |
+| `results/` | One report for each run in the baseline, written with it. |
 
 ## The one rule: a case selects, it never authors
 
@@ -45,3 +46,17 @@ uv run python scripts/run_evals.py --mode batch # live, the Batch API at half pr
 ```
 
 `docs/guides/running-tests.md` has the rest, including what each mode costs.
+
+## The baseline
+
+```bash
+uv run python scripts/check_day20_baseline.py --plan   # free: what it will do and cost
+uv run python scripts/check_day20_baseline.py          # live, 118 calls
+uv run python scripts/eval_baseline.py --against evaluations/baseline.json <run-dir>   # free
+```
+
+The checkpoint writes `baseline.md`, `baseline.json`, and `results/` only when it ran the whole set.
+A run on a selection is a rehearsal and leaves this directory alone.
+
+A baseline is replaced, not edited.
+When the case file changes, its `sha256` changes, every comparison against the old baseline is refused, and the checkpoint is run again.

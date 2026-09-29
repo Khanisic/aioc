@@ -48,7 +48,7 @@ describes local tooling output, and may change freely.
 
 | Field | Meaning |
 |---|---|
-| `run_id` | `<UTC>__<kind>__<name>`, unique per run |
+| `run_id` | `<UTC>__<kind>__<name>`, unique per run: the stamp is to the second, so a run that starts in the same second as another of the same name gets `-2`, `-3`, ... appended |
 | `kind`, `name` | run family and what it was |
 | `outcome` | `passed` / `failed` / `error` - `error` means the run never reached a verdict |
 | `exit_code` | the process exit code, when there was one |

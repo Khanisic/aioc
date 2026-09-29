@@ -1,8 +1,10 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 19** of 30, after the eval harness, prompt caching, and the Batch
-API path were built and proven offline - and before any of them had met the real API, because
-the Anthropic key in `.env` is revoked (§4, §7 item 31). **Replacing the key is the first thing.**
+Written during **Day 20** of 30. Day 19's eval harness, prompt caching, and Batch API path
+are built and proven offline, and so is Day 20's checkpoint - one command that runs the
+baseline and commits it. **Day 20 is not done: the measurement has not been made**, because
+the Anthropic key in `.env` is revoked (§4, §7 item 31) and nothing here has ever met the real
+API. **Replacing the key is the first thing, and the baseline is one command after it.**
 `CLAUDE.md` is loaded automatically and covers what the project *is*; this
 file covers what a fresh session cannot infer from the code - live state, environment traps,
 standing preferences, and what to do next.
@@ -17,7 +19,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 918-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 970-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -49,23 +51,23 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**`origin/main` holds Day 16 and nothing after it (2026-09-29).** Read this paragraph before
-merging anything.
+**`origin/main` holds everything through Day 19 (2026-09-29).** PRs #21 (Days 17 and 18)
+and #22 (Day 19) are merged, #22 after its base had been retargeted to `main`.
 
-- PR #19 (Day 16) is merged into `main`.
-- PR #20 (Day 17) was merged 26 seconds later, before GitHub had retargeted it, so it landed
-  on **`d16-schemas-hitl`**, not `main`. Day 17 is not on `main`. The merge commit
-  (`0358ff4`, on `origin/d16-schemas-hitl`) adds no content of its own.
-- PR #21 (Day 18, `d18-confidence-provenance`) did not exist until 2026-09-29; the previous
-  version of this file described it as open. It is open now, against `main`, and carries the
-  two Day 17 commits as its first two - **merging #21 puts Days 17 and 18 on `main`
-  together.** `origin/d16-schemas-hitl` can be deleted afterwards.
-- Day 19 is `d19-evals-cost-levers`, cut from `d18-confidence-provenance` and pushed, with
-  its PR stacked on #21. **Merge #21 first, then wait for the Day 19 PR's base to read
-  `main` before merging it** - the trap in §4 is exactly this.
+- How Day 17 got there is worth knowing: PR #20 was merged 26 seconds after #19, before
+  GitHub had retargeted it, and landed on `d16-schemas-hitl` instead of `main`. #21 carried
+  its two commits to `main`. `origin/d16-schemas-hitl` still exists, holds nothing `main`
+  lacks, and can be deleted. The trap is in §4.
+- One commit is not on `main`: `ff28e25` ("HANDOFF: Day 19 is PR #22"), pushed after #22
+  had already been merged. It changes two lines of this file, it is the base of the Day 20
+  branch, and it reaches `main` with Day 20.
+- Day 20's tooling is `d20-eval-baseline`, pushed, with its PR against `main`. The PR says
+  in its title that the baseline itself is not in it; when the run has been made,
+  `evaluations/baseline.md`, `baseline.json`, and `results/` go on top of that branch, or
+  in a PR of their own if this one has merged.
 
-`khanisic/main` trails `origin/main` by four merges (Days 13-16); the mirror push below is
-due after the next merge.
+`khanisic/main` trails `origin/main` by six merges (Days 13-19); the mirror push below is
+due.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -104,6 +106,12 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `llm/pricing.py` | **Day 19.** The one price table (read 2026-09-25), the cache write multipliers (1.25x for 5m, 2x for 1h), the batch discount (0.5). `price` and `price_uncached`; an unlisted model is unpriced, not guessed. `scripts/cost_review.py` imports it. |
 | `evals/` + `evaluations/cases/` | **Day 19. No live score yet.** `seeded-incidents.json` is 20 cases, 38 items: each seeded incident as a diagnosis and as a recall, plus two no-precedent probes. A case selects verbatim seed lines; the expected values are read from the seed SQL at load; `check_leaks` refuses a context that carries its answer. Scoring is pure (`scoring.py`): accuracy with abstentions counted apart, every checkable statement in a diagnosis looked for in its context, tool success, calibration per band. `runner.py` is realtime or batch over the shipped agents, a `Usage` and `RetryLog` per item, and `EvalAborted` on a refused credential. |
 | `scripts/run_evals.py` | **Day 19.** `--list`, `--show <case>`, `--dry-run`, `--rescore <run-dir>`, `--recorded-tools` are free. Live: one call an item (38), `--mode batch`, `--no-cache`, `--cache-ttl`, `--tasks`, `--cases`, `--limit`, `--model`, `--write`. Records `report.md`, `eval.json`, `responses.json`. Exit 2 on no key or a refused one. |
+| `evals/report.py` cache verdict | **Day 20.** `cache_health(run)`: `healthy` for a realtime run whose later requests read the prefix the first one wrote, `NOT WORKING` when requests that share a prefix ran one after another and none read it (the failure that costs 25% more and breaks nothing), and not assessed for a run with caching off, with nothing to share, or batched. In every report and every `eval.json`. |
+| `evals/baseline.py` | **Day 20.** `build_baseline(records)`: several runs of one set side by side, refused unless they share the set, the model, and the items, with one run a configuration. Two cost deltas, kept apart: `same_tokens` prices a run's own tokens both ways (the lever and nothing else), `measured` is one run's bill against the reference run's (what was paid, noise included). `agreement` names every item the runs scored differently. `compare(baseline, record)` reads a later run against the baseline run of its own configuration - Day 24's token reduction. |
+| `scripts/check_day20_baseline.py` | **Day 20. Built and tested offline; never run live.** `--plan` is free. Live: a smoke test of 4 calls, stopping there if it fails, then the whole set once for each configuration (default `realtime-uncached`, `realtime-cached`, `batch-cached`): 118 calls, **~$2.95 projected before caching**. On the whole set it writes `evaluations/baseline.md`, `baseline.json`, and `results/<configuration>.md`; on a selection (`--limit`, `--cases`, `--tasks`) it writes nothing under `evaluations/`. |
+| `scripts/eval_baseline.py` | **Day 20.** Free. Named run directories, or `--latest` (the newest complete run of each configuration on the set as it is now), side by side; `--write PATH.md` also writes `PATH.json`; `--against baseline.json <run-dir>` compares a later run. |
+| `scripts/run_evals.py --smoke` | **Day 20.** Live, 4 calls, about $0.12, and a verdict: fails when an item got no response or the cache is on and did not read. The first thing to run after anything changes the wire. |
+| `scripts/runlog.py` | **Day 20 fix.** A run id is now unique: the name is stamped to the second, so a run starting in the same second as another of the same name gets `-2`. Before this the second run wrote into the first one's directory. Found by the checkpoint's tests. |
 | `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated), with a `usage` accumulator (the Day 7 cost seam). The schema-annotation helper it pioneered now lives in `agents/_annotate.py`, shared with the Docs agent. |
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
 | `retrieval/` | **Day 8.** `embeddings.py` (Embedder protocol, Voyage client; `default_embedder()` is `None` without `VOYAGE_API_KEY`) + `corpus.py` (sha256-idempotent ingestion into `incident_embeddings`, pg_trgm + pgvector hybrid search, RRF fusion, honest `degraded` field for lexical-only mode). |
@@ -214,12 +222,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 918 passed
+uv run pytest -q                                                   # expect 970 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **918 passed** with the stack up at the end of Day 19 (2026-09-29);
-without Docker Desktop the 17 `integration`-marked tests skip and it is 901. Lint and mypy
+Costs nothing. Last run: **970 passed** with the stack up on Day 20 (2026-09-29);
+without Docker Desktop the 17 `integration`-marked tests skip and it is 953. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
 most of it.
@@ -265,31 +273,36 @@ coordinator prompt change. Remember `make chaos-reset` (or
 **From the plan:** Checkpoint: full eval run, results committed to `evaluations/baseline.md`.
 Record cached vs. uncached and batch vs. realtime cost deltas - these are portfolio numbers.
 
-**Everything Day 20 needs is built; none of it has run live.** In order:
+**Everything Day 20 needs is built and tested; none of it has run live.** In order:
 
 1. **Replace the API key** (§4). Nothing below works until the free `models.list` call does.
-2. **Merge PR #21**, which puts Days 17 and 18 on `main` (§3), then the Day 19 PR once
-   its base reads `main`.
-3. **A four-item smoke test before the full set** - the first time caching and the harness
-   meet the real API, so spend a little to find out what breaks:
-   `run_evals.py --tasks diagnose --limit 4` (4 calls, about $0.12). What to read in the
-   report: `of which read from the cache` should be zero on the first item and about 4.4k on
-   the other three. If it is zero on all four, something in the prefix varies by request;
-   diff two recorded requests.
-4. **The three runs that give Day 20 its deltas**, each on the full set (38 calls):
+2. **Bring the stack up** (`docker compose up -d --wait`); the recalls retrieve from it.
+3. **Read the plan, then run the checkpoint.** Needs the stack up.
 
-   | Run | Command | Projected |
+   ```bash
+   uv run python scripts/check_day20_baseline.py --plan       # free
+   PYTHONIOENCODING=utf-8 uv run python scripts/check_day20_baseline.py
+   ```
+
+   | Step | Calls | Projected |
    |---|---|---|
-   | realtime, uncached (the baseline) | `run_evals.py --no-cache` | ~$1.13 |
-   | realtime, cached | `run_evals.py` | ~$0.87 |
-   | batch, cached | `run_evals.py --mode batch --cache-ttl 1h` | under $0.60 |
+   | smoke test (4 diagnoses, realtime, cached) | 4 | ~$0.12 |
+   | realtime, uncached - the reference | 38 | ~$1.13 |
+   | realtime, cached | 38 | ~$1.13 before caching, ~$0.87 after |
+   | batch, cached (1h TTL) | 38 | ~$0.57 before caching |
+   | **total** | **118** | **~$2.95 before caching, about $2.60 after** |
 
-   About $2.60 for all three, projected from `--dry-run` with 2,000 output tokens a report
-   assumed. **Say these numbers before running, and the measured ones after.** The scores
-   should be the same across the three within model noise; the cost is what differs.
-   `--write evaluations/results/<name>.md` puts each report where it can be committed.
-5. **`evaluations/baseline.md`** is the three reports' headline numbers side by side, with
-   the set's `sha256`, so Day 24's re-run compares like with like.
+   **Say these numbers before running, and the measured ones after.** The projection is
+   from `--dry-run` sizes with 2,000 output tokens a report assumed; a validation retry is
+   one more call. The batch run waits on the Batch API - usually minutes, up to an hour.
+4. **If the smoke test fails, the checkpoint stops after four calls** and says why. "The
+   cache is on and not working" means something in the prefix varies by request: diff the
+   `system` and `tools` of two recorded requests. For a cheaper look at the whole path
+   first, `--limit 6` is a 22-call rehearsal that writes nothing under `evaluations/`.
+5. **Commit what it wrote**: `evaluations/baseline.md`, `baseline.json`, and the three
+   reports under `evaluations/results/`. Then put the measured numbers in
+   `docs/interview-prep/numbers.md` and the Day 20 done-when in `docs/EXECUTION_PLAN.md`,
+   both of which say "not measured" today.
 
 **What to expect, so a surprise is recognisable as one:**
 
@@ -869,6 +882,18 @@ for github queries.
    recorded runs (30/30 across 19 reports, a survivor's number). An eval for them needs
    recorded tool replies and its own answer key; `check_agent_selection.py`'s missing case
    (item 24) is the same kind of gap for the planner.
+36. **Run ids were not unique until Day 20.** `runlog.py` stamps a run directory to the
+   second and used `mkdir(exist_ok=True)`, so two runs of one name starting inside a second
+   shared a directory and the second overwrote the first's `run.json`. No recorded live
+   run is affected (each takes minutes); the checkpoint's smoke test and first full run
+   are both `evals-realtime` and collided against a scripted model. Fixed by claiming the
+   directory, pinned by a test.
+37. **The baseline can only be as good as the set.** Item 35 still holds: two agents of
+   four are scored. `evaluations/baseline.md`, once it exists, is the baseline for the
+   Incident and Docs agents' forced-emit call and for nothing else - the tool-driven
+   agents' token reduction on Day 21 (items 13 and 16, the PR read and the diff reply)
+   will not show in it. Its before-and-after is `check_day15_integration.py`'s recorded
+   input tokens (343-348k), which `cost_review.py` already keeps.
 
 ## 8. Where things are written down
 

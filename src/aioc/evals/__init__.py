@@ -15,6 +15,15 @@ calls themselves is covered offline.
 
 from __future__ import annotations
 
+from .baseline import (
+    REFERENCE,
+    BaselineError,
+    build_baseline,
+    compare,
+    render_baseline,
+    render_comparison,
+)
+from .baseline import label as run_label
 from .cases import (
     DEFAULT_SET,
     CaseError,
@@ -26,7 +35,7 @@ from .cases import (
     render_signals,
     sentences,
 )
-from .report import CostView, cost_view, render_markdown, to_record
+from .report import CacheHealth, CostView, cache_health, cost_view, render_markdown, to_record
 from .runner import (
     EvalAborted,
     EvalRun,
@@ -58,8 +67,11 @@ from .seed import SEED_PATH, SeedError, SeedEvent, SeedIncident, load_seed, pars
 
 __all__ = [
     "DEFAULT_SET",
+    "REFERENCE",
     "SEED_PATH",
     "BandCalibration",
+    "BaselineError",
+    "CacheHealth",
     "CaseError",
     "CostView",
     "EvalAborted",
@@ -78,18 +90,24 @@ __all__ = [
     "SeedIncident",
     "Summary",
     "Task",
+    "build_baseline",
+    "cache_health",
     "calibrate",
     "check_leaks",
     "cited_documents",
+    "compare",
     "cost_view",
     "ground_diagnosis",
     "load_cases",
     "load_seed",
     "parse_seed",
+    "render_baseline",
+    "render_comparison",
     "render_markdown",
     "render_signals",
     "run_batch",
     "run_item",
+    "run_label",
     "run_realtime",
     "score_diagnosis",
     "score_failure",
