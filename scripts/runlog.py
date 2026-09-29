@@ -133,10 +133,21 @@ class RunRecorder:
 
         self.started = _utcnow()
         self._monotonic_start = time.monotonic()
-        self.run_id = f"{self.started.strftime('%Y%m%dT%H%M%SZ')}__{kind}__{_slug(name)}"
-
-        self.dir = self._root / "runs" / self.started.strftime("%Y-%m-%d") / self.run_id
-        self.dir.mkdir(parents=True, exist_ok=True)
+        # The name is stamped to the second, and two runs of one check can start inside one:
+        # a script that runs its check twice, or two terminals. Claiming the directory is
+        # what makes the id unique - a second run gets `-2`, never the first run's records.
+        base = f"{self.started.strftime('%Y%m%dT%H%M%SZ')}__{kind}__{_slug(name)}"
+        day = self._root / "runs" / self.started.strftime("%Y-%m-%d")
+        day.mkdir(parents=True, exist_ok=True)
+        attempt = 1
+        while True:
+            self.run_id = base if attempt == 1 else f"{base}-{attempt}"
+            self.dir = day / self.run_id
+            try:
+                self.dir.mkdir()
+                break
+            except FileExistsError:
+                attempt += 1
         self.events_path = self.dir / "events.jsonl"
 
         self._seq = 0

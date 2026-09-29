@@ -497,11 +497,37 @@ The live run was attempted and refused: the API key in `.env` has been revoked (
 
 ---
 
+## Day 20 - the baseline: the plan, and no measurement
+
+`evaluations/baseline.md` does not exist.
+The API key was still refused on 2026-09-29 (`401 API key is invalid`), so the run the day is named for has not been made.
+This section is the plan the run will be held to, written before it, so the measured numbers can be read against what was expected rather than explained afterwards.
+
+| Step | Calls | Projected, before caching |
+|---|---|---|
+| Smoke test: 4 diagnoses, realtime, cached | 4 | ~$0.12 |
+| Realtime, uncached - the reference | 38 | ~$1.13 |
+| Realtime, cached | 38 | ~$1.13 (about $0.87 if 36 of 38 requests read their prefix) |
+| Batch, cached, 1h TTL | 38 | ~$0.57 |
+| Total | 118 | ~$2.95 (about $2.60 after caching) |
+
+| | |
+|---|---|
+| Source of the projection | `scripts/check_day20_baseline.py --plan`: every request built and sized offline, ~187k input tokens a run (characters / 4), 2,000 output tokens a report assumed |
+| Offline suite | 970 passed with the stack up (918 before Day 20; 51 baseline tests, 1 for the run-id fix) |
+| Measured | nothing |
+
+- **What would count as a surprise.** Any lever that costs more than its own tokens would have uncached; a realtime cached run with no cache reads; the three runs scoring more than a fifth of the items differently. The checkpoint fails on each of these by name.
+- **What would not.** Failure-mode accuracy well under 100% (three cases are hard on purpose), severity worse than failure mode (recorded severities are withheld), and a batch with few or no cache reads (its requests run concurrently, so they may all be written before any can be read).
+- **The projection's weak assumption is the output.** Output is two thirds of the projected bill and 2,000 tokens a report is one number from the Day 10 runs. If reports run to 3,000, the total is nearer $4.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
 
-- **No eval score.** The harness exists (Day 19) and has never run against a model: the key was revoked before its first live call. Accuracy, hallucination rate, and calibration are all unmeasured; tool success is measured only over recorded runs.
+- **No eval score and no baseline.** The harness (Day 19) and the baseline checkpoint (Day 20) exist and have never run against a model: the key was revoked before the first live call. Accuracy, hallucination rate, calibration, and both cost deltas are unmeasured; tool success is measured only over recorded runs.
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.

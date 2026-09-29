@@ -54,11 +54,82 @@ def cost_view(run: EvalRun, summary: Summary) -> CostView:
     )
 
 
-def to_record(run: EvalRun, cases: EvalSet) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class CacheHealth:
+    """Whether the prompt cache did what the run assumed it would.
+
+    ``healthy`` is ``None`` when the run cannot say: caching was off, or no two answered
+    items shared an agent (and so a prefix), or the run was a batch, whose requests are
+    processed concurrently and may all be written before any can be read. It is ``False``
+    only for the case worth stopping on: a realtime run in which requests that share a
+    prefix ran one after another and none of them read it back. That costs 25% more than
+    no cache at all and fails nothing, so the report has to be what says it.
+    """
+
+    healthy: bool | None
+    reads: int
+    writes: int
+    note: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "healthy": self.healthy,
+            "reads": self.reads,
+            "writes": self.writes,
+            "note": self.note,
+        }
+
+
+def cache_health(run: EvalRun) -> CacheHealth:
+    answered = [score for score in run.scores if score.answered]
+    reads = sum(score.usage.cache_read_tokens or 0 for score in answered)
+    writes = sum(score.usage.cache_write_tokens or 0 for score in answered)
+    if not run.prompt_caching:
+        return CacheHealth(None, reads, writes, "prompt caching was off for this run")
+    by_agent: dict[str, list[ItemScore]] = {}
+    for score in answered:
+        by_agent.setdefault(score.agent, []).append(score)
+    sharing = {agent: scores for agent, scores in by_agent.items() if len(scores) >= 2}
+    if not sharing:
+        return CacheHealth(
+            None, reads, writes, "no two answered items shared a prefix, so nothing could be read"
+        )
+    if all(score.usage.cache_read_tokens is None for score in answered):
+        return CacheHealth(
+            False, reads, writes, "the API reported no cache counters on any response"
+        )
+    if run.mode == "batch":
+        return CacheHealth(
+            None,
+            reads,
+            writes,
+            "a batch's requests run concurrently, so reads are best-effort: "
+            f"{reads:,} tokens were read and {writes:,} written",
+        )
+    silent = sorted(
+        agent
+        for agent, scores in sharing.items()
+        if not any(score.usage.cache_read_tokens for score in scores[1:])
+    )
+    if silent:
+        return CacheHealth(
+            False,
+            reads,
+            writes,
+            f"no {' or '.join(silent)} request after the first read from the cache: "
+            "something in the prefix varies by request, or it is below the model's minimum",
+        )
+    return CacheHealth(
+        True, reads, writes, "every agent's later requests read the prefix the first one wrote"
+    )
+
+
+def to_record(run: EvalRun, cases: EvalSet, *, run_id: str | None = None) -> dict[str, Any]:
     summary = summarise(run.scores)
     return {
         "set": {"name": cases.name, "version": cases.version, "sha256": cases.sha256},
         "run": {
+            "run_id": run_id,
             "mode": run.mode,
             "model": run.model,
             "prompt_caching": run.prompt_caching,
@@ -78,6 +149,7 @@ def to_record(run: EvalRun, cases: EvalSet) -> dict[str, Any]:
         },
         "summary": summary.to_dict(),
         "cost": cost_view(run, summary).to_dict(),
+        "cache": cache_health(run).to_dict(),
         "items": [score.to_dict() for score in run.scores],
     }
 
@@ -98,6 +170,11 @@ def _saving(base: float | None, actual: float | None) -> str:
     if base is None or actual is None or not base:
         return "n/a"
     return f"{(actual - base) / base:+.0%}"
+
+
+def _verdict(health: CacheHealth) -> str:
+    word = {True: "healthy", False: "NOT WORKING", None: "not assessed"}[health.healthy]
+    return f"{word} - {health.note}."
 
 
 def _row(label: str, rate: Rate) -> str:
@@ -228,6 +305,8 @@ def render_markdown(run: EvalRun, cases: EvalSet, *, heading: str | None = None)
             f"| {_saving(cost.realtime_uncached, cost.without_cache)} |",
             f"| As run | {_usd(cost.as_run)} | {_saving(cost.realtime_uncached, cost.as_run)} |",
             f"| As run, per item | {_usd(cost.per_item)} | |",
+            "",
+            f"Cache: {_verdict(cache_health(run))}",
         ]
     )
     if run.batches:

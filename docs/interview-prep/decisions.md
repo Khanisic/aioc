@@ -614,3 +614,27 @@ Dropping retries in batch mode: the eval would then measure a system nobody runs
 
 **What I would watch.** Replay is only sound while the work is deterministic up to the model's replies.
 The tool loop is refused outright for that reason - its tools would run again on every pass - so the GitHub and Deployment agents cannot be batched without recording their tool replies first.
+
+## 37. A baseline keeps its two cost deltas apart, refuses runs it cannot compare, and starts with a smoke test
+
+**Context.** Day 20: the full eval run, committed, with the cached-versus-uncached and batch-versus-realtime deltas.
+Three runs of the same 38 items, which differ only in how they are billed.
+The numbers are portfolio numbers, so the question is what each one is allowed to mean.
+
+**Decision.** Two deltas, never mixed.
+Two runs never write the same output tokens, so one run's bill against another's is the lever plus whatever the model happened to write; `same_tokens` prices each run's own measured tokens both ways instead, and that delta is the lever and nothing else.
+The run-against-run figure is reported beside it as `measured`, because it is what was paid.
+Runs are compared only on the same set, the same model, and the same items, with one run a configuration; anything else is refused by name rather than averaged over.
+`agreement` lists every item the runs scored differently: a lever changes the billing and not the request, so a few are noise and many are a bug.
+The checkpoint (`scripts/check_day20_baseline.py`) runs a four-call smoke test first and does not start the 114 that follow unless it passes.
+A run on part of the set writes nothing under `evaluations/`.
+
+**Why the smoke test is code and not a paragraph.** The failure it guards against is the one that fails nothing.
+A prefix that varies by request is served correctly and billed as a cache write every time: 25% more than no cache, no error, and a report full of plausible numbers.
+So every report carries a verdict (`cache_health`), and the verdict declines to judge what it cannot - a batch, whose requests may all be written before any can be read, is reported and not called broken.
+
+**What was rejected.** One headline saving, cached-and-batched against the reference: it would have been the largest number on the page and the least defensible, since it folds two levers and the output noise into one figure.
+Writing a rehearsal's baseline to `evaluations/` with a note saying it was partial: a committed baseline is compared with as if it were the whole, and nobody reads the note.
+
+**What I would watch.** The baseline covers two agents of four.
+Day 21's trimming targets the tool-driven agents' replies, which this baseline cannot see; its before-and-after is the recorded `check_day15_integration.py` input tokens.

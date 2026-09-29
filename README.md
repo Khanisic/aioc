@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 19 of 30.** All four agents run live on one query. The coordinator plans
+> **Status: Day 20 of 30, baseline pending.** All four agents run live on one query. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -20,8 +20,9 @@ confidence-scored output through custom MCP tools.
 > behind it, and every unanswered sub-question to the gap that reports it.
 > An eval harness scores the shipped agents against the seeded incidents' recorded truth
 > (accuracy, hallucination rate, tool success, calibration), with prompt caching on and
-> the Batch API as a second way to run it; it is proven offline and has no live score
-> yet. The full eval run and its committed baseline are next.
+> the Batch API as a second way to run it. The baseline checkpoint that runs it three
+> ways and commits the deltas is built; it is proven offline and has no live score yet,
+> because the run is waiting on an API key.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
@@ -123,6 +124,12 @@ uv run python scripts/run_evals.py --dry-run
 uv run python scripts/run_evals.py --recorded-tools
 PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py
 PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --mode batch
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --smoke      # 4 calls, a verdict
+
+# the Day 20 baseline: the set three ways, side by side (118 calls, ~$2.95 projected)
+uv run python scripts/check_day20_baseline.py --plan                   # free
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day20_baseline.py
+uv run python scripts/eval_baseline.py --latest                        # free
 
 # the routing case study: 20 queries per set, --dry-run is free; --variant v1_1 is the split
 uv run python scripts/check_tool_routing.py --dry-run

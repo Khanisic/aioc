@@ -331,3 +331,30 @@ def test_null_cache_counters_are_not_counted(tmp_path: Path):
     _record(tmp_path, "nulls", "2026-09-29", [{"data": {"usage": block}}])
     tally = review(tmp_path, since=None)["by_check"]["nulls"]
     assert (tally.input_tokens, tally.cache_read_tokens, tally.cache_write_tokens) == (100, 0, 0)
+
+
+def test_two_runs_in_the_same_second_keep_their_own_records(tmp_path: Path):
+    # Found by the Day 20 checkpoint: its smoke test and its first full run are both
+    # `evals-realtime`, and against a scripted model they start inside one second. The
+    # second run was writing into the first one's directory.
+    first = RunRecorder(kind="llm", name="evals-realtime", results_root=tmp_path)
+    second = RunRecorder(kind="llm", name="evals-realtime", results_root=tmp_path)
+    third = RunRecorder(kind="llm", name="evals-realtime", results_root=tmp_path)
+    if first.run_id.split("__")[0] != third.run_id.split("__")[0]:
+        pytest.skip("the clock ticked over between the three; nothing to collide")
+    assert second.run_id == f"{first.run_id}-2" and third.run_id == f"{first.run_id}-3"
+    assert len({first.dir, second.dir, third.dir}) == 3
+
+    first.event("a", outcome="passed")
+    second.event("b", outcome="failed")
+    first.finish()
+    second.finish()
+    assert json.loads((first.dir / "run.json").read_text(encoding="utf-8"))["totals"] == {
+        "events": 1,
+        "passed": 1,
+    }
+    assert json.loads((second.dir / "run.json").read_text(encoding="utf-8"))["run_id"] == (
+        second.run_id
+    )
+    index = (tmp_path / "index.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["run_id"] for line in index] == [first.run_id, second.run_id]

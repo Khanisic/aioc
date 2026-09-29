@@ -78,8 +78,11 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   file selects verbatim seed lines and never authors them (`cases.py`, with the leak guard enforced
   at load); scoring is pure functions over contract models (`scoring.py`); the runner calls the
   shipped agents with an explicit context, realtime or through a batch (`runner.py`); the report
-  prices the run three ways (`report.py`). An agent that raised is a scored item, a refused
-  credential aborts the run. The case and record formats are not frozen; the answer key is.
+  prices the run three ways and gives the cache verdict (`report.py`). An agent that raised is a
+  scored item, a refused credential aborts the run. `baseline.py` (Day 20) puts runs side by
+  side and refuses runs that are not comparable; a cost delta is either a run's own tokens priced
+  both ways or one run's bill against another's, and the two are never added or averaged. The
+  case and record formats are not frozen; the answer key is.
 - `hitl/` - the human-in-the-loop approval gate (Day 16). `policy.py` is the contract's approval rule as
   code (a production-write classifier ORed with the agent's flag and the risk rule; the Incident runtime
   stamps `requires_approval` from it, upward only). `gate.py` decides every recommendation in each
