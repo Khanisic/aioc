@@ -60,9 +60,8 @@ merging anything.
   version of this file described it as open. It is open now, against `main`, and carries the
   two Day 17 commits as its first two - **merging #21 puts Days 17 and 18 on `main`
   together.** `origin/d16-schemas-hitl` can be deleted afterwards.
-- Day 19 is `d19-evals-cost-levers`, cut from `d18-confidence-provenance` and pushed, with
-  its PR stacked on #21. **Merge #21 first, then wait for the Day 19 PR's base to read
-  `main` before merging it** - the trap in §4 is exactly this.
+- Day 19 is PR #22 (`d19-evals-cost-levers`), stacked on #21. **Merge #21 first, then wait
+  for #22's base to read `main` before merging it** - the trap in §4 is exactly this.
 
 `khanisic/main` trails `origin/main` by four merges (Days 13-16); the mirror push below is
 due after the next merge.
@@ -268,8 +267,8 @@ Record cached vs. uncached and batch vs. realtime cost deltas - these are portfo
 **Everything Day 20 needs is built; none of it has run live.** In order:
 
 1. **Replace the API key** (§4). Nothing below works until the free `models.list` call does.
-2. **Merge PR #21**, which puts Days 17 and 18 on `main` (§3), then the Day 19 PR once
-   its base reads `main`.
+2. **Merge PR #21**, which puts Days 17 and 18 on `main` (§3), then #22 once its base
+   reads `main`.
 3. **A four-item smoke test before the full set** - the first time caching and the harness
    meet the real API, so spend a little to find out what breaks:
    `run_evals.py --tasks diagnose --limit 4` (4 calls, about $0.12). What to read in the
