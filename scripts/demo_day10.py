@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
                 "agents_responded": [r.agent.value for r in resp.agent_responses],
                 "trace_id": resp.trace_id,
                 "trace_url": trace_url,
-                "cost": {"in": resp.cost.input_tokens, "out": resp.cost.output_tokens},
+                "cost": resp.cost.model_dump(),
                 "wall_seconds": round(wall_seconds, 1),
                 "refinement_rounds": resp.refinement_rounds,
                 "unresolved_gaps": len(resp.unresolved_gaps),

@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 749 tests, no network, no API key; 16 skip without the Docker stack
+uv run pytest -q              # 918 tests, no network, no API key; 17 skip without the Docker stack
 ```
 
 Selecting a subset:
@@ -69,6 +69,10 @@ A type error in `scripts/runlog.py` will not fail `mypy`.
 | `tests/test_audit_log.py` | 17 | Day 17 audit log: every decision written before it is returned, a release the log refused coming back denied, `respond(gate=...)` on its own span, the replay and read scripts, and the Postgres store's round trip and append-only triggers (3 need the stack) |
 | `tests/test_confidence.py` | 26 | Day 18 field-level confidence: the band table pinned to the contract's text and the agents' prompt, band boundaries, every judgement read with its path (assessments and Docs claims), the three flags each way, the intent's exemption, the request profile, rendering, and the digest line |
 | `tests/test_provenance.py` | 16 | Day 18 Docs provenance: the worked example's claim traced to its evidence and retrieval call, chunk match over document match, a source with no evidence shown as none, non-document evidence kept out, coverage gaps by index then in order with `None` for a question no gap reports, rendering, the digest pairing, and the free report script |
+| `tests/test_prompt_caching.py` | 27 | Day 19 caching and pricing: where the cache marker goes and where it does not, the prefix byte-identical across requests that differ in everything else, no system prompt carrying a date or an id, the three-part prompt count put back together, the executor's cost carrying the counters, and the price of a read, a write, and a batch |
+| `tests/test_batch.py` | 22 | Day 19 Batch API against a scripted batch endpoint: request keys, the wire (polling on an injected clock, results read by id from a reversed list), `DeferredClient`, and the shipped Incident agent run unchanged through a batch, including a refused report retried as a second batch |
+| `tests/test_evals.py` | 98 | Day 19 eval harness: the seed parser, the committed set and eleven case files that must be refused, the leak guard, scoring each way with the denominators checked, calibration per band, the runner realtime and batched, the report and its three prices (1 needs the stack) |
+| `tests/test_eval_scripts.py` | 22 | Day 19 dev tooling: `run_evals.py` end to end with a scripted model, corpus, and batch endpoint, a recorded run re-scored from disk, a revoked key aborting with no item blamed, and the cost review pricing cache and batch usage |
 
 The house rule from `.claude/rules/tests.md`: every validated invariant gets a negative test asserting the violation is rejected.
 A test that only proves the happy path does not prove the invariant is enforced.
@@ -103,6 +107,7 @@ Each records itself under `test-results/`, so a result is diagnosable after the 
 | `gate_recorded_run.py` | **0** | Free: puts every recorded `respond()` response through the Day 16 HITL approval gate (fail-closed `DenyAll` by default; `--approver console --identity <who>` asks at the terminal, `--run` picks one run, `--json`); the gate exercised against what the agents actually recommended live. `--persist` (Day 17) writes the decisions to `hitl_audit_log` on the stack's Postgres instead of the in-memory log |
 | `audit_log.py` | **0** | Free: reads the append-only audit log back (`--request`, `--decision`, `--since`, `--limit`, `--json`); needs the stack |
 | `confidence_report.py` | **0** | Free: every recorded `respond()` response read field by field - each judgement with its band and flags, and each Docs report's claim -> source chain and coverage gaps (`--run`, `--json`); the calibration floor the Day 19 eval starts from |
+| `run_evals.py` | 38 on the full set, one per item, plus one per validation retry (+1 Voyage query embed per recall with a key); **0** with `--list`, `--show`, `--dry-run`, `--rescore`, `--recorded-tools` | The Day 19 eval: the shipped Incident and Docs agents scored against the seeded incidents' recorded truth - accuracy, hallucination rate, tool success, calibration per band - and the run priced three ways from its measured tokens. `--mode batch` sends the same requests through the Batch API (half price, usually minutes, up to an hour); `--no-cache` is the uncached baseline; `--tasks diagnose` needs no stack. Projected ~$1.13 for a full realtime run before caching (`--dry-run` prints it). A refused credential aborts the run with exit 2 |
 | `check_tool_routing.py` | 20 per query set, 40 for both (`--dry-run` free) | The Domain 2 routing case study: a forced single-tool choice between the two overlapping tools over 20 plain and 20 adversarially worded queries; `--variant v1` lists the `1.0.0` `analyze_*` server (the baseline), `--variant v1_1` the `1.1.0` `search_*` server (the split), the same ground truth mapped onto each server's names; prints and records the misrouting rate per set with the query-set hash, so before and after compare like with like; `--model` swaps the router |
 
 ```bash
@@ -164,6 +169,21 @@ uv run python scripts/audit_log.py --limit 20
 
 # Every recorded judgement by band, the flags, and each Docs report's claim -> source chain. Free.
 uv run python scripts/confidence_report.py
+
+# The eval set. Free: list it, see what one case shows each agent, size every request,
+# re-score a recorded run, read tool success off the recorded live runs.
+uv run python scripts/run_evals.py --list
+uv run python scripts/run_evals.py --show case_04
+uv run python scripts/run_evals.py --dry-run
+uv run python scripts/run_evals.py --rescore test-results/runs/<date>/<run-dir>
+uv run python scripts/run_evals.py --recorded-tools
+
+# The eval set, live. One call an item: 38 on the full set. Recalls need the stack.
+# Start small; --write puts the report under evaluations/ where it can be committed.
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --tasks diagnose --limit 4
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --no-cache
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --mode batch --cache-ttl 1h
 
 # The routing case study. 20 calls per set, 40 for both; --dry-run lists the queries for free.
 # --variant v1 is the 1.0.0 baseline, --variant v1_1 the 1.1.0 split.
@@ -301,4 +321,5 @@ That output is what identified the `*_detail` pairing failure as a schema-afford
 
 `test-results/` is gitignored by design: per-machine, per-clock, unbounded growth.
 When a run needs to be shared - an eval result, a case-study measurement, evidence for the Day 26 domain table - copy it into `evaluations/`, which the build plan reserves for committed results.
+For an eval run that is one flag: `scripts/run_evals.py --write evaluations/results/<name>.md`, or the same with `--rescore <run-dir>` for a run already made.
 Do not un-gitignore `test-results/`.

@@ -27,7 +27,7 @@ from aioc.agents import (
 )
 from aioc.agents.github import _EMIT_SCHEMA, GitHubReport, _apply_guidance
 from aioc.contracts import AgentName, ErrorClass, GitHubAgentResponse, PullRequestState
-from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage
+from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage, system_text
 
 # --------------------------------------------------------------------------- fakes
 
@@ -345,7 +345,7 @@ def test_context_is_passed_explicitly_and_the_emit_call_is_forced():
     agent.analyze(_QUERY, context=_CONTEXT)
 
     first = messages.calls[0]
-    assert first["system"] == GITHUB_SYSTEM_PROMPT
+    assert system_text(first["system"]) == GITHUB_SYSTEM_PROMPT
     user_text = first["messages"][0]["content"]
     assert _CONTEXT in user_text and _QUERY in user_text
     assert {t["name"] for t in first["tools"]} == {

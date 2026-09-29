@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
                 "corpus_snapshot": cov.corpus_snapshot,
                 "unanswered": list(cov.unanswered),
                 "overall_confidence": resp.overall_confidence,
-                "usage": {"in": usage.input_tokens, "out": usage.output_tokens},
+                "usage": usage.as_record(),
                 "complaints": complaints,
             },
             message="; ".join(complaints) if complaints else "docs agent answered with citations",

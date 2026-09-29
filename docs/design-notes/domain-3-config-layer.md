@@ -44,10 +44,14 @@ The six rules and the paths they claim:
 | `tools.md` | `src/aioc/tools/**` | the four-part description template, the error taxonomy, the deliberate `analyze_*` overlap |
 | `tests.md` | `tests/**`, `**/test_*.py` | the worked-example anchor test, and one negative test per invariant |
 | `platform.md` | `docker-compose.yml`, `docker/**`, `demo-app/**`, `Makefile`, `.env.example` | pinned tags, volume survival, and the chaos-mode-to-enum mapping |
+| `evals.md` (Day 19) | `src/aioc/evals/**`, `evaluations/**`, `scripts/run_evals.py` | one answer key, cases that select rather than author, the leak guard, pure scoring |
 
 `coordinator.md` and `platform.md` were added on Day 2 to close two real coverage gaps.
 The coordinator carries the most heavily graded Domain 1 behaviours and had no rule at all.
 The platform surface had its constraints written as comments inside `docker-compose.yml` and the `Makefile`, which are only read by someone already editing the file that the comment is defending.
+
+`evals.md` was added on Day 19, a seventh rule, for the same reason as the other two: the eval harness has rules that are invisible from inside any one of its files.
+That the answer key lives in the seed and nowhere else is not something a person editing a case file would infer from the case file.
 
 ---
 

@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
                 "evidence": len(resp.evidence),
                 "gaps": len(resp.gaps),
                 "overall_confidence": resp.overall_confidence,
-                "usage": {"in": usage.input_tokens, "out": usage.output_tokens},
+                "usage": usage.as_record(),
                 "complaints": complaints,
             },
             message="; ".join(complaints) if complaints else "github agent reported from the wire",

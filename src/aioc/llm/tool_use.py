@@ -77,15 +77,62 @@ class Usage:
     A plain value object on purpose - no lock. Concurrent runners (the Day 9 parallel
     group) each get their own accumulator, folded into the request total with `add` after
     the join; ``+=`` on a shared instance from two threads would lose counts silently.
+
+    ``input_tokens`` is every prompt token the model read, however it was billed. With
+    prompt caching on (Day 19) the API reports the prompt in three parts - the uncached
+    remainder, the tokens written to the cache, and the tokens read from it - and `record`
+    adds them back together, so a token count recorded before caching and one recorded
+    after it measure the same thing. The two cache counters say how much of that total was
+    billed at the write and read rates; they stay ``None`` until a response reports them
+    (the contract's null: not measured, which is different from a measured zero).
     """
 
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+
+    def record(self, reported: Any) -> None:
+        """Add one response's ``usage`` block. The only place the API's three-part prompt
+        count is put back together - every call site goes through here."""
+        read = _counter(reported, "cache_read_input_tokens")
+        write = _counter(reported, "cache_creation_input_tokens")
+        self.input_tokens += reported.input_tokens + (read or 0) + (write or 0)
+        self.output_tokens += reported.output_tokens
+        if read is not None:
+            self.cache_read_tokens = (self.cache_read_tokens or 0) + read
+        if write is not None:
+            self.cache_write_tokens = (self.cache_write_tokens or 0) + write
 
     def add(self, other: Usage) -> None:
         """Fold another accumulator into this one."""
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
+        if other.cache_read_tokens is not None:
+            self.cache_read_tokens = (self.cache_read_tokens or 0) + other.cache_read_tokens
+        if other.cache_write_tokens is not None:
+            self.cache_write_tokens = (self.cache_write_tokens or 0) + other.cache_write_tokens
+
+    @property
+    def uncached_input_tokens(self) -> int:
+        """The part of the prompt billed at the full input rate."""
+        return self.input_tokens - (self.cache_read_tokens or 0) - (self.cache_write_tokens or 0)
+
+    def as_record(self) -> dict[str, int | None]:
+        """The shape the live checks write to ``test-results/`` and `scripts/cost_review.py`
+        prices: the two totals, and the cache counters that say how the input was billed."""
+        return {
+            "in": self.input_tokens,
+            "out": self.output_tokens,
+            "cache_read": self.cache_read_tokens,
+            "cache_write": self.cache_write_tokens,
+        }
+
+
+def _counter(reported: Any, name: str) -> int | None:
+    value = getattr(reported, name, None)
+    # bool is an int; a scripted fake that answers every attribute is not a count either.
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 @dataclass(slots=True)

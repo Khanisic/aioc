@@ -285,8 +285,7 @@ class ModelSynthesiser:
             tools=[_EMIT_TOOL],
             tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
         )
-        usage.input_tokens += resp.usage.input_tokens
-        usage.output_tokens += resp.usage.output_tokens
+        usage.record(resp.usage)
         if resp.stop_reason == "max_tokens":
             raise SynthesisError(
                 f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "

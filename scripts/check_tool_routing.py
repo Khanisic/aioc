@@ -62,7 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from runlog import RunRecorder  # noqa: E402 - needs the sys.path insert above
 
-from aioc.llm import LLMClient, LLMSettings, McpStdioToolset, ToolSpec  # noqa: E402
+from aioc.llm import LLMClient, LLMSettings, McpStdioToolset, ToolSpec, Usage  # noqa: E402
 
 ToolName = Literal["analyze_logs", "analyze_events"]
 
@@ -411,7 +411,9 @@ def _never_runs(_args: dict[str, Any]) -> str:
     raise RuntimeError("the routing check reads the tool_use block; tools are never executed")
 
 
-def _route(client: LLMClient, specs: list[ToolSpec], query: str) -> tuple[str, dict[str, Any], Any]:
+def _route(
+    client: LLMClient, specs: list[ToolSpec], query: str
+) -> tuple[str, dict[str, Any], Usage]:
     resp = client.complete(
         messages=[{"role": "user", "content": query}],
         system=ROUTER_SYSTEM_PROMPT,
@@ -420,7 +422,9 @@ def _route(client: LLMClient, specs: list[ToolSpec], query: str) -> tuple[str, d
     )
     for block in resp.content:
         if getattr(block, "type", None) == "tool_use":
-            return block.name, dict(block.input or {}), resp.usage
+            usage = Usage()
+            usage.record(resp.usage)
+            return block.name, dict(block.input or {}), usage
     raise RuntimeError(f"no tool_use block (stop_reason={resp.stop_reason!r})")
 
 
@@ -478,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     client = LLMClient(settings)
 
     errors = 0
-    total_in = total_out = 0
+    total = Usage()
     per_set: dict[str, dict[str, Any]] = {
         name: {"scored": 0, "misrouted": 0, "by_expected": {}} for name in set_names
     }
@@ -526,8 +530,7 @@ def main(argv: list[str] | None = None) -> int:
             duration_ms = (time.monotonic() - start) * 1000
             expected = variant.expected(case.expected)
             wrong = picked != expected
-            total_in += usage.input_tokens
-            total_out += usage.output_tokens
+            total.add(usage)
             tally = per_set[set_name]
             tally["scored"] += 1
             tally["misrouted"] += wrong
@@ -545,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
                 "arguments": arguments,
                 "why": case.why,
                 "duration_ms": round(duration_ms),
-                "usage": {"in": usage.input_tokens, "out": usage.output_tokens},
+                "usage": usage.as_record(),
             }
             results.append(record)
             run.event(
@@ -575,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
                 for name, tally in per_set.items()
             },
             "errors": errors,
-            "usage": {"in": total_in, "out": total_out},
+            "usage": total.as_record(),
         }
         run.artifact("routing.json", json.dumps({"summary": summary, "results": results}, indent=2))
 
@@ -586,7 +589,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"--- tool routing ({args.variant}, {name}): {wrong}/{scored} misrouted = {rate} ---")
         for expected, counts in tally["by_expected"].items():
             print(f"    expected {expected:<15} {counts['misrouted']}/{counts['n']} misrouted")
-    print(f"    cost {total_in} in / {total_out} out tokens; model {settings.model}")
+    print(
+        f"    cost {total.input_tokens} in / {total.output_tokens} out tokens; "
+        f"model {settings.model}"
+    )
     if errors:
         print(f"    {errors} call(s) errored and were not scored")
     print(f"records: {run.dir}")

@@ -309,6 +309,30 @@ And when a bounded summary has to lose something, decide what it may not lose: t
 
 ---
 
+## 12. The eval harness's first live run scored five failures, and none of them was the agents'
+
+**Symptom.** The first live run of the Day 19 eval harness finished in two seconds and reported `Answered: 0/5`.
+Every item had failed, each with its own row in the report, its own `failed` mark, and its own entry under "what was refused or ungrounded".
+The accuracy table was a column of `n/a`.
+
+**What it was.** `401 API key is invalid`, five times.
+The key in `.env` had been revoked since the last live run; a free `models.list` call was refused the same way, no shell variable shadowed it, and its hash was the hash `LLMSettings` loaded.
+The harness had done exactly what I had designed it to do with an agent that raises: score the item as failed, keep its reason, carry on.
+It had no way to tell an agent that gave up on its report from an environment in which no agent could have done anything.
+
+**Why it matters more in an eval than anywhere else.** A check that fails on a bad key fails, and you look.
+An eval that records a bad key as thirty-eight wrong answers produces a report, with a score in it, and the score is zero.
+Committed as a baseline, that number would have been compared against every later run.
+
+**Fix.** A refused credential aborts the run on the first item (`EvalAborted`), with one message that names the item it stopped at, says how many were scored before it, and points at the HANDOFF entry for replacing the key.
+The run is recorded as an error with no item blamed.
+An agent that raised is still a scored item - that is a result of the thing under test, and the two are now different types.
+
+**Transferable lesson.** Before counting failures, ask whose they are.
+A harness that turns every exception into a data point will faithfully measure your environment and label it your model.
+
+---
+
 ## How to tell these in an interview
 
 Lead with the symptom, not the answer.
@@ -316,5 +340,5 @@ Lead with the symptom, not the answer.
 Opening with "I had a max_tokens misconfiguration" throws the story away.
 
 Have one sentence ready for what you changed *besides* the fix.
-Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error, the test that pins the roster's capability claims.
+Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error, the test that pins the roster's capability claims, the run that stops on a refused credential instead of scoring it.
 Fixing the bug is table stakes. Making the failure legible next time is the part that reads as seniority.

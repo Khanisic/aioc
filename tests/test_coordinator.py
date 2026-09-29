@@ -26,7 +26,7 @@ from aioc.coordinator import (
     CoordinatorError,
     SelectionPlan,
 )
-from aioc.llm import LLMClient, LLMSettings
+from aioc.llm import LLMClient, LLMSettings, system_text
 
 # --------------------------------------------------------------------------------- fakes
 
@@ -129,7 +129,7 @@ def test_plan_forces_the_select_tool_with_the_selection_prompt():
     coordinator.plan("Why is checkout slow?")
     call = messages.calls[0]
 
-    assert call["system"] == SELECTION_SYSTEM_PROMPT
+    assert system_text(call["system"]) == SELECTION_SYSTEM_PROMPT
     assert call["tool_choice"] == {"type": "tool", "name": SELECT_TOOL_NAME}
     assert [t["name"] for t in call["tools"]] == [SELECT_TOOL_NAME]
 

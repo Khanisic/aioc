@@ -557,3 +557,60 @@ The Docs digest pairs them the same way, so a downstream agent and the synthesis
 
 **What I would watch.** The recorded Day 15 Docs report decomposed the whole four-part query into sub-questions, so three of its four "unanswered" questions were siblings' parts, each gapped and pointed at the right sibling - correct by the rules, and exactly the re-delegation cost item 22's roster is meant to remove.
 Coverage reporting is only as honest as the decomposition; the roster's live re-run is where that shows.
+
+## 34. The eval set selects from the seed and never authors, and the seed is the only answer key
+
+**Context.** Day 19's Reasoning half: 15-20 cases from the seeded incidents and a harness that scores accuracy, hallucination rate, and tool success.
+The corpus has carried `true_severity`, `true_failure_mode`, and `true_root_cause` since Day 5 for exactly this.
+The trap is that the same rows are post-mortems: a seeded summary often names the cause, and the last timeline event is always the fix.
+
+**Decision.** A case names an incident and says which of its recorded lines the agent is shown - summary sentences by index, timeline events by id (`evaluations/cases/seeded-incidents.json`).
+Nothing an agent reads about an incident is written by the case's author, so the question cannot drift from the corpus, and whether it contains its answer is a string comparison that `check_leaks` makes at load.
+The expected values are not in the case file at all; they are read from the seed SQL when the set loads, so there is one answer key.
+Each incident gives two tasks: a diagnosis from the signals an on-call engineer would have had (Incident agent), and a recall of the same incident's post-mortem (Docs agent).
+Two more cases are no-precedent probes, where the only correct answer is that the corpus records nothing.
+The harness calls `IncidentAgent.diagnose` and `DocsAgent.answer` exactly as the executor does, so the score is of the shipped prompt, schema, and retry loop.
+
+**What was rejected.** Scoring `respond()` end to end: about a dollar a query, and the seed carries no answer key for the planner or the synthesis.
+Hand-written situation blocks: better prose, no way to test for a leak.
+An LLM judge for the root cause: the visible signals rarely establish it, so the honest output is a gap, and a judge would be scoring how well the agent guessed.
+
+**What I would watch.** The guard covers what is withheld; what is *selected* is curation, reviewed as a diff.
+Recorded severities are withheld because an alert tagged `sev2` makes severity a transcription - which means severity accuracy will look worse than the Day 5 preview, and that is the eval working.
+
+## 35. The cache marker goes on the system block and the tool loop's tail, and `input_tokens` stays the whole prompt
+
+**Context.** Day 19's Platform half, first lever.
+The Day 15 review kept caching for today and named the prefix: every agent's system prompt and emit schema are byte-identical on every call.
+
+**Decision.** `LLMClient.request_params` sends the system prompt as one text block carrying the marker.
+Render order is tools, then system, then messages, so that one marker caches the tool schemas with it.
+The tool loop also caches its growing tail, because each round re-sends every earlier tool reply (item 16: a 22k-token PR read, every round).
+A single forced call does not cache its tail: the message is the part that differs every time, and a write nobody reads back costs 25% more than no cache.
+`Usage.record` adds the API's three-part prompt count back together, so `input_tokens` means every token the model read, before and after caching, and the two cache counters say how it was billed.
+`CoordinatorResponse.cost` fills the contract's `cache_read_tokens` and `cache_write_tokens`, which have been in the frozen shape and null since Day 1.
+
+**The check that mattered.** A test sends two requests that differ in everything a caller can vary and asserts the prefix is byte-identical.
+That is the property caching cannot work without, and the one that breaks silently: a timestamp in a system prompt fails nothing, it just makes every request a cache write.
+
+**What I would watch.** By the API's documented invalidation rules, forcing `tool_choice` after a tool loop drops the messages cache, so the GitHub and Deployment agents' emit call re-reads its conversation at full price; only the tools and system prefix is read from the cache there.
+That is the documentation's claim and not yet a measurement, and whether it is worth restructuring is a number nobody has.
+
+## 36. The Batch API is a client, not a second code path
+
+**Context.** Day 19's Platform half, second lever: run the eval suite through the Batch API.
+The agents call `client.complete` and validate what comes back, retrying in the same conversation when the report is refused.
+A batch is asynchronous, so the obvious design is a second, batch-shaped version of each agent's emit step.
+
+**Decision.** `DeferredClient` is an `LLMClient` whose `complete` is answered from the results it holds; a request with no result is queued and raises `PendingRequest`.
+The runner runs every item, flushes the queue as one batch, and runs the waiting items again.
+Each pass gets one model call further, because every earlier call is answered from the store.
+A request is identified by the hash of its arguments, which is also its `custom_id`, so the same request is the same request whichever pass built it.
+The agents are not changed and do not know: `IncidentAgent.diagnose` runs unmodified, and the validation-retry loop comes along for free as the next pass's pending call and a second, smaller batch.
+Request shaping is inherited from `LLMClient`, so a batched request is byte for byte the realtime one.
+
+**What was rejected.** A batch mode inside each agent: four copies of the retry loop's bookkeeping, and an eval that scores a different code path from the one that ships.
+Dropping retries in batch mode: the eval would then measure a system nobody runs.
+
+**What I would watch.** Replay is only sound while the work is deterministic up to the model's replies.
+The tool loop is refused outright for that reason - its tools would run again on every pass - so the GitHub and Deployment agents cannot be batched without recording their tool replies first.

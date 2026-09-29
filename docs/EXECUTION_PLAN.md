@@ -469,6 +469,26 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** Eval set of 15–20 cases from the seeded incidents + a scoring harness
   (accuracy, hallucination rate, tool success rate).
 - **B:** Prompt caching on shared system prompts; run the eval suite through the Batch API.
+- **Done (2026-09-29), offline; the live run is blocked on a revoked API key.** A:
+  `src/aioc/evals/` and `evaluations/cases/seeded-incidents.json` - 20 cases, 38 items: every
+  seeded incident as a diagnosis (Incident agent, from the signals an on-call engineer would have
+  had) and as a recall (Docs agent, of that incident's own post-mortem), plus two no-precedent
+  probes. A case selects lines of the seed and never authors them, the expected values are read
+  from the seed SQL at load, and a leak guard refuses a context that carries its own answer.
+  Scoring is pure: accuracy (failure mode and severity against the `true_*` columns, services as
+  precision and recall, abstentions counted apart from wrong answers), hallucination rate (every
+  checkable statement in a diagnosis looked for in its context; an invented precedent on a probe;
+  the agents' own grounding refusals), tool success rate, and calibration per contract band. B:
+  prompt caching is request shaping in `LLMClient` (`AIOC_PROMPT_CACHING`, on by default) - the
+  marker on the system block, which caches the tool schemas with it, and on the tool loop's tail -
+  and `Usage` carries the cache counters into `CoordinatorResponse.cost`. The Batch API is
+  `src/aioc/llm/batch.py`: `DeferredClient` runs the unmodified agents through a batch by
+  replaying them until every call is answered, so a refused report's retry is simply a second
+  batch. `scripts/run_evals.py` runs either mode, prices the run three ways from its measured
+  tokens, and re-scores a recorded run from disk for free; `scripts/cost_review.py` prices cache
+  reads, cache writes, and batches from the record. 918 offline tests. **No live score exists:**
+  the first live run was refused with `401 API key is invalid` before spending anything, which
+  is also how the harness learned to abort on a refused credential rather than score it.
 
 ### Day 20 — Integration: baseline
 - **Checkpoint:** Full eval run, results committed to `evaluations/baseline.md`.

@@ -7,6 +7,20 @@ refinement loop. A hand-written loop is also more legible as CCA-F Domain 4 evid
 
 The underlying ``anthropic.Anthropic`` client is injected, so tests drive the loop with a
 scripted fake and no network or API key.
+
+**Prompt caching (Day 19).** The cache is a prefix match over ``tools`` -> ``system`` ->
+``messages``, so one marker on the system block caches the tool schemas and the system
+prompt together - the part of every agent's request that never changes. Two placements,
+each for a reason:
+
+- every request marks its system block (`LLMClient.request_params`);
+- the tool loop also caches its growing tail, because each round re-sends every earlier
+  tool reply (a ~22k-token PR read, on the GitHub agent) and nothing about it has changed.
+
+A single forced call does not cache its tail: the message is the one part of the request
+that differs every time, and a write nobody reads back is a 25% surcharge. Nothing that
+varies per request may sit in a system prompt, or the marker caches nothing - which is why
+the context block and the query are in the user message.
 """
 
 from __future__ import annotations
@@ -29,9 +43,15 @@ from .tool_use import (
     Usage,
 )
 
-# The SDK's "omit this param" sentinel. Typed Any so an omitted optional (system, tools,
-# tool_choice) satisfies the API's strict per-param TypedDict unions without a cast each.
-_OMIT: Any = anthropic.NOT_GIVEN
+
+def system_text(system: Any) -> str | None:
+    """The system prompt's text, whichever way it went on the wire: a plain string with
+    caching off, text blocks (the last one carrying the cache marker) with it on."""
+    if system is None:
+        return None
+    if isinstance(system, str):
+        return system
+    return "".join(block["text"] for block in system)
 
 
 class LLMClient:
@@ -61,6 +81,51 @@ class LLMClient:
             return {}
         return {"output_config": {"effort": self.settings.effort}}
 
+    def _cache_control(self) -> dict[str, Any]:
+        control: dict[str, Any] = {"type": "ephemeral"}
+        if self.settings.prompt_cache_ttl != "5m":
+            control["ttl"] = self.settings.prompt_cache_ttl
+        return control
+
+    def request_params(
+        self,
+        *,
+        messages: Sequence[MessageParam],
+        system: str | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        tools: Sequence[ToolSpec] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        cache_tail: bool = False,
+    ) -> dict[str, Any]:
+        """The exact ``messages.create`` arguments for one request - what `complete` sends,
+        and what a batch submits instead (`aioc.llm.batch`), so the two cannot drift.
+
+        An omitted optional is left out rather than sent as null. With caching on, the
+        system prompt goes as one text block carrying the cache marker; ``cache_tail``
+        adds the moving marker on the end of the conversation (the tool loop's case).
+        """
+        params: dict[str, Any] = {
+            "model": model or self.settings.model,
+            "max_tokens": max_tokens or self.settings.max_tokens,
+            "messages": list(messages),
+        }
+        caching = self.settings.prompt_caching
+        if system is not None:
+            params["system"] = (
+                [{"type": "text", "text": system, "cache_control": self._cache_control()}]
+                if caching
+                else system
+            )
+        if tools:
+            params["tools"] = [t.to_api() for t in tools]
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
+        if caching and cache_tail:
+            params["cache_control"] = self._cache_control()
+        params.update(self._output_config())
+        return params
+
     # -- single-shot messages --------------------------------------------------
 
     def complete(
@@ -75,16 +140,17 @@ class LLMClient:
     ) -> Message:
         """One request, one response. No loop - the caller inspects ``stop_reason`` itself."""
         resp = self._client.messages.create(
-            model=model or self.settings.model,
-            max_tokens=max_tokens or self.settings.max_tokens,
-            system=system if system is not None else _OMIT,
-            messages=list(messages),
-            tools=[t.to_api() for t in tools] if tools else _OMIT,
-            tool_choice=cast("Any", tool_choice) if tool_choice is not None else _OMIT,
-            **self._output_config(),
+            **self.request_params(
+                messages=messages,
+                system=system,
+                model=model,
+                max_tokens=max_tokens,
+                tools=tools,
+                tool_choice=tool_choice,
+            )
         )
-        # cast: the Any-typed omit sentinel widens create()'s return to Any; without tools
-        # this is always a non-streamed Message.
+        # cast: the arguments are built as a plain dict, which widens create()'s return to
+        # Any; without ``stream`` this is always a non-streamed Message.
         return cast("Message", resp)
 
     # -- streaming -------------------------------------------------------------
@@ -99,11 +165,9 @@ class LLMClient:
     ) -> Iterator[str]:
         """Yield text deltas as they arrive. The stream context stays open until exhausted."""
         with self._client.messages.stream(
-            model=model or self.settings.model,
-            max_tokens=max_tokens or self.settings.max_tokens,
-            system=system if system is not None else _OMIT,
-            messages=list(messages),
-            **self._output_config(),
+            **self.request_params(
+                messages=messages, system=system, model=model, max_tokens=max_tokens
+            )
         ) as stream:
             yield from stream.text_stream
 
@@ -124,7 +188,6 @@ class LLMClient:
         record of every tool call for tracing.
         """
         by_name = {t.name: t for t in tools}
-        api_tools = [t.to_api() for t in tools]
         convo: list[MessageParam] = list(messages)
         records: list[ToolCallRecord] = []
         usage = Usage()
@@ -132,15 +195,18 @@ class LLMClient:
 
         for round_no in range(1, limit + 1):
             resp = self._client.messages.create(
-                model=model or self.settings.model,
-                max_tokens=max_tokens or self.settings.max_tokens,
-                system=system if system is not None else _OMIT,
-                messages=convo,
-                tools=api_tools,
-                **self._output_config(),
+                **self.request_params(
+                    messages=convo,
+                    system=system,
+                    model=model,
+                    max_tokens=max_tokens,
+                    tools=tools,
+                    # Each round re-sends every earlier tool reply unchanged; the moving
+                    # marker lets round n read what round n-1 wrote.
+                    cache_tail=True,
+                )
             )
-            usage.input_tokens += resp.usage.input_tokens
-            usage.output_tokens += resp.usage.output_tokens
+            usage.record(resp.usage)
             convo.append(cast("MessageParam", {"role": "assistant", "content": resp.content}))
 
             # A server-side tool paused mid-turn; re-send to let it resume (CONTRACTS-agnostic,

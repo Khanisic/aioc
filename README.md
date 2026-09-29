@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 18 of 30.** All four agents run live on one query. The coordinator plans
+> **Status: Day 19 of 30.** All four agents run live on one query. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -18,7 +18,10 @@ confidence-scored output through custom MCP tools.
 > Every judgement in a response is read back with its band and flagged where the band
 > promises more evidence than the field cites; every Docs claim traces to the retrieval
 > behind it, and every unanswered sub-question to the gap that reports it.
-> The eval harness is next.
+> An eval harness scores the shipped agents against the seeded incidents' recorded truth
+> (accuracy, hallucination rate, tool success, calibration), with prompt caching on and
+> the Batch API as a second way to run it; it is proven offline and has no live score
+> yet. The full eval run and its committed baseline are next.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
@@ -111,6 +114,15 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
 # (~12-20 calls, ~$1.10 measured); then what every recorded live run has cost (free)
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day15_integration.py --deploy --max-rounds 1
 uv run python scripts/cost_review.py
+
+# the eval set: 38 items scored against the seed's answer key. The first four are free;
+# a live run is one call an item (~$1.13 projected uncached, about half through the Batch API)
+uv run python scripts/run_evals.py --list
+uv run python scripts/run_evals.py --show case_04
+uv run python scripts/run_evals.py --dry-run
+uv run python scripts/run_evals.py --recorded-tools
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py
+PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --mode batch
 
 # the routing case study: 20 queries per set, --dry-run is free; --variant v1_1 is the split
 uv run python scripts/check_tool_routing.py --dry-run

@@ -19,10 +19,15 @@ The Anthropic Console is the truth; this is the breakdown the Console does not g
 check spent it, on which day, at how many tokens a run. The review compares the two: a
 Console figure far above this floor means unrecorded spend worth finding.
 
-Prices are per million tokens, from the published table as cached on 2026-06-24. A model
-missing from `PRICES` is reported unpriced rather than guessed at. No recorded run used
-prompt caching (HANDOFF sec 7 item 4), so every input token is priced at the full rate;
-when caching lands (Day 19) the records will need the cache counters for this to stay right.
+Prices are per million tokens, from the one table in `aioc.llm.pricing`. A model missing
+from it is reported unpriced rather than guessed at.
+
+**The two cost levers are priced from the record, never assumed (Day 19).** A run made
+with prompt caching records how much of its input was read from the cache and how much
+was written to it, and those tokens are priced at the read and write rates; a run with no
+cache counters predates caching and every input token is priced at the full rate. An
+event that says it went through the Batch API is priced at half. The `saved` column is
+what the same tokens would have cost realtime and uncached, minus what they did cost.
 """
 
 from __future__ import annotations
@@ -35,21 +40,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aioc.llm import PRICES, Usage, price, price_uncached
+from aioc.llm.pricing import price_key
+
 _RESULTS = Path(__file__).resolve().parents[1] / "test-results"
 
 DEFAULT_MODEL = "claude-sonnet-5"
 
-# USD per million tokens: (input, output).
-PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus-5": (5.00, 25.00),
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-haiku-4-5": (1.00, 5.00),
-}
-
-
-def _price_key(model: str) -> str | None:
-    """`claude-haiku-4-5-20251001` is priced as `claude-haiku-4-5`."""
-    return next((known for known in PRICES if model.startswith(known)), None)
+__all__ = ["PRICES", "Tally", "review", "tally_run"]
 
 
 @dataclass(slots=True)
@@ -58,7 +56,11 @@ class Tally:
     unmeasured_runs: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     usd: float = 0.0
+    # What the same tokens cost realtime and uncached - the baseline `usd` is compared with.
+    usd_flat: float = 0.0
     unpriced_models: set[str] = field(default_factory=set)
 
     def add(self, other: Tally) -> None:
@@ -66,21 +68,43 @@ class Tally:
         self.unmeasured_runs += other.unmeasured_runs
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
+        self.cache_read_tokens += other.cache_read_tokens
+        self.cache_write_tokens += other.cache_write_tokens
         self.usd += other.usd
+        self.usd_flat += other.usd_flat
         self.unpriced_models |= other.unpriced_models
 
+    @property
+    def saved(self) -> float:
+        return self.usd_flat - self.usd
 
-def _tokens(data: dict[str, Any]) -> tuple[int, int] | None:
-    """The two shapes the checks have recorded over time: `usage` or `cost`, keyed `in`/`out`
-    or `input_tokens`/`output_tokens`. None when the event measured nothing."""
+
+def _count(block: dict[str, Any], *names: str) -> int | None:
+    for name in names:
+        value = block.get(name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _tokens(data: dict[str, Any]) -> Usage | None:
+    """The shapes the checks have recorded over time: a `usage` or `cost` block, keyed
+    `in`/`out` or `input_tokens`/`output_tokens`, with the cache counters beside them since
+    Day 19 (`cache_read`/`cache_write`, or the contract's `cache_read_tokens` /
+    `cache_write_tokens`). None when the event measured nothing."""
     block = data.get("usage") or data.get("cost")
     if not isinstance(block, dict):
         return None
-    tokens_in = block.get("in", block.get("input_tokens"))
-    tokens_out = block.get("out", block.get("output_tokens"))
-    if not isinstance(tokens_in, int) or not isinstance(tokens_out, int):
+    tokens_in = _count(block, "in", "input_tokens")
+    tokens_out = _count(block, "out", "output_tokens")
+    if tokens_in is None or tokens_out is None:
         return None
-    return tokens_in, tokens_out
+    return Usage(
+        input_tokens=tokens_in,
+        output_tokens=tokens_out,
+        cache_read_tokens=_count(block, "cache_read", "cache_read_tokens"),
+        cache_write_tokens=_count(block, "cache_write", "cache_write_tokens"),
+    )
 
 
 def _event_model(event: dict[str, Any], run: dict[str, Any]) -> str:
@@ -104,20 +128,24 @@ def tally_run(run_dir: Path) -> Tally:
             if not line.strip():
                 continue
             event = json.loads(line)
-            tokens = _tokens(event.get("data") or {})
-            if tokens is None or tokens == (0, 0):
+            data = event.get("data") or {}
+            usage = _tokens(data)
+            if usage is None or (usage.input_tokens, usage.output_tokens) == (0, 0):
                 continue
             measured = True
-            tokens_in, tokens_out = tokens
-            tally.input_tokens += tokens_in
-            tally.output_tokens += tokens_out
+            tally.input_tokens += usage.input_tokens
+            tally.output_tokens += usage.output_tokens
+            tally.cache_read_tokens += usage.cache_read_tokens or 0
+            tally.cache_write_tokens += usage.cache_write_tokens or 0
             model = _event_model(event, run)
-            key = _price_key(model)
-            if key is None:
+            if price_key(model) is None:
                 tally.unpriced_models.add(model)
                 continue
-            price_in, price_out = PRICES[key]
-            tally.usd += tokens_in / 1e6 * price_in + tokens_out / 1e6 * price_out
+            ttl = data.get("cache_ttl") if data.get("cache_ttl") in ("5m", "1h") else "5m"
+            spent = price(model, usage, batch=data.get("batch") is True, cache_ttl=ttl)
+            flat = price_uncached(model, usage)
+            tally.usd += spent or 0.0
+            tally.usd_flat += flat or 0.0
     if not measured:
         tally.unmeasured_runs = 1
     return tally
@@ -148,7 +176,7 @@ def _row(label: str, t: Tally) -> str:
     unmeasured = f"{t.unmeasured_runs}" if t.unmeasured_runs else "-"
     return (
         f"  {label:<22} {t.runs:>4} {unmeasured:>10} {t.input_tokens:>12,} "
-        f"{t.output_tokens:>10,} {t.usd:>9.2f}"
+        f"{t.cache_read_tokens:>11,} {t.output_tokens:>10,} {t.usd:>9.2f} {t.saved:>8.2f}"
     )
 
 
@@ -158,7 +186,11 @@ def _as_json(t: Tally) -> dict[str, Any]:
         "unmeasured_runs": t.unmeasured_runs,
         "input_tokens": t.input_tokens,
         "output_tokens": t.output_tokens,
+        "cache_read_tokens": t.cache_read_tokens,
+        "cache_write_tokens": t.cache_write_tokens,
         "usd": round(t.usd, 4),
+        "usd_realtime_uncached": round(t.usd_flat, 4),
+        "saved_usd": round(t.saved, 4),
         "unpriced_models": sorted(t.unpriced_models),
     }
 
@@ -185,8 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    header = f"  {'':<22} {'runs':>4} {'unmeasured':>10} {'input tok':>12} {'output tok':>10} "
-    header += f"{'USD':>9}"
+    header = f"  {'':<22} {'runs':>4} {'unmeasured':>10} {'input tok':>12} {'cache read':>11} "
+    header += f"{'output tok':>10} {'USD':>9} {'saved':>8}"
     print("Recorded live runs, by check")
     print(header)
     for name, tally in sorted(result["by_check"].items(), key=lambda kv: -kv[1].usd):
@@ -199,6 +231,11 @@ def main(argv: list[str] | None = None) -> int:
     print(_row("TOTAL (measured)", total))
     share = total.usd / args.alert * 100 if args.alert else 0.0
     print(f"\n  measured spend is {share:.1f}% of the ${args.alert:,.0f} alert")
+    if total.saved:
+        print(
+            f"  caching and batching saved ${total.saved:.2f} against the same tokens "
+            f"realtime and uncached (${total.usd_flat:.2f})"
+        )
     if total.unmeasured_runs:
         print(
             f"  {total.unmeasured_runs} of {total.runs} runs recorded no usage (early checks, or "

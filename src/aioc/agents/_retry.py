@@ -380,8 +380,7 @@ def _request(
         tool_choice={"type": "tool", "name": emit_tool},
     )
     if usage is not None:
-        usage.input_tokens += resp.usage.input_tokens
-        usage.output_tokens += resp.usage.output_tokens
+        usage.record(resp.usage)
     # Truncation before validation, and never retried: a report cut off mid-JSON parses
     # as a missing required field, and the same budget would cut it the same way.
     if resp.stop_reason == "max_tokens":

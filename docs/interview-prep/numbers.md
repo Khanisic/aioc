@@ -475,13 +475,36 @@ Zero API calls.
 
 ---
 
+## Day 19 - the eval harness and the two cost levers, offline (free)
+
+Everything below was measured without a model call, 2026-09-29.
+The live run was attempted and refused: the API key in `.env` has been revoked (`401 API key is invalid`, on the free `models.list` call too), so **nothing on this page is a live score and nothing was spent**.
+
+| | |
+|---|---|
+| Eval set | `seeded-incidents` v1: 20 cases, 38 items (18 diagnose, 20 recall of which 2 are no-precedent probes) |
+| Answer key coverage | `resource_exhaustion` 4, `bad_config_deploy` 4, `code_regression` 4, `downstream_latency` 4, `other` 2 |
+| Lines shown to an agent that are not verbatim from the seed | 0, by construction and by test |
+| Seeded lines withheld from the diagnoses | 5 of 37 summary sentences and 22 of 65 timeline events (every finding and every fix), plus every title, root cause, resolution, and recorded severity |
+| Request size, `--dry-run` | ~4.7k input tokens a diagnosis, ~5.1k a recall (characters / 4, an estimate) |
+| Projected price of one full run | ~$1.13 realtime and uncached, ~$0.57 through the Batch API, before caching (187k input estimated, 2,000 output tokens a report assumed from the Day 10 runs) |
+| Tool success over the recorded live runs | 30/30 across 19 agent reports in 10 runs: Deployment 15/15, GitHub 12/12, Docs 3/3 (`run_evals.py --recorded-tools`) |
+| Offline suite | 918 passed with the stack up (749 before Day 19; 27 caching and pricing tests, 22 batch, 98 eval harness of which 1 needs the stack, 22 script) |
+
+- **The 100% tool success is a survivor's number.** A recorded response is one the agent accepted; a run that died on a tool error left no response to count. It is the rate among reports that were delivered, and it says so.
+- **What the cache will save is arithmetic until it is measured.** The shared prefix (system prompt plus emit schema) is about 4.4k of a diagnosis's ~4.7k tokens and 3.8k of a recall's ~5.1k. There are two prefixes, so 36 of 38 requests would read theirs at a tenth of the input price: about $0.26 off the projected $1.13, since output is two thirds of the bill and the cache does not touch it. The Batch API halves everything and is the larger lever on this workload.
+- **The projection is a ceiling for the plan and a floor for surprise.** Both Day 15 estimates were low by 2-3x because refinement rounds multiplied them; an eval item is one forced call with no loop, so the only multiplier is the validation retry, capped at two.
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
 
-- **No eval harness.** Accuracy, hallucination rate, and tool-success rate are Day 19. The Day 5 checkpoint is a single-case preview of it.
+- **No eval score.** The harness exists (Day 19) and has never run against a model: the key was revoked before its first live call. Accuracy, hallucination rate, and calibration are all unmeasured; tool success is measured only over recorded runs.
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
 - **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
-- **Prompt caching not enabled.** The system prompt plus tool schema is identical on every call and is an obvious candidate; not yet done.
+- **Prompt caching is on and unmeasured.** Every request marks its system block since Day 19 and the counters are recorded, but no response has reported a cache read yet. Whether a batch's requests read each other's cache at all is also open; that is Day 20's measurement.
+- **The Batch API path has never met the real API.** It is proven against a scripted batch endpoint, including the retry as a second batch. Its first live run is Day 20's.
