@@ -681,3 +681,56 @@ The checkpoint's `--resume` counts a submitted, unread batch as items already pa
 
 **What I would watch.** Batch results expire after 29 days, and nothing here notices an id that has.
 The queue times were 2 h 40 min, 1 h 42 min, and 45 min in one day; the batch is the cheaper lever for work nobody is waiting on, and for nothing else.
+
+## 40. Trim a tool reply at the tool, by extracting facts, and let the agent ask for what was cut
+
+**Context.** Day 21's plan was "trim verbose tool outputs; structured fact extraction before content enters context".
+The four-agent run gave the numbers to trim against: the GitHub agent's four replies came to about 20k tokens by the envelope's own estimate, and every round of its tool loop re-read them.
+Measured on the same calls, a commit list was nine tenths message bodies, and the agent read one PR's six patches twice, once through the PR and once through a diff of the range the PR's merge produced.
+
+**Decision.** The trimming happens in the tool servers, where the structure is still known, not in the agent after the text has arrived.
+A commit is its subject line, a flag saying a body was dropped, and for a GitHub merge commit the pull request's title, which is the one fact such a commit hides in its body.
+Every string that comes back is a verbatim line of the original, so a quote of it still passes the agents' grounding checks.
+Patches share one budget a reply, spent on configuration and code before tests and documentation; a file the budget missed says so, and a new `patch_paths` input asks for exactly that file.
+The GitHub agent's rules name the double read.
+The frozen `diff_release` keeps its shape and narrows what `message` holds, with part 3 of its description saying so and a dated entry in `contract-changes.md` saying why that is not a contract change.
+
+**What was rejected.** Summarising replies with a model before they enter the context: a second call per reply, and a summary is not something the grounding checks can hold a quote to.
+A smaller per-file patch cap: it cuts every file equally, including the configuration file that is the finding.
+Defaulting `diff_release`'s `include` to configuration only, as the Day 12 handoff proposed: a changed default on a frozen input.
+
+**What it found on the way.** A commit body is prose, and prose can carry a configuration value (`DB_POOL_TIMEOUT_MS=2500 is new`).
+`diff_release` promises keys only, and until Day 21 it returned a thousand characters of every commit message.
+The subject-only rule closes that too, and a test pins it.
+
+**What I would watch.** The saving is measured on replies (-34% on the run's five calls), not yet on a run's bill.
+With caching on, a reply is paid for mostly as one cache write and cheap reads, so the bill moves less than the reply does; output tokens are now the larger half.
+
+## 41. Every fake client enforces the API's rules on what it is sent
+
+**Context.** War story #14: a tool loop that stopped at `max_tokens` part-way through a call handed on a conversation the API refuses, and eleven scripted fake clients had accepted every conversation for twenty days.
+
+**Decision.** `tests/wire.py` holds the rule the API enforces - each `tool_use` answered in the next message, each `tool_result` answering the turn before - and every fake that stands in for `messages.create` checks it on each request.
+The rule went into the fakes before the fix went into the loop, so the whole suite started checking it at once, and the loop's fix answers a cut-off call with an error result and never runs it.
+The same run found the model synthesis outside the validation-retry loop; it now runs inside it, with feedback that fits a report that has no gaps to record.
+
+**What was rejected.** A single regression test for the one path that failed: it would pin that path and leave the next one unguarded, which is how the first eleven fakes came to accept everything.
+
+**What I would watch.** `tests/wire.py` holds one rule, the one that failed.
+The API has others (alternating roles are merged rather than refused; a `tool_result` must lead its message's content), and the fakes believe nothing about them yet.
+
+## 42. Claude Code reviews every pull request, told what a defect is here and allowed to say nothing
+
+**Context.** The Domain 3 workflow half: Claude Code in GitHub Actions reviewing this repository's pull requests.
+The repository also had no CI at all; the offline suite and lint ran only on this machine.
+
+**Decision.** Two workflows.
+`ci.yml` runs lint, types, and the offline suite on every push and pull request with no secrets, because the suite makes no network calls by design; it was rehearsed first in a fresh clone with no `.env`, where it gave the same 1010 passes as this machine without Docker.
+`claude-review.yml` runs `anthropics/claude-code-action` on every non-draft pull request with a prompt that lists what this repository treats as a defect - a frozen shape changed without the §0 record, `null` and `[]` confused, an `other` without its detail, a configuration value reaching any output, a test that can reach the network - and requires a concrete failure scenario for every finding.
+"No defects found" is a valid review.
+The reviewer can read, grep, view the diff, and comment inline; it cannot push, merge, or run anything, and it is capped by turns, by wall clock, and by cancelling a run a newer commit supersedes.
+
+**What was rejected.** The generic review prompt from the action's examples (quality, security, performance, testing, docs): it invites the style and praise comments that train a reader to ignore the reviewer.
+Letting the reviewer run the tests: CI already does, and a reviewer with a shell is a reviewer with the repository's secrets in reach.
+
+**What I would watch.** Day 22 is tuning it for false positives, which needs its first real reviews to measure; until the repository secret and the Claude GitHub App are in place, the workflow is written and has never run.

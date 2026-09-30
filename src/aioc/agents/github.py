@@ -108,7 +108,10 @@ Ground rules:
    them.
 6. Be economical with tools: fetch the PR or window the query names, read the patch only
    when the question is about what the code does, and stop when you have what the report
-   needs."""
+   needs. A PR's patches and a `diff_refs` over the range its merge produced are the same
+   change - read it once. A file whose `patch` is null with `patch_truncated: true` was
+   left out by the reply's patch budget; ask for it with `patch_paths` only if the report
+   needs it."""
 
 
 # ------------------------------------------------------------------- structured output

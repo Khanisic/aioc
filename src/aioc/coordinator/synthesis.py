@@ -35,10 +35,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from anthropic.types import ToolUseBlock
 from pydantic import Field
 
 from aioc.agents._annotate import ROOT, apply_guidance
+from aioc.agents._retry import (
+    RejectionKind,
+    ReportRejected,
+    RetryLog,
+    default_retry_log,
+    emit_with_retry,
+    render_rejection,
+)
 from aioc.agents.incident import _CONFIDENCE_BANDS
 from aioc.contracts import (
     AgentInvocation,
@@ -85,9 +92,14 @@ class Synthesiser(Protocol):
     def synthesise(self, request: SynthesisRequest, *, usage: Usage) -> Synthesis: ...
 
 
-class SynthesisError(RuntimeError):
-    """The model's synthesis could not be used: ungrounded evidence, no tool call, or
-    truncation. The executor falls back to `deterministic` on this."""
+class SynthesisError(ReportRejected):
+    """The model's synthesis could not be used: a malformed payload, ungrounded evidence,
+    no tool call, or truncation. The executor falls back to `deterministic` on this.
+
+    ``kind`` is the validation-retry loop's (`agents._retry`): a malformed payload and a
+    confident answer that cites nothing are ``format`` (the ids are in the digests it was
+    given), an invented id is ``grounding``, and truncation or a missing call are ``None``
+    and never re-requested."""
 
 
 # ------------------------------------------------------------------------- deterministic
@@ -269,42 +281,75 @@ _EMIT_TOOL = ToolSpec(
 
 
 class ModelSynthesiser:
-    """One forced structured-output call over the agents' digests, grounded in code."""
+    """One forced structured-output call over the agents' digests, grounded in code, inside
+    the validation-retry loop every agent's emit runs in (`agents._retry`).
 
-    def __init__(self, client: LLMClient | None = None) -> None:
+    The loop was missing here until the 2026-09-30 four-agent run: the synthesis came back
+    without `answer` and `confidence`, a format slip one re-request fixes, and the whole
+    model-written answer was thrown away for the deterministic form instead."""
+
+    def __init__(
+        self,
+        client: LLMClient | None = None,
+        *,
+        max_validation_retries: int | None = None,
+        retry_log: RetryLog | None = None,
+    ) -> None:
         self._client = client or LLMClient()
+        # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
+        self._max_retries = (
+            max_validation_retries
+            if max_validation_retries is not None
+            else self._client.settings.max_validation_retries
+        )
+        self._retry_log = retry_log if retry_log is not None else default_retry_log()
 
     def synthesise(self, request: SynthesisRequest, *, usage: Usage) -> Synthesis:
         if not request.responses:
             # Nothing to synthesise from; the deterministic text says so without a call.
             return deterministic(request)
 
-        resp = self._client.complete(
+        def build(payload: dict[str, Any]) -> Synthesis:
+            try:
+                parsed = ModelSynthesis.model_validate(payload)
+                answer = Assessment[str](
+                    value=parsed.answer.strip() if parsed.answer else None,
+                    confidence=parsed.confidence,
+                    evidence=parsed.evidence,
+                    reasoning=parsed.reasoning.strip(),
+                    detail=None,
+                )
+            except ValueError as exc:
+                raise SynthesisError(
+                    f"{EMIT_TOOL_NAME} payload failed validation: {render_rejection(exc)}",
+                    kind=RejectionKind.FORMAT,
+                ) from exc
+            check_grounding(answer, request.responses)
+            return Synthesis(synthesis=parsed.synthesis.strip(), answer=answer)
+
+        return emit_with_retry(
+            self._client,
+            agent="synthesis",
             messages=[{"role": "user", "content": render_prompt(request)}],
             system=SYNTHESIS_SYSTEM_PROMPT,
             tools=[_EMIT_TOOL],
-            tool_choice={"type": "tool", "name": EMIT_TOOL_NAME},
+            emit_tool=EMIT_TOOL_NAME,
+            build=build,
+            error_type=SynthesisError,
+            usage=usage,
+            max_retries=self._max_retries,
+            log=self._retry_log,
+            request_id=None,
+            invocation_id=None,
+            grounding_advice=_GROUNDING_ADVICE,
         )
-        usage.record(resp.usage)
-        if resp.stop_reason == "max_tokens":
-            raise SynthesisError(
-                f"{EMIT_TOOL_NAME} output was truncated at the max_tokens limit "
-                f"({resp.usage.output_tokens} output tokens); the synthesis is incomplete."
-            )
-        payload = _extract_tool_input(resp, EMIT_TOOL_NAME)
-        try:
-            parsed = ModelSynthesis.model_validate(payload)
-            answer = Assessment[str](
-                value=parsed.answer.strip() if parsed.answer else None,
-                confidence=parsed.confidence,
-                evidence=parsed.evidence,
-                reasoning=parsed.reasoning.strip(),
-                detail=None,
-            )
-        except ValueError as exc:
-            raise SynthesisError(f"{EMIT_TOOL_NAME} payload failed validation: {exc}") from exc
-        check_grounding(answer, request.responses)
-        return Synthesis(synthesis=parsed.synthesis.strip(), answer=answer)
+
+
+_GROUNDING_ADVICE = (
+    "Cite only ids listed under `evidence` in the handoff blocks. Remove the id that is not "
+    "listed; if nothing listed supports the answer, lower `confidence` below 0.5 and say in "
+    "`reasoning` what the answer lacks."
+)
 
 
 def check_grounding(answer: Assessment[str], responses: Sequence[AgentResponse]) -> None:
@@ -319,7 +364,8 @@ def check_grounding(answer: Assessment[str], responses: Sequence[AgentResponse])
     if answer.value is not None and answer.confidence >= 0.5 and not answer.evidence:
         raise SynthesisError(
             "answer claims the evidenced band (confidence >= 0.5) but cites no evidence "
-            "(CONTRACTS.md sec 2.1)"
+            "(CONTRACTS.md sec 2.1)",
+            kind=RejectionKind.FORMAT,
         )
 
 
@@ -353,14 +399,3 @@ def render_prompt(request: SynthesisRequest) -> str:
     else:
         parts.append("No gaps remain open.")
     return "\n".join(parts).rstrip()
-
-
-def _extract_tool_input(resp: Any, tool_name: str) -> dict[str, Any]:
-    for block in resp.content:
-        if isinstance(block, ToolUseBlock) and block.name == tool_name:
-            if not isinstance(block.input, dict):
-                raise SynthesisError(f"{tool_name} input was not a JSON object")
-            return dict(block.input)
-    raise SynthesisError(
-        f"model did not call {tool_name} (stop_reason={resp.stop_reason!r}); no synthesis"
-    )

@@ -23,9 +23,17 @@ strings. This is the same rule `diff_release` enforces (contract sec 4.4) applie
 earlier, and the redaction is tested, not assumed.
 
 **Output is bounded, and says so.** Every list is capped (`max_files`, `max_commits`),
-patches are truncated per file at `MAX_PATCH_CHARS`, and `meta.truncated` is true whenever
-anything was cut. An agent reading a bounded answer must know it is bounded, because "the
-PR touched 8 files" and "the first 8 of 40 files" are different findings.
+patches are truncated per file at `MAX_PATCH_CHARS` and per reply at `PATCH_BUDGET_CHARS`,
+and `meta.truncated` is true whenever anything was cut. An agent reading a bounded answer
+must know it is bounded, because "the PR touched 8 files" and "the first 8 of 40 files" are
+different findings.
+
+**Facts are extracted before they reach a context window (Day 21).** A commit comes back as
+its subject line, with `message_truncated` saying a body was dropped and, for a GitHub merge
+commit, the pull request's title read out of that body - the four-agent run's commit list
+was 16.8k characters, nine tenths of it message bodies an agent re-read every round. The
+patch budget is spent on configuration and code before tests and documentation
+(`patch_priority`), and `patch_paths` asks for exactly the patches a first reply left out.
 
 **Framework input validation is off** (`validate_input=False`), for the same reason as the
 incident servers: the framework returns plain text where the contract requires a structured
@@ -45,6 +53,7 @@ from mcp.server.stdio import stdio_server
 
 from aioc.tools.envelope import Timer, err, ok
 from aioc.tools.github.api import GitHubApi, GitHubApiError
+from aioc.tools.github.commits import commit_headline
 
 SERVER_NAME = "aioc-github"
 
@@ -61,8 +70,10 @@ MAX_MAX_FILES = 300
 DEFAULT_MAX_COMMITS = 20
 MAX_MAX_COMMITS = 100
 MAX_PATCH_CHARS = 4000
+PATCH_BUDGET_CHARS = 8000  # every patch in one reply together
+MIN_PATCH_CHARS = 200  # a remainder smaller than this is left out rather than shown as a stub
 MAX_BODY_CHARS = 2000
-MAX_MESSAGE_CHARS = 1000
+MAX_PATCH_PATHS = 50
 
 # ------------------------------------------------------------------------ redaction
 #
@@ -106,9 +117,10 @@ touched, and the commits it carries. Returns `pull_request` (number, title, stat
 open/closed/merged/draft, merged_at, head_sha, base/head refs, author, files_changed, \
 additions, deletions, touched_paths, a truncated body), `files` (one entry per path with \
 status, additions, deletions, and the unified-diff `patch` when `include_patch` is true), and \
-`commits` (sha, short_sha, message, authored_at). Inputs: `number` (integer, required), \
-`include_patch` (boolean, default false - patches are large; ask only when you need to read \
-the change itself), `max_files` (1-300, default 50).
+`commits` (sha, short_sha, the subject line as message, authored_at). Inputs: `number` \
+(integer, required), `include_patch` (boolean, default false - patches are large; ask only \
+when you need to read the change itself), `patch_paths` (list of file paths; patches for \
+exactly those files, implies include_patch), `max_files` (1-300, default 50).
 
 Example queries this tool answers:
 - "What did PR #12 change, and how risky does it look?"
@@ -120,10 +132,15 @@ Edge cases and limits: `state` is `merged` when the PR was merged (GitHub itself
 `closed` for those), `draft` for open drafts. Configuration VALUES are never returned: any \
 added or removed `KEY=value` line in a patch comes back with the value replaced by \
 `<redacted>` and the key kept, and `redacted_lines` counts them - the key being changed is the \
-finding, the value is not yours to read. Patches are cut at 4000 characters per file and the \
-file list at `max_files`; `meta.truncated` is true whenever anything was cut, so "N files" \
-means "the first N" in that case. A PR number that does not exist is a NOT_FOUND business \
-error, not an empty success. Binary files have no patch.
+finding, the value is not yours to read. Patches are cut at 4000 characters per file and \
+8000 per reply, spent on configuration and code files before tests and documentation; a \
+file the budget did not reach has `patch: null` with `patch_truncated: true` - call again \
+with `patch_paths` naming it. The file list is cut at `max_files`; `meta.truncated` is true \
+whenever anything was cut, so "N files" means "the first N" in that case. A commit's \
+`message` is its subject line only (`message_truncated` says a body was dropped; a merge \
+commit's `pull_request_title` is read from that body). A PR number that does not exist is a \
+NOT_FOUND business error, not an empty success. Binary files have no patch (`patch: null`, \
+`patch_truncated: false`).
 
 When to use this vs. the alternative: use `get_pull_request` when you have a PR NUMBER and \
 want to know what that one change did. Use `list_commits` instead to find WHICH changes \
@@ -134,14 +151,15 @@ keys, images, rollout - rather than in the source."""
 
 LIST_COMMITS_DESCRIPTION = """\
 Lists recent commits on a ref of the configured repository, newest first, with optional time \
-window and path filter. Each entry has sha, short_sha, message (first 1000 characters), \
-authored_at (RFC 3339 UTC), html_url, and pull_request_number when the message carries a \
-squash or merge marker like `(#12)` or `Merge pull request #12`. With `include_paths` true \
-each commit also lists `touched_paths` (one extra GitHub call per commit - keep \
-`max_commits` small when you ask for it). Inputs: `ref` (branch, tag, or SHA; default the \
-repository's default branch), `since` / `until` (RFC 3339 UTC with explicit Z), `path` \
-(only commits touching this file or directory), `max_commits` (1-100, default 20), \
-`include_paths` (boolean, default false).
+window and path filter. Each entry has sha, short_sha, message (the subject line; \
+`message_truncated` is true when a body was dropped), authored_at (RFC 3339 UTC), html_url, \
+and pull_request_number when the subject carries a squash or merge marker like `(#12)` or \
+`Merge pull request #12` - for a merge commit, `pull_request_title` is the PR's title, read \
+from the body. With `include_paths` true each commit also lists `touched_paths` (one extra \
+GitHub call per commit - keep `max_commits` small when you ask for it). Inputs: `ref` \
+(branch, tag, or SHA; default the repository's default branch), `since` / `until` (RFC \
+3339 UTC with explicit Z), `path` (only commits touching this file or directory), \
+`max_commits` (1-100, default 20), `include_paths` (boolean, default false).
 
 Example queries this tool answers:
 - "What landed on main in the hour before the 14:00 latency spike?"
@@ -154,8 +172,9 @@ error - "nothing landed" is a finding. `pull_request_number` is parsed from the 
 text, so a commit merged without a marker has `null` there even if it came from a PR; \
 confirm with `get_pull_request` before relying on it. Only the first page is returned \
 (`max_commits`), newest first; `meta.truncated` is true when the window held more. An \
-unknown `ref` is a NOT_FOUND business error. `touched_paths` is empty unless \
-`include_paths` is true - empty there means "not asked", not "touched nothing".
+unknown `ref` is a NOT_FOUND business error. `touched_paths` is null unless \
+`include_paths` is true - null means "not asked"; an empty list means the commit touched no \
+file.
 
 When to use this vs. the alternative: use `list_commits` to DISCOVER candidate changes in a \
 time window or on a path when you do not yet know which PR matters. Use `get_pull_request` \
@@ -170,7 +189,8 @@ comparison GitHub's compare view uses) and returns the commits between them plus
 that differ, with additions, deletions, status, and the unified-diff `patch` when \
 `include_patch` is true. Also reports `ahead_by`, `behind_by`, and `total_commits`. Inputs: \
 `base` and `head` (each a branch, tag, or SHA; required), `include_patch` (boolean, default \
-false), `max_files` (1-300, default 50).
+false), `patch_paths` (list of file paths; patches for exactly those files, implies \
+include_patch), `max_files` (1-300, default 50).
 
 Example queries this tool answers:
 - "What changed between v1.4.2 and v1.4.3?"
@@ -182,9 +202,12 @@ Edge cases and limits: identical refs return an empty `files` array and `total_c
 a success meaning "no difference", not an error. An unknown ref is a NOT_FOUND business \
 error. Configuration VALUES are never returned: added or removed `KEY=value` lines come back \
 with the value replaced by `<redacted>` (the key is kept, `redacted_lines` counts them). \
-Patches are cut at 4000 characters per file and the file list at `max_files`; \
-`meta.truncated` is true whenever anything was cut. GitHub caps a comparison at 250 \
-commits and 300 files; beyond that the answer is partial and flagged.
+Patches are cut at 4000 characters per file and 8000 per reply, configuration and code \
+first; a file the budget did not reach has `patch: null` with `patch_truncated: true` - \
+call again with `patch_paths` naming it. The file list is cut at `max_files`; \
+`meta.truncated` is true whenever anything was cut. Commits carry their subject line only, \
+as in `list_commits`. GitHub caps a comparison at 250 commits and 300 files; beyond that \
+the answer is partial and flagged.
 
 When to use this vs. the alternative: use `diff_refs` when you have TWO REFS and want the \
 source-level difference between them. Use `get_pull_request` for one PR's change. Use \
@@ -207,6 +230,16 @@ GET_PULL_REQUEST_SCHEMA: dict[str, Any] = {
             "type": "boolean",
             "default": False,
             "description": "Include each file's unified-diff patch (large; values redacted).",
+        },
+        "patch_paths": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "maxItems": MAX_PATCH_PATHS,
+            "default": None,
+            "description": (
+                "Return patches for exactly these file paths (implies include_patch). Use it "
+                "for a file whose patch the reply's budget left out."
+            ),
         },
         "max_files": {
             "type": "integer",
@@ -268,6 +301,16 @@ DIFF_REFS_SCHEMA: dict[str, Any] = {
             "type": "boolean",
             "default": False,
             "description": "Include each file's unified-diff patch (large; values redacted).",
+        },
+        "patch_paths": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "maxItems": MAX_PATCH_PATHS,
+            "default": None,
+            "description": (
+                "Return patches for exactly these file paths (implies include_patch). Use it "
+                "for a file whose patch the reply's budget left out."
+            ),
         },
         "max_files": {
             "type": "integer",
@@ -362,6 +405,20 @@ def _timestamp(args: dict[str, Any], field: str) -> str | None:
     return _stamp(parsed)
 
 
+def _paths(args: dict[str, Any], field: str) -> list[str] | None:
+    value = args.get(field)
+    if value is None:
+        return None
+    expected = f"a list of at most {MAX_PATCH_PATHS} non-empty file paths, or null"
+    if (
+        not isinstance(value, list)
+        or len(value) > MAX_PATCH_PATHS
+        or not all(isinstance(v, str) and v.strip() for v in value)
+    ):
+        raise _Invalid(field, expected, f"{field} must be {expected}")
+    return [v.strip() for v in value]
+
+
 def _validate(name: str, args: dict[str, Any]) -> dict[str, Any]:
     schema = SCHEMAS[name]
     _reject_unknown(args, schema)
@@ -369,6 +426,7 @@ def _validate(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {
             "number": _int_in(args, "number", 1, 10**9, 0),
             "include_patch": _bool(args, "include_patch"),
+            "patch_paths": _paths(args, "patch_paths"),
             "max_files": _int_in(args, "max_files", 1, MAX_MAX_FILES, DEFAULT_MAX_FILES),
         }
     if name == LIST_COMMITS:
@@ -387,6 +445,7 @@ def _validate(name: str, args: dict[str, Any]) -> dict[str, Any]:
         "base": _req_str(args, "base"),
         "head": _req_str(args, "head"),
         "include_patch": _bool(args, "include_patch"),
+        "patch_paths": _paths(args, "patch_paths"),
         "max_files": _int_in(args, "max_files", 1, MAX_MAX_FILES, DEFAULT_MAX_FILES),
     }
 
@@ -424,48 +483,100 @@ def pull_request_number_from_message(message: str) -> int | None:
 
 def _shape_commit(raw: dict[str, Any], *, touched_paths: list[str] | None = None) -> dict[str, Any]:
     commit = raw.get("commit") or {}
-    message, _ = _clip(str(commit.get("message") or ""), MAX_MESSAGE_CHARS)
+    subject, truncated, title = commit_headline(str(commit.get("message") or ""))
     sha = str(raw.get("sha") or "")
     author = (commit.get("author") or {}).get("date")
     return {
         "sha": sha,
         "short_sha": sha[:7],
-        "message": message,
+        "message": subject,
+        "message_truncated": truncated,
         "authored_at": author,
         "html_url": raw.get("html_url"),
-        "pull_request_number": pull_request_number_from_message(message),
-        "touched_paths": list(touched_paths) if touched_paths is not None else [],
+        "pull_request_number": pull_request_number_from_message(subject),
+        "pull_request_title": title,
+        # null is "not asked" (include_paths false); [] is "asked, and it touched nothing".
+        "touched_paths": list(touched_paths) if touched_paths is not None else None,
     }
 
 
+# Where a reply's patch budget goes first. What a release can break through lives in
+# configuration and code; tests and documentation explain a change but rarely are one.
+_CONFIG_PATH = re.compile(
+    r"(^|/)(\.env[^/]*|[^/]*\.(ya?ml|toml|ini|cfg|conf|json)|Dockerfile[^/]*|Makefile)$"
+    r"|(^|/)(docker|infrastructure|k8s|deploy|manifests)/"
+)
+_TEST_PATH = re.compile(r"(^|/)(tests?|__tests__)/|(^|/)test_[^/]*$|_test\.[a-z]+$")
+_DOC_PATH = re.compile(r"\.(md|rst|txt|adoc)$|(^|/)docs?/", re.IGNORECASE)
+
+
+def patch_priority(path: str) -> int:
+    """0 configuration, 1 code, 2 tests, 3 documentation - the order the budget is spent in."""
+    if _CONFIG_PATH.search(path):
+        return 0
+    if _DOC_PATH.search(path):
+        return 3
+    if _TEST_PATH.search(path):
+        return 2
+    return 1
+
+
 def _shape_files(
-    raw_files: list[dict[str, Any]], *, include_patch: bool, max_files: int
+    raw_files: list[dict[str, Any]],
+    *,
+    include_patch: bool,
+    max_files: int,
+    patch_paths: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], bool, int]:
-    """The bounded, redacted file list. Returns (files, truncated, redacted_lines)."""
+    """The bounded, redacted file list. Returns (files, truncated, redacted_lines).
+
+    Patches share one budget per reply, spent in `patch_priority` order and in list order
+    within a priority; the list itself keeps GitHub's order. A patch cut by the per-file cap
+    or by the budget says so, and one the budget did not reach at all is null with
+    `patch_truncated` true, which `patch_paths` asks for directly."""
     truncated = len(raw_files) > max_files
-    files: list[dict[str, Any]] = []
-    redacted_total = 0
-    for raw in raw_files[:max_files]:
-        entry: dict[str, Any] = {
+    shown = raw_files[:max_files]
+    files: list[dict[str, Any]] = [
+        {
             "path": raw.get("filename"),
             "status": raw.get("status"),
             "additions": raw.get("additions", 0),
             "deletions": raw.get("deletions", 0),
             "previous_path": raw.get("previous_filename"),
         }
-        if include_patch:
-            patch = raw.get("patch")
-            if patch is None:
-                entry["patch"] = None  # binary or too large for GitHub to render
-                entry["patch_truncated"] = False
-            else:
-                redacted, n = redact_patch(str(patch))
-                redacted_total += n
-                clipped, cut = _clip(redacted, MAX_PATCH_CHARS)
-                entry["patch"] = clipped
-                entry["patch_truncated"] = cut
-                truncated = truncated or cut
-        files.append(entry)
+        for raw in shown
+    ]
+    redacted_total = 0
+    wanted = set(patch_paths) if patch_paths is not None else None
+    if not (include_patch or wanted is not None):
+        return files, truncated, redacted_total
+
+    remaining = PATCH_BUDGET_CHARS
+    order = sorted(
+        range(len(shown)), key=lambda i: (patch_priority(str(shown[i].get("filename") or "")), i)
+    )
+    for i in order:
+        raw, entry = shown[i], files[i]
+        if wanted is not None and raw.get("filename") not in wanted:
+            continue
+        patch = raw.get("patch")
+        if patch is None:
+            entry["patch"] = None  # binary or too large for GitHub to render
+            entry["patch_truncated"] = False
+            continue
+        redacted, n = redact_patch(str(patch))
+        allowed = min(MAX_PATCH_CHARS, remaining)
+        if allowed < min(MIN_PATCH_CHARS, len(redacted)):
+            entry["patch"] = None  # the reply's budget ran out before this file
+            entry["patch_truncated"] = True
+            truncated = True
+            continue
+        redacted_total += n
+        clipped, cut = _clip(redacted, allowed)
+        remaining -= len(clipped)
+        entry["patch"] = clipped
+        entry["patch_truncated"] = cut
+        truncated = truncated or cut
     return files, truncated, redacted_total
 
 
@@ -485,7 +596,10 @@ def fetch_pull_request(params: dict[str, Any], api: GitHubApi) -> types.CallTool
         return _api_error(exc)
 
     files, truncated, redacted = _shape_files(
-        raw_files, include_patch=params["include_patch"], max_files=params["max_files"]
+        raw_files,
+        include_patch=params["include_patch"],
+        max_files=params["max_files"],
+        patch_paths=params["patch_paths"],
     )
     body, body_cut = _clip(pr.get("body"), MAX_BODY_CHARS)
     head = pr.get("head") or {}
@@ -584,7 +698,10 @@ def fetch_diff(params: dict[str, Any], api: GitHubApi) -> types.CallToolResult:
 
     raw_files = [f for f in comparison.get("files") or [] if isinstance(f, dict)]
     files, truncated, redacted = _shape_files(
-        raw_files, include_patch=params["include_patch"], max_files=params["max_files"]
+        raw_files,
+        include_patch=params["include_patch"],
+        max_files=params["max_files"],
+        patch_paths=params["patch_paths"],
     )
     raw_commits = [c for c in comparison.get("commits") or [] if isinstance(c, dict)]
     total_commits = int(comparison.get("total_commits") or len(raw_commits))

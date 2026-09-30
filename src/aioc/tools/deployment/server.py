@@ -56,6 +56,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from aioc.tools.deployment import health, release
 from aioc.tools.envelope import Timer, err, ok
 from aioc.tools.github.api import GitHubApi, GitHubApiError
+from aioc.tools.github.commits import commit_headline
 from aioc.tools.policy import ground_truth_denied, restricted_names
 
 SERVER_NAME = "aioc-deployment"
@@ -82,7 +83,6 @@ MIN_LOOKBACK_MINUTES = 5
 MAX_LOOKBACK_MINUTES = 1440
 MAX_RELEASE_FILES = 40  # manifests inspected per diff (two GitHub reads each)
 MAX_COMMITS = 250  # GitHub's own cap on a comparison
-MAX_MESSAGE_CHARS = 1000
 
 
 class DeploymentSettings(BaseSettings):
@@ -139,8 +139,9 @@ identical refs are a SAME_VERSION validation error, not an empty diff. A ref tha
 exist is an UNKNOWN_RELEASE_VERSION business error naming which one. Empty lists are a \
 finding ("no config key changed"), not an error. Up to 40 release files are inspected per \
 diff and GitHub caps a comparison at 250 commits; `meta.truncated` is true whenever either \
-cap was hit. A service absent from every manifest yields empty config/image/manifest lists \
-while the commits are still reported - the commits are repository-wide. The demo stack's \
+cap was hit. A commit's `message` is its subject line only. A service absent from every \
+manifest yields empty config/image/manifest lists while the commits are still reported - \
+the commits are repository-wide. The demo stack's \
 deployed version is whatever `DEMO_GIT_SHA` was set to; a version like `baseline` is not \
 a git ref and cannot be diffed.
 
@@ -473,11 +474,14 @@ def fetch_diff(params: dict[str, Any], api: GitHubApi) -> types.CallToolResult:
 
 
 def _shape_commit(raw: dict[str, Any]) -> dict[str, Any]:
+    # The subject line only (Day 21): the contract's commit is {sha, message, authored_at},
+    # and a message body is prose re-read every round, not a release fact. Part 3 of the
+    # description says so, and `diff_refs` is where the rest of a commit is.
     commit = raw.get("commit") or {}
-    message = str(commit.get("message") or "")[:MAX_MESSAGE_CHARS]
+    subject, _, _ = commit_headline(str(commit.get("message") or ""))
     return {
         "sha": str(raw.get("sha") or ""),
-        "message": message,
+        "message": subject,
         "authored_at": (commit.get("author") or {}).get("date"),
     }
 

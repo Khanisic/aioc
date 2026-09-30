@@ -255,6 +255,7 @@ def emit_with_retry[T](
     request_id: str | None,
     invocation_id: str | None,
     captured: dict[str, Any] | None = None,
+    grounding_advice: str | None = None,
 ) -> T:
     """Force ``emit_tool``, validate the payload with ``build``, and re-request on a
     retryable rejection with the error attached, until accepted or a stopping rule.
@@ -264,6 +265,9 @@ def emit_with_retry[T](
     emitted on its own) and no first call is made; its retry is a plain user message
     because that ``tool_use`` already has its result. Otherwise the first call is made
     here, and every retry answers the refused ``tool_use`` with an error ``tool_result``.
+
+    ``grounding_advice`` replaces the agents' advice on a ``grounding`` rejection, for an
+    emitter whose schema has no gaps to record (the coordinator's synthesis).
 
     ``build`` turns the payload into the agent's validated response and raises on any
     rejection; `classify_rejection` decides whether the loop re-requests. Token counts go
@@ -319,7 +323,12 @@ def emit_with_retry[T](
                 log.record(record)
                 exc.add_note(_exhausted_note(record))
                 raise
-            feedback = render_feedback(emit_tool, rejection, remaining=max_retries - attempt + 1)
+            feedback = render_feedback(
+                emit_tool,
+                rejection,
+                remaining=max_retries - attempt + 1,
+                grounding_advice=grounding_advice,
+            )
             if pending is None:
                 convo.append({"role": "user", "content": feedback})
             else:
@@ -422,9 +431,19 @@ _GROUNDING_ADVICE = (
 )
 
 
-def render_feedback(emit_tool: str, rejection: Rejection, *, remaining: int) -> str:
+def render_feedback(
+    emit_tool: str,
+    rejection: Rejection,
+    *,
+    remaining: int,
+    grounding_advice: str | None = None,
+) -> str:
     """What the model is told when its report is refused."""
-    advice = _FORMAT_ADVICE if rejection.kind is RejectionKind.FORMAT else _GROUNDING_ADVICE
+    advice = (
+        _FORMAT_ADVICE
+        if rejection.kind is RejectionKind.FORMAT
+        else grounding_advice or _GROUNDING_ADVICE
+    )
     return (
         f"Your `{emit_tool}` call was rejected and has NOT been recorded "
         f"({remaining} attempt(s) remain).\n\n"

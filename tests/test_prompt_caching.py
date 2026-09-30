@@ -51,6 +51,7 @@ from tests.test_docs_agent import _payload as _docs_payload
 from tests.test_docs_agent import _tool_message as _docs_message
 from tests.test_executor import _incident_response, _invocation, _plan
 from tests.test_incident_agent import _STRUCTURED_PAYLOAD, _tool_use_message
+from tests.wire import check_conversation
 
 # ------------------------------------------------------------------------------- fakes
 
@@ -61,6 +62,7 @@ class _FakeMessages:
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        check_conversation(kwargs["messages"])
         self.calls.append(kwargs)
         return self._responses.pop(0)
 

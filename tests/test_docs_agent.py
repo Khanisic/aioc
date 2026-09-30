@@ -26,6 +26,7 @@ from aioc.agents.docs import _EMIT_SCHEMA, DEFAULT_TOP_K, _apply_guidance
 from aioc.contracts import AgentName, DocsAgentResponse, ResponseStatus
 from aioc.llm import LLMClient, LLMSettings, Usage, system_text
 from aioc.retrieval import RetrievalResult, RetrievedDoc
+from tests.wire import check_conversation
 
 # --------------------------------------------------------------------------- fakes
 
@@ -36,6 +37,7 @@ class _FakeMessages:
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        check_conversation(kwargs["messages"])
         self.calls.append(kwargs)
         if not self._responses:
             raise AssertionError("fake client ran out of scripted responses")

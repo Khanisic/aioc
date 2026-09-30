@@ -63,6 +63,20 @@ Found by the audit and deliberately **not** done, because each is a real contrac
 5. **§6.4 "must include" details** (`details.field` / `details.expected` on `validation`, `details.required_scope` on `permission`) and the SCREAMING_SNAKE `code` format are unvalidated on `ToolError`. The tool servers are JSON Schema and do not import these models, so enforcement belongs in the servers' own tests first.
 6. **RFC 3339 `Z` timestamps and id prefixes** are stated conventions, not "(validated)" rules; a `+05:00` timestamp validates. Tightening them could refuse payloads the contract does not call invalid.
 
+### 2026-09-30 - no version change - `diff_release` commits carry their subject line (Day 21)
+
+Not a contract change, recorded so the claim can be checked.
+§7.3's commit shape is `{sha, message, authored_at}` and it still is: no field, type, or input moved, `include` still defaults to `all`, `schema_version` stays `1.1.0`, and §9 gets no row.
+What changed is how much of a commit's message `message` carries: the subject line, where it was the first 1,000 characters of the whole message.
+Written after the code, like the Day 16 entry, and acceptable for the same reason only.
+
+| Field | |
+|---|---|
+| Why | Day 21's trimming. A commit body is prose an agent re-reads on every round of its loop, and it is not a release fact. It is also a way round §7.3's own rule: a body saying `DB_POOL_TIMEOUT_MS=2500 is new` put a configuration value in a tool that promises keys only. `tests/test_deployment_tool.py` now pins that a value in a body never leaves. |
+| Why this is not a change | The contract never said what `message` holds; the §7.3 example is `"message": "..."`. Part 3 of the tool's description now says it is the subject line, so a consumer is told rather than left to notice. |
+| What was considered instead | (a) An additive `message_truncated` flag, as the GitHub tools now carry - a patch bump through the full §0 process for a boolean the description already states for every commit. (b) Defaulting `include` to `config` so commits are opt-in, as HANDOFF item 13 proposed - a changed default on a frozen input, which is a behaviour change for any consumer relying on `all`. Neither was worth a version for what one sentence of part 3 says. |
+| Not covered by this entry | The GitHub tools (`get_pull_request`, `list_commits`, `diff_refs`) are not among the six named tools, so their new fields (`message_truncated`, `pull_request_title`, `patch_paths`) and `touched_paths: null` for "not asked" are free to churn and need no entry. |
+
 ### Anticipated, not yet made
 
 1. **`TIMELINE_STORE_TIMEOUT` (patch).**

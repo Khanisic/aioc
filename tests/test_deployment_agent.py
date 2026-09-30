@@ -33,6 +33,7 @@ from aioc.contracts import (
     RolloutStatus,
 )
 from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage, system_text
+from tests.wire import check_conversation
 
 # --------------------------------------------------------------------------- fakes
 
@@ -43,6 +44,7 @@ class _FakeMessages:
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        check_conversation(kwargs["messages"])
         self.calls.append(kwargs)
         if not self._responses:
             raise AssertionError("fake client ran out of scripted responses")
@@ -662,6 +664,28 @@ def test_truncated_emit_output_is_reported_as_truncation_not_as_a_schema_error()
     )
     with pytest.raises(DeploymentAgentError, match="max_tokens"):
         agent.assess(_QUERY, context=_CONTEXT)
+
+
+def test_a_tool_loop_cut_off_mid_call_still_hands_on_a_conversation_the_api_accepts():
+    # The 2026-09-30 live run: the loop stopped at max_tokens part-way through a tool call,
+    # and the forced emit was refused with a 400 because that call had no tool_result.
+    cut_off = _message(
+        [
+            TextBlock(type="text", text="Writing the report now."),
+            ToolUseBlock(type="tool_use", id="toolu_cut", name=DEPLOYMENT_EMIT_TOOL_NAME, input={}),
+        ],
+        stop_reason="max_tokens",
+    )
+    agent, messages, toolset = _agent([*_SCRIPT[:2], cut_off, _emit_message(_report())])
+    resp = agent.assess(_QUERY, context=_CONTEXT)
+    assert resp.findings.service == "checkout-api"
+    # The forced call answered the cut-off tool_use rather than leaving it dangling ...
+    forced = messages.calls[-1]
+    answer = forced["messages"][-2]["content"]
+    assert answer[0]["tool_use_id"] == "toolu_cut" and answer[0]["is_error"] is True
+    assert "max_tokens" in answer[0]["content"]
+    # ... and never ran it: its input is whatever was written before the cut.
+    assert [name for name, _ in toolset.calls] == ["diff_release", "check_rollout_health"]
 
 
 def test_model_not_calling_the_emit_tool_fails_clearly():
