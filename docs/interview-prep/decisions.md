@@ -638,3 +638,30 @@ Writing a rehearsal's baseline to `evaluations/` with a note saying it was parti
 
 **What I would watch.** The baseline covers two agents of four.
 Day 21's trimming targets the tool-driven agents' replies, which this baseline cannot see; its before-and-after is the recorded `check_day15_integration.py` input tokens.
+
+## 38. A run stops for the environment, keeps what it paid for, and can be continued
+
+**Context.** The eval harness's first two live runs.
+One recorded a revoked key as five failed items (war story #12).
+The next, with the key rotated, was five items in when the account ran out of credit, and recorded the other thirty-three as the agents' failures; a third had been stopped by hand and had kept nothing, because a run held its results in memory until it ended.
+The fix for the first had been a list of two exception classes, and the second failure was not on the list.
+
+**Decision.** Whose failure it was is decided by what raised, not by a list of what has gone wrong before.
+An error from the API client or from a lost batch is the environment's; anything else is the agent's and is a score.
+A refusal known to be about the caller - the key, the permission, the balance - stops the run at once.
+Any other environment failure is recorded as a failed item and the run goes on, until three in a row have failed that way: one overloaded response is weather, three are the climate.
+Every item is written to `progress.jsonl` the moment it is scored.
+A continued run (`--resume`) takes from a stopped run's directory the answered items and the agent's failures, asks again for anything the environment failed, and refuses a directory of another set, model, or configuration.
+What is read back is scored again by today's rules, so a run made in two sittings is scored by one set of rules; the tokens, the retries, and the clock are the measured ones.
+An item taken from a run that already recorded its cost is marked, and the cost review counts it once.
+
+**What was rejected.** Adding `BadRequestError` to the list: the next environment failure would be the one not yet on it.
+Retrying an environment failure inside the run: the SDK already retries what is retryable, and a harness that retries on top of it hides an outage as latency.
+Resuming by re-running everything the first run failed: an agent that gave up on its report would get a second attempt that the first run's items never had, and the two halves of the run would not be the same measurement.
+
+**The same run corrected a scoring rule.** Two of its first three hallucination flags were evidence excerpts whose every part was in the context word for word, joined by the model across two lines.
+An excerpt is now `verbatim`, `stitched`, or ungrounded, and only the last is counted as invented.
+Because scoring is pure and responses are kept, the run was re-scored from disk for nothing.
+
+**What I would watch.** Three in a row is a guess at where weather ends.
+It has never been tested against a real outage, only against a scripted one.

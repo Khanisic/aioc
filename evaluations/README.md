@@ -52,6 +52,7 @@ uv run python scripts/run_evals.py --mode batch # live, the Batch API at half pr
 ```bash
 uv run python scripts/check_day20_baseline.py --plan   # free: what it will do and cost
 uv run python scripts/check_day20_baseline.py          # live, 118 calls
+uv run python scripts/check_day20_baseline.py --resume # live, only what is not yet done
 uv run python scripts/eval_baseline.py --against evaluations/baseline.json <run-dir>   # free
 ```
 

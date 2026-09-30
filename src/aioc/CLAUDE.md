@@ -79,7 +79,9 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   at load); scoring is pure functions over contract models (`scoring.py`); the runner calls the
   shipped agents with an explicit context, realtime or through a batch (`runner.py`); the report
   prices the run three ways and gives the cache verdict (`report.py`). An agent that raised is a
-  scored item, a refused credential aborts the run. `baseline.py` (Day 20) puts runs side by
+  scored item; a call the environment failed is not, and stops the run when it is the key, the
+  account, or the third in a row. Every item is written to `progress.jsonl` as it is scored and a
+  stopped run is continued, not repeated (`store.py`). `baseline.py` (Day 20) puts runs side by
   side and refuses runs that are not comparable; a cost delta is either a run's own tokens priced
   both ways or one run's bill against another's, and the two are never added or averaged. The
   case and record formats are not frozen; the answer key is.

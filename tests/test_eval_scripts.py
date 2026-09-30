@@ -159,7 +159,7 @@ def test_a_revoked_key_aborts_the_run_and_says_what_to_do(
     )
     assert run_evals.main(_FOUR) == 2
     err = capsys.readouterr().err
-    assert "ABORTED: the API refused the credential at case_01:diagnose" in err
+    assert "ABORTED: stopped at case_01:diagnose: the API refused the credential" in err
     assert "HANDOFF.md sec 7 item 10" in err
     # The attempt is on record as an error, with no item blamed for it.
     summary = json.loads((_run_dir(scripted) / "run.json").read_text(encoding="utf-8"))

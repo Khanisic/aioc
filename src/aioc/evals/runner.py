@@ -18,17 +18,29 @@ attributed to the case that spent them. Retrieval is memoised per question: the 
 path replays an item once per pass and must rebuild the same request each time, and the
 realtime path should not pay Voyage twice for one question either.
 
-**An agent that raised is a scored item; a credential that was refused is not.** A report
-the agent gave up on is a result of the thing under test. A rejected API key is a fact
-about the environment that every remaining item would repeat, so the run stops on the
-first one (`EvalAborted`) instead of recording it thirty-eight times as the agents'
-failure - which is what the first live run of this harness did.
+**An agent that raised is a scored item; a call the environment refused is not.** A report
+the agent gave up on is a result of the thing under test. A rejected API key, an account
+with no credit, or an API that is down is a fact about the environment that every
+remaining item would repeat, so the run stops (`EvalAborted`) instead of recording it
+thirty-eight times as the agents' failure. Both of the first two live runs of this harness
+did exactly that: one on a revoked key, one on an empty balance five items in.
+
+Two rules, because the failures that matter cannot all be listed in advance. A refusal
+that is known to be about the caller (the key, the permission, the balance) stops the run
+at once. Anything else the API itself fails on is given the benefit of the doubt, item by
+item, until `MAX_ENVIRONMENT_FAILURES` in a row have failed that way - one overloaded
+response is weather, three in a row is the climate.
+
+**What was paid for is kept.** Every finished item is handed to ``on_result`` as it
+finishes, and a run can be given the items it has already ``done``. So a run that is
+stopped - by the rule above, by a closed terminal, by anything - costs what it had not
+yet done, and nothing twice.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -38,6 +50,7 @@ from aioc.agents import DocsAgent, IncidentAgent, RetryLog
 from aioc.agents.docs import DEFAULT_TOP_K, CorpusRetriever
 from aioc.contracts import AgentResponse
 from aioc.llm import (
+    BatchError,
     BatchRun,
     DeferredClient,
     LLMClient,
@@ -49,31 +62,63 @@ from aioc.llm import (
 from aioc.retrieval import RetrievalResult
 
 from .cases import EvalItem, Task
-from .scoring import ItemScore, RetryStats, score_failure, score_item
+from .scoring import ItemScore, RetryStats, is_environment_error, score_failure, score_item
 
 Mode = Literal["realtime", "batch"]
 Progress = Callable[[str], None]
 
+# How many items in a row may fail on the API itself before the run stops.
+MAX_ENVIRONMENT_FAILURES = 3
+
 # Refusals that are about the caller, not the request: no item can succeed after one.
-_NOT_THE_AGENTS_DOING = (anthropic.AuthenticationError, anthropic.PermissionDeniedError)
+_ABOUT_THE_CALLER = (anthropic.AuthenticationError, anthropic.PermissionDeniedError)
 
 
 class EvalAborted(RuntimeError):  # noqa: N818 - names what happened to the run
     """The run cannot continue, and that is no item's result. ``completed`` is how many
-    items had been scored when it stopped."""
+    items had been scored when it stopped; ``results`` is those items, which were paid
+    for and can be given to the next run as ``done``."""
 
-    def __init__(self, message: str, *, completed: int) -> None:
+    def __init__(self, message: str, *, completed: int, results: Sequence[ItemResult] = ()) -> None:
         super().__init__(message)
         self.completed = completed
+        self.results = list(results)
 
 
-def _aborted(exc: BaseException, *, completed: int, at: str) -> EvalAborted:
+def stops_the_run(exc: BaseException) -> str | None:
+    """Why this failure means no later item can succeed, or ``None`` when it does not
+    say so on its own."""
+    if isinstance(exc, _ABOUT_THE_CALLER):
+        return (
+            "the API refused the credential. Nothing more can succeed until the key is "
+            "replaced - see HANDOFF.md sec 7 item 10"
+        )
+    if is_environment_error(exc) and "credit balance" in str(exc).lower():
+        return (
+            "the account has no credit left. Nothing more can succeed until credit is "
+            "added in the Console (Plans & Billing); the run can then be resumed"
+        )
+    return None
+
+
+def _aborted(
+    exc: BaseException, why: str, *, at: str, results: Sequence[ItemResult]
+) -> EvalAborted:
     return EvalAborted(
-        f"the API refused the credential at {at} ({type(exc).__name__}: {exc}); "
-        f"{completed} item(s) had been scored. Nothing more can succeed until the key is "
-        "replaced - see HANDOFF.md sec 7 item 10.",
-        completed=completed,
+        f"stopped at {at}: {why} ({type(exc).__name__}: {' '.join(str(exc).split())}). "
+        f"{len(results)} item(s) had been scored and are kept.",
+        completed=len(results),
+        results=results,
     )
+
+
+class _EnvironmentFailure(Exception):
+    """An item the environment failed, carried up to the loop that counts them."""
+
+    def __init__(self, cause: BaseException, result: ItemResult) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.result = result
 
 
 class RecordingRetriever:
@@ -181,18 +226,22 @@ def _attempt(
     started = time.monotonic()
     response: AgentResponse | None
     retrieved: tuple[str, ...] | None = None
+    failure: BaseException | None = None
     try:
         response = run_item(item, client, retriever, usage=usage, retry_log=log)
-    except (PendingRequest, *_NOT_THE_AGENTS_DOING):
+    except PendingRequest:
         raise
     except Exception as exc:  # noqa: BLE001 - an agent that raised is a scored outcome
-        response, score = None, score_failure(item, exc)
+        response, score, failure = None, score_failure(item, exc), exc
     else:
         if item.task is Task.RECALL and retriever is not None:
             retrieved = retriever.retrieved(item.query)
         score = score_item(item, response, retrieved=retrieved)
     score = replace(score, usage=usage, retry=_retry_stats(log), seconds=time.monotonic() - started)
-    return ItemResult(item=item, score=score, response=response, retrieved=retrieved)
+    result = ItemResult(item=item, score=score, response=response, retrieved=retrieved)
+    if failure is not None and is_environment_error(failure):
+        raise _EnvironmentFailure(failure, result)
+    return result
 
 
 def _new_run(mode: Mode, settings: LLMSettings) -> EvalRun:
@@ -215,23 +264,87 @@ def _say(progress: Progress | None, result: ItemResult) -> None:
     progress(f"  {score.key:<20} {verdict}")
 
 
+class _Tally:
+    """The results of a run as they arrive, and the count of environment failures in a row.
+
+    A failure the environment caused is held back rather than recorded: if the next item
+    succeeds it was weather and is recorded as the failed item it was; if the run stops,
+    it is dropped, so a resumed run asks again instead of inheriting it.
+    """
+
+    def __init__(
+        self,
+        done: Mapping[str, ItemResult] | None,
+        progress: Progress | None,
+        on_result: Callable[[ItemResult], None] | None,
+    ) -> None:
+        self.results: dict[str, ItemResult] = dict(done or {})
+        self._held: list[ItemResult] = []
+        self._progress = progress
+        self._on_result = on_result
+
+    def has(self, item: EvalItem) -> bool:
+        return item.key in self.results
+
+    def _record(self, result: ItemResult) -> None:
+        self.results[result.item.key] = result
+        _say(self._progress, result)
+        if self._on_result is not None:
+            self._on_result(result)
+
+    def add(self, result: ItemResult) -> None:
+        for held in self._held:
+            self._record(held)
+        self._held = []
+        self._record(result)
+
+    def failed(self, failure: _EnvironmentFailure, *, at: str) -> None:
+        """Count one environment failure, and stop the run if it says to."""
+        why = stops_the_run(failure.cause)
+        self._held.append(failure.result)
+        if why is None and len(self._held) >= MAX_ENVIRONMENT_FAILURES:
+            why = (
+                f"{len(self._held)} items in a row failed on the API itself, so the next would too"
+            )
+        if why is not None:
+            raise _aborted(failure.cause, why, at=at, results=self.ordered()) from failure.cause
+
+    def finish(self) -> None:
+        """The run ended with failures still held: they were the last items, and stand."""
+        for held in self._held:
+            self._record(held)
+        self._held = []
+
+    def ordered(self, items: Sequence[EvalItem] | None = None) -> list[ItemResult]:
+        if items is None:
+            return list(self.results.values())
+        return [self.results[item.key] for item in items if item.key in self.results]
+
+
 def run_realtime(
     items: Sequence[EvalItem],
     client: LLMClient,
     retriever: CorpusRetriever | None = None,
     *,
     progress: Progress | None = None,
+    done: Mapping[str, ItemResult] | None = None,
+    on_result: Callable[[ItemResult], None] | None = None,
 ) -> EvalRun:
+    """``done`` is the items a stopped run already finished (by key): they are not run
+    again. ``on_result`` is called with each item as it finishes."""
     run = _new_run("realtime", client.settings)
     recording = None if retriever is None else RecordingRetriever(retriever)
+    tally = _Tally(done, progress, on_result)
     started = time.monotonic()
     for item in items:
+        if tally.has(item):
+            continue
         try:
-            result = _attempt(item, client, recording)
-        except _NOT_THE_AGENTS_DOING as exc:
-            raise _aborted(exc, completed=len(run.results), at=item.key) from exc
-        run.results.append(result)
-        _say(progress, result)
+            tally.add(_attempt(item, client, recording))
+        except _EnvironmentFailure as failure:
+            tally.failed(failure, at=item.key)
+    tally.finish()
+    run.results = tally.ordered(items)
     run.seconds = time.monotonic() - started
     if recording is not None:
         run.retrieval_degraded = recording.degraded()
@@ -245,53 +358,60 @@ def run_batch(
     retriever: CorpusRetriever | None = None,
     *,
     progress: Progress | None = None,
+    done: Mapping[str, ItemResult] | None = None,
+    on_result: Callable[[ItemResult], None] | None = None,
 ) -> EvalRun:
     run = _new_run("batch", client.settings)
     recording = None if retriever is None else RecordingRetriever(retriever)
+    tally = _Tally(done, progress, on_result)
     started = time.monotonic()
-    done: dict[str, ItemResult] = {}
-    waiting = list(items)
+    waiting = [item for item in items if not tally.has(item)]
     # One pass per model call an item can make: the first attempt, then each retry.
     passes = client.settings.max_validation_retries + 1
     for number in range(1, passes + 2):
         still: list[EvalItem] = []
         for item in waiting:
             try:
-                done[item.key] = _attempt(item, client, recording)
+                tally.add(_unclocked(_attempt(item, client, recording)))
             except PendingRequest:
                 still.append(item)
-            else:
-                _say(progress, done[item.key])
+            except _EnvironmentFailure as failure:
+                failure.result = _unclocked(failure.result)
+                tally.failed(failure, at=item.key)
         waiting = still
         if not waiting:
             break
         if number > passes:
             # Cannot happen while the retry cap holds; refuse to loop on it if it does.
             for item in waiting:
-                done[item.key] = ItemResult(
-                    item,
-                    score_failure(item, RuntimeError(f"still pending after {passes} passes")),
-                    None,
-                )
+                error = RuntimeError(f"still pending after {passes} passes")
+                tally.add(ItemResult(item, score_failure(item, error), None))
             break
         if progress is not None:
             progress(f"  pass {number}: {len(client.pending)} request(s) submitted as one batch")
         try:
             batch = client.flush(batcher)
-        except _NOT_THE_AGENTS_DOING as exc:
-            raise _aborted(exc, completed=len(done), at=f"batch submission {number}") from exc
+        except (anthropic.APIError, BatchError) as exc:
+            # The batch is how every waiting item is asked: if it cannot be sent or
+            # never ends, none of them can be answered.
+            why = stops_the_run(exc) or "the batch could not be run"
+            raise _aborted(
+                exc, why, at=f"batch submission {number}", results=tally.ordered()
+            ) from exc
         if progress is not None and batch is not None:
             progress(
                 f"  pass {number}: batch {batch.batch_id} ended in {batch.seconds:.0f}s, "
                 f"{batch.succeeded} succeeded, {batch.failed} failed"
             )
-    run.results = [done[item.key] for item in items]
-    # A batched item's own clock measures replay, not the model: the batches carry the time.
-    run.results = [
-        replace(result, score=replace(result.score, seconds=None)) for result in run.results
-    ]
+    tally.finish()
+    run.results = tally.ordered(items)
     run.batches = list(client.runs)
     run.seconds = time.monotonic() - started
     if recording is not None:
         run.retrieval_degraded = recording.degraded()
     return run
+
+
+def _unclocked(result: ItemResult) -> ItemResult:
+    # A batched item's own clock measures replay, not the model: the batches carry the time.
+    return replace(result, score=replace(result.score, seconds=None))

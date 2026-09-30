@@ -504,6 +504,17 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   run's bill against another's), and names every item the runs scored differently; `compare`
   reads a later run against it, which is Day 24's token reduction. Every report carries a cache
   verdict. 970 offline tests. **The done-when is the committed baseline, and it is still open.**
+- **First live run (2026-09-29), stopped by an empty account.** With the key rotated the smoke
+  test passed - the cache was measured reading a 7,272-token prefix, four diagnoses 21% cheaper
+  than their own tokens uncached - and the first full run scored five items before every call
+  returned `credit balance is too low`. Nine items are measured and kept; about $0.65 was spent.
+  The run changed the harness: a failure that is the environment's stops the run instead of
+  being scored (at once for the key or the account, at the third in a row otherwise); every item
+  is written to `progress.jsonl` as it is scored and `--resume` continues a stopped run without
+  paying twice or counting twice (`src/aioc/evals/store.py`); an excerpt joined from verbatim
+  lines is `stitched`, not invented; and the cost projection was re-calibrated from measured
+  requests. 1013 offline tests. **Still open:** the baseline, which is 105 calls and about $3
+  from done.
 
 ---
 

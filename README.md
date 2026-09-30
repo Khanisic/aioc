@@ -21,8 +21,9 @@ confidence-scored output through custom MCP tools.
 > An eval harness scores the shipped agents against the seeded incidents' recorded truth
 > (accuracy, hallucination rate, tool success, calibration), with prompt caching on and
 > the Batch API as a second way to run it. The baseline checkpoint that runs it three
-> ways and commits the deltas is built; it is proven offline and has no live score yet,
-> because the run is waiting on an API key.
+> ways and commits the deltas is built. Its first live run measured the cache working
+> and scored nine items before the account ran out of credit; a stopped run is
+> continued rather than repeated, so the baseline is 105 calls from done.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
 ![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
@@ -130,6 +131,7 @@ PYTHONIOENCODING=utf-8 uv run python scripts/run_evals.py --smoke      # 4 calls
 uv run python scripts/check_day20_baseline.py --plan                   # free
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day20_baseline.py
 uv run python scripts/eval_baseline.py --latest                        # free
+PYTHONIOENCODING=utf-8 uv run python scripts/check_day20_baseline.py --resume --skip-smoke  # only what is left
 
 # the routing case study: 20 queries per set, --dry-run is free; --variant v1_1 is the split
 uv run python scripts/check_tool_routing.py --dry-run

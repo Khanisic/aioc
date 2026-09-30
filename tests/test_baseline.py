@@ -649,7 +649,8 @@ def test_a_refused_credential_stops_the_checkpoint_at_the_first_call(
 ):
     wired["refuse"] = True
     assert check_day20_baseline.main(["--out", str(wired["out"])]) == 2
-    assert "ABORTED: the API refused the credential at case_01:diagnose" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "ABORTED: stopped at case_01:diagnose: the API refused the credential" in err
     assert not wired["out"].exists()
 
 

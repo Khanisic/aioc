@@ -252,6 +252,7 @@ def render_markdown(run: EvalRun, cases: EvalSet, *, heading: str | None = None)
                 "Diagnosis statements with nothing behind them in the context", summary.ungrounded
             ),
             _row("Diagnoses carrying at least one", summary.items_with_ungrounded),
+            _row("Evidence joined from verbatim lines (counted here, not above)", summary.stitched),
             _row("Probes answered with an invented precedent", summary.invented_precedents),
             _row("Reports the agents' own grounding rule refused", summary.grounding_refusals),
             "",

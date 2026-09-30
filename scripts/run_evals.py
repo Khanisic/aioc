@@ -8,6 +8,7 @@
     uv run python scripts/run_evals.py --no-cache               # LIVE, the uncached baseline
     uv run python scripts/run_evals.py --tasks diagnose --limit 4
     uv run python scripts/run_evals.py --smoke                  # LIVE, 4 calls: is it wired?
+    uv run python scripts/run_evals.py --resume test-results/runs/<date>/<run>   # LIVE, the rest
     uv run python scripts/run_evals.py --rescore test-results/runs/<date>/<run>   # free
     uv run python scripts/run_evals.py --recorded-tools         # free - tool success, recorded
 
@@ -35,6 +36,14 @@ report to read. It fails when an item got no response, and when prompt caching i
 the later requests did not read the prefix the first one wrote - the failure that costs
 money and breaks nothing.
 
+**A stopped run is continued, not repeated.** Every item is written to `progress.jsonl`
+in the run directory as it finishes. `--resume <run-dir>` starts a new run that takes from
+that directory every item worth keeping - the answered ones, and the ones whose agent gave
+up - and asks only for the rest, which includes anything the API itself failed. It refuses
+a directory from a different set, model, or configuration. A run stops itself, and says
+how to resume, when the key or the account is refused or three items in a row fail on the
+API.
+
 Every run is recorded under `test-results/` (`report.md`, `eval.json`, `responses.json`)
 and priced by `scripts/cost_review.py`; `--write` also puts the report where it can be
 committed. `scripts/eval_baseline.py` puts several runs side by side.
@@ -47,7 +56,7 @@ import json
 import sys
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -56,34 +65,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runlog import RESULTS_ROOT, RunRecorder  # noqa: E402 - needs the sys.path insert above
 
 from aioc.agents import RetryLog  # noqa: E402
-from aioc.contracts import (  # noqa: E402
-    AgentResponse,
-    CoordinatorResponse,
-    DocsAgentResponse,
-    IncidentAgentResponse,
-)
+from aioc.contracts import AgentResponse, CoordinatorResponse  # noqa: E402
 from aioc.evals import (  # noqa: E402
     EvalAborted,
     EvalItem,
     EvalRun,
     EvalSet,
     ItemResult,
-    RetryStats,
+    ProgressFile,
+    RunConfig,
+    StoreError,
     Task,
     cache_health,
     load_cases,
+    read_run,
     render_markdown,
+    restore,
     run_batch,
     run_item,
     run_realtime,
-    score_failure,
-    score_item,
     to_record,
     tool_success,
 )
 from aioc.llm import (  # noqa: E402
     BATCH_DISCOUNT,
     PRICES,
+    BatchRun,
     DeferredClient,
     LLMClient,
     LLMSettings,
@@ -95,9 +102,17 @@ from aioc.llm import (  # noqa: E402
 from aioc.llm.pricing import price_key  # noqa: E402
 from aioc.retrieval import CorpusSearcher, default_embedder  # noqa: E402
 
-# What a report has cost in output tokens on the recorded live runs (Day 10: 12.4k output
-# over ~8 calls). A projection needs a number; this one is measured, and rough.
-_ASSUMED_OUTPUT_TOKENS = 2_000
+# The projection's two constants, both measured on the first nine live items
+# (2026-09-29, claude-sonnet-5) after the first projection came out 40% low on input:
+#
+# - A request is mostly JSON Schema, which tokenises far denser than prose: 7.9k tokens
+#   measured against 19k characters, so 2.4 characters a token rather than the usual 4.
+# - A diagnosis is a long report and a recall is a short one: 2.2k-3.5k output tokens
+#   against 1.0k-1.7k. One number for both was wrong in both directions.
+#
+# Still an estimate. The report's measured tokens are what a run cost.
+_CHARS_PER_TOKEN = 2.4
+_ASSUMED_OUTPUT_TOKENS = {Task.DIAGNOSE: 3_000, Task.RECALL: 1_400}
 
 
 def _select(cases: EvalSet, args: argparse.Namespace) -> list[EvalItem]:
@@ -165,17 +180,17 @@ def _show(items: list[EvalItem], case_id: str) -> int:
 class Projection:
     """Every request built and sized, nothing sent."""
 
-    sized: list[tuple[str, int]]  # (item key, estimated input tokens)
+    sized: list[tuple[str, int, int]]  # (item key, estimated input, assumed output)
     unbuildable: list[tuple[str, str]]  # (item key, why)
     realtime_uncached_usd: float | None
 
     @property
     def input_tokens(self) -> int:
-        return sum(tokens for _, tokens in self.sized)
+        return sum(tokens for _, tokens, _ in self.sized)
 
     @property
     def output_tokens(self) -> int:
-        return _ASSUMED_OUTPUT_TOKENS * len(self.sized)
+        return sum(tokens for _, _, tokens in self.sized)
 
     @property
     def batch_uncached_usd(self) -> float | None:
@@ -188,7 +203,7 @@ def project(items: list[EvalItem], settings: LLMSettings) -> Projection:
     even Voyage is called; a live recall's documents may differ in order."""
     client = DeferredClient(settings)
     retriever = CorpusSearcher(None) if any(i.task is Task.RECALL for i in items) else None
-    sized: list[tuple[str, int]] = []
+    sized: list[tuple[str, int, int]] = []
     unbuildable: list[tuple[str, str]] = []
     for item in items:
         before = set(client.pending)
@@ -201,10 +216,12 @@ def project(items: list[EvalItem], settings: LLMSettings) -> Projection:
             continue
         (key,) = set(client.pending) - before
         body = json.dumps(client.pending[key], default=str)
-        sized.append((item.key, len(body) // 4))
+        sized.append(
+            (item.key, round(len(body) / _CHARS_PER_TOKEN), _ASSUMED_OUTPUT_TOKENS[item.task])
+        )
     total = Usage(
-        input_tokens=sum(tokens for _, tokens in sized),
-        output_tokens=_ASSUMED_OUTPUT_TOKENS * len(sized),
+        input_tokens=sum(tokens for _, tokens, _ in sized),
+        output_tokens=sum(tokens for _, _, tokens in sized),
     )
     return Projection(sized, unbuildable, price(settings.model, total))
 
@@ -214,12 +231,16 @@ def _dry_run(items: list[EvalItem], settings: LLMSettings, mode: str) -> int:
     for key, why in projection.unbuildable:
         print(f"  {key:<20} cannot be built: {why}")
     print(f"{len(projection.sized)} request(s), model {settings.model}, mode {mode}")
-    for key, tokens in projection.sized:
+    for key, tokens, _ in projection.sized:
         print(f"  {key:<20} ~{tokens:>6,} input tokens")
-    print(f"\n  ~{projection.input_tokens:,} input tokens (chars / 4 - an estimate, not a count)")
+    print(
+        f"\n  ~{projection.input_tokens:,} input tokens "
+        f"(characters / {_CHARS_PER_TOKEN} - an estimate, not a count)"
+    )
     print(
         f"  ~{projection.output_tokens:,} output tokens assumed "
-        f"({_ASSUMED_OUTPUT_TOKENS:,} per report)"
+        f"({_ASSUMED_OUTPUT_TOKENS[Task.DIAGNOSE]:,} a diagnosis, "
+        f"{_ASSUMED_OUTPUT_TOKENS[Task.RECALL]:,} a recall)"
     )
     if projection.realtime_uncached_usd is None:
         print(f"  {settings.model} has no listed price")
@@ -262,8 +283,12 @@ def _recorded_tools(results: Path) -> int:
     return 0
 
 
-def _rescore(run_dir: Path, cases: EvalSet, write: Path | None) -> int:
-    """A recorded run scored again with today's rules. Free: the responses are on disk."""
+def _rescore(run_dir: Path, cases: EvalSet, write: Path | None, *, save: bool = False) -> int:
+    """A recorded run scored again with today's rules. Free: the responses are on disk.
+
+    ``save`` keeps the result beside the run as `eval.rescored.json` and
+    `report.rescored.md`. The originals are left alone: they are the record of what
+    was scored at the time, and the difference between the two is the rule that changed."""
     record = json.loads((run_dir / "eval.json").read_text(encoding="utf-8"))
     kept = json.loads((run_dir / "responses.json").read_text(encoding="utf-8"))
     if record["set"]["sha256"] != cases.sha256:
@@ -281,6 +306,16 @@ def _rescore(run_dir: Path, cases: EvalSet, write: Path | None) -> int:
         cache_ttl=record["run"]["cache_ttl"],
         seconds=record["run"]["seconds"],
         retrieval_degraded=record["run"]["retrieval_degraded"],
+        batches=[
+            BatchRun(
+                batch_id=b["batch_id"],
+                requests=b["requests"],
+                succeeded=b["succeeded"],
+                failed=b["failed"],
+                seconds=b["seconds"],
+            )
+            for b in record["run"]["batches"]
+        ],
     )
     for key, entry in old.items():
         item = items.get(key)
@@ -288,43 +323,21 @@ def _rescore(run_dir: Path, cases: EvalSet, write: Path | None) -> int:
             print(f"note: {key} is no longer in the case file; skipped", file=sys.stderr)
             continue
         saved = kept.get(key) or {}
-        response: AgentResponse | None = None
-        retrieved = None if saved.get("retrieved") is None else tuple(saved["retrieved"])
-        if saved.get("response") is None:
-            score = score_failure(item, RuntimeError(entry["error"] or "no response recorded"))
-            score = _with(score, error=entry["error"])
-        else:
-            model = IncidentAgentResponse if item.task is Task.DIAGNOSE else DocsAgentResponse
-            response = model.model_validate(saved["response"])
-            score = score_item(item, response, retrieved=retrieved)
-        usage = entry["usage"]
-        score = _with(
-            score,
-            usage=Usage(
-                input_tokens=usage["in"],
-                output_tokens=usage["out"],
-                cache_read_tokens=usage.get("cache_read"),
-                cache_write_tokens=usage.get("cache_write"),
-            ),
-            retry=RetryStats(
-                attempts=entry["retry"]["attempts"],
-                rejections=tuple(entry["retry"]["rejections"]),
-                outcome=entry["retry"]["outcome"],
-            ),
-            seconds=entry["seconds"],
-        )
-        run.results.append(ItemResult(item, score, response, retrieved))
+        run.results.append(restore(item, entry, saved.get("response"), saved.get("retrieved")))
     report = render_markdown(run, cases, heading=f"Eval run, rescored: {run_dir.name}")
     print(report)
+    if save:
+        rescored = to_record(run, cases, run_id=record["run"].get("run_id") or run_dir.name)
+        (run_dir / "eval.rescored.json").write_text(
+            json.dumps(rescored, indent=2), encoding="utf-8"
+        )
+        (run_dir / "report.rescored.md").write_text(report, encoding="utf-8")
+        print(f"saved: {run_dir / 'eval.rescored.json'}")
     if write is not None:
         write.parent.mkdir(parents=True, exist_ok=True)
         write.write_text(report, encoding="utf-8")
         print(f"written: {write}")
     return 0
-
-
-def _with(score: Any, **changes: Any) -> Any:
-    return replace(score, **changes)
 
 
 # ------------------------------------------------------------------------------- live path
@@ -353,6 +366,66 @@ class Executed:
     run_id: str
 
 
+def _resumed(
+    resume_from: Path, cases: EvalSet, config: RunConfig, items: list[EvalItem]
+) -> tuple[dict[str, ItemResult], set[str]]:
+    """The items of ``resume_from`` a run with this configuration need not ask again, and
+    which of them that run already recorded the cost of."""
+    stored = read_run(resume_from, cases)
+    differences = config.differs_from(stored.config)
+    if differences:
+        raise StoreError(
+            f"{resume_from.name} is a different run and cannot be continued by this one - "
+            + "; ".join(differences)
+        )
+    wanted = {item.key for item in items}
+    done = {key: result for key, result in stored.reusable().items() if key in wanted}
+    counted: set[str] = set()
+    events = resume_from / "events.jsonl"
+    if events.is_file():
+        for line in events.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (event.get("data") or {}).get("usage"):
+                counted.add(str(event.get("name")))
+    return done, counted
+
+
+def _record_items(
+    recorder: RunRecorder,
+    results: list[ItemResult],
+    settings: LLMSettings,
+    *,
+    batch: bool,
+    reused_from: str | None = None,
+    counted: set[str] | None = None,
+) -> None:
+    for result in results:
+        score = result.score
+        data: dict[str, Any] = {
+            **score.to_dict(),
+            "model": settings.model,
+            "batch": batch,
+            "cache_ttl": settings.prompt_cache_ttl,
+        }
+        if reused_from is not None and score.key in (counted or set()):
+            # The run it was taken from already recorded these tokens. Said here so the
+            # cost review counts them once.
+            data["reused_from"] = reused_from
+        recorder.event(
+            score.key,
+            # An eval item is a measurement: a wrong answer is recorded as `failed`
+            # so the index can be queried, and the run itself still completed.
+            outcome="error" if not score.answered else "passed" if score.correct else "failed",
+            duration_ms=None if score.seconds is None else score.seconds * 1000,
+            type="llm_call",
+            message=score.error,
+            data=data,
+        )
+
+
 def execute(
     items: list[EvalItem],
     cases: EvalSet,
@@ -361,17 +434,41 @@ def execute(
     mode: str,
     poll_seconds: float = 20.0,
     command: str | None = None,
+    resume_from: Path | None = None,
     say: Callable[[str], None] = print,
 ) -> Executed:
-    """Run the items, record the run, return what was recorded. Spends money. Raises
-    `EvalAborted` when the credential is refused; the recorder notes it on the way out."""
-    needs_corpus = any(item.task is Task.RECALL for item in items)
+    """Run the items, record the run, return what was recorded. Spends money.
+
+    Each item is written to `progress.jsonl` as it finishes. With ``resume_from`` the items
+    that directory already finished are taken from it and not asked again. Raises
+    `EvalAborted` when the environment stops the run; what it had finished is recorded,
+    and the exception's note says how to continue.
+    """
+    config = RunConfig(
+        set_sha256=cases.sha256,
+        model=settings.model,
+        mode=mode,
+        prompt_caching=settings.prompt_caching,
+        cache_ttl=settings.prompt_cache_ttl,
+    )
+    done: dict[str, ItemResult] = {}
+    counted: set[str] = set()
+    if resume_from is not None:
+        done, counted = _resumed(resume_from, cases, config, items)
+
+    needs_corpus = any(item.task is Task.RECALL for item in items if item.key not in done)
     retriever = CorpusSearcher(default_embedder()) if needs_corpus else None
     caching = f"on, {settings.prompt_cache_ttl}" if settings.prompt_caching else "off"
     say(
         f"{len(items)} item(s) from {cases.name} v{cases.version}, model {settings.model}, "
         f"mode {mode}, prompt caching {caching}"
     )
+    if resume_from is not None:
+        say(
+            f"  continuing {resume_from.name}: {len(done)} item(s) kept, "
+            f"{len(items) - len(done)} to run"
+        )
+    reused_from = None if resume_from is None else resume_from.name
     with RunRecorder(
         kind="llm",
         name=f"evals-{mode}",
@@ -385,37 +482,62 @@ def execute(
             "model": settings.model,
             "prompt_caching": settings.prompt_caching,
             "cache_ttl": settings.prompt_cache_ttl,
+            "resumed_from": reused_from,
+            "items_kept": len(done),
         },
     ) as recorder:
-        if mode == "batch":
-            batcher = MessageBatcher.from_settings(
+        progress = ProgressFile(recorder.dir, config)
+        for kept in done.values():
+            progress.write(kept)
+        try:
+            if mode == "batch":
+                batcher = MessageBatcher.from_settings(
+                    settings,
+                    poll_seconds=poll_seconds,
+                    on_poll=lambda batch_id, status, elapsed: say(
+                        f"    {batch_id} {status} after {elapsed:.0f}s"
+                    ),
+                )
+                run = run_batch(
+                    items,
+                    DeferredClient(settings),
+                    batcher,
+                    retriever,
+                    progress=say,
+                    done=done,
+                    on_result=progress.write,
+                )
+            else:
+                run = run_realtime(
+                    items,
+                    LLMClient(settings),
+                    retriever,
+                    progress=say,
+                    done=done,
+                    on_result=progress.write,
+                )
+        except EvalAborted as exc:
+            # What it finished was paid for: on the record, and there to be continued from.
+            _record_items(
+                recorder,
+                exc.results,
                 settings,
-                poll_seconds=poll_seconds,
-                on_poll=lambda batch_id, status, elapsed: say(
-                    f"    {batch_id} {status} after {elapsed:.0f}s"
-                ),
+                batch=mode == "batch",
+                reused_from=reused_from,
+                counted=counted,
             )
-            run = run_batch(items, DeferredClient(settings), batcher, retriever, progress=say)
-        else:
-            run = run_realtime(items, LLMClient(settings), retriever, progress=say)
+            exc.add_note(f"to continue it: run_evals.py --resume {recorder.dir}")
+            exc.add_note(str(recorder.dir))
+            raise
 
-        for result in run.results:
-            score = result.score
-            recorder.event(
-                score.key,
-                # An eval item is a measurement: a wrong answer is recorded as `failed`
-                # so the index can be queried, and the run itself still completed.
-                outcome="error" if not score.answered else "passed" if score.correct else "failed",
-                duration_ms=None if score.seconds is None else score.seconds * 1000,
-                type="llm_call",
-                message=score.error,
-                data={
-                    **score.to_dict(),
-                    "model": settings.model,
-                    "batch": run.mode == "batch",
-                    "cache_ttl": settings.prompt_cache_ttl,
-                },
-            )
+        _record_items(
+            recorder,
+            run.results,
+            settings,
+            batch=run.mode == "batch",
+            reused_from=reused_from,
+            counted=counted,
+        )
         report = render_markdown(run, cases, heading=f"Eval run: {recorder.run_id}")
         record = to_record(run, cases, run_id=recorder.run_id)
         recorder.artifact("report.md", report)
@@ -445,7 +567,14 @@ def _live(items: list[EvalItem], cases: EvalSet, args: argparse.Namespace) -> in
     if price_key(settings.model) is None:
         print(f"note: {settings.model} has no listed price; known: {sorted(PRICES)}")
 
-    done = execute(items, cases, settings, mode=args.mode, poll_seconds=args.poll_seconds)
+    done = execute(
+        items,
+        cases,
+        settings,
+        mode=args.mode,
+        poll_seconds=args.poll_seconds,
+        resume_from=args.resume,
+    )
     print()
     print(done.report)
     print(f"records: {done.dir}")
@@ -477,6 +606,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--poll-seconds", type=float, default=20.0, help="batch poll interval")
     parser.add_argument("--write", type=Path, default=None, help="also write the report here")
     parser.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="live: continue this stopped run, asking only for what it did not finish",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="live, 4 calls: the first four diagnoses, with a pass or fail verdict",
@@ -486,6 +621,11 @@ def main(argv: list[str] | None = None) -> int:
     free.add_argument("--show", metavar="CASE", default=None, help="free: print one case")
     free.add_argument("--dry-run", action="store_true", help="free: build and size requests")
     free.add_argument("--rescore", type=Path, default=None, help="free: a recorded run directory")
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="with --rescore: keep the result beside the run as eval.rescored.json",
+    )
     free.add_argument("--recorded-tools", action="store_true", help="free: recorded tool success")
     parser.add_argument("--results", type=Path, default=RESULTS_ROOT, help="test-results directory")
     args = parser.parse_args(argv)
@@ -497,7 +637,7 @@ def main(argv: list[str] | None = None) -> int:
         # One agent, so one prefix: the second request onward must read what the first wrote.
         args.tasks, args.limit = "diagnose", 4
     if args.rescore is not None:
-        return _rescore(args.rescore, cases, args.write)
+        return _rescore(args.rescore, cases, args.write, save=args.save)
     items = _select(cases, args)
     if not items:
         raise SystemExit("the selection is empty")
@@ -512,6 +652,11 @@ def main(argv: list[str] | None = None) -> int:
     except EvalAborted as exc:
         # Recorded by the run's own recorder on the way out; said here for the terminal.
         print(f"\nABORTED: {exc}", file=sys.stderr)
+        for note in getattr(exc, "__notes__", [])[:1]:
+            print(f"  {note}", file=sys.stderr)
+        return 2
+    except StoreError as exc:
+        print(f"cannot resume: {exc}", file=sys.stderr)
         return 2
 
 

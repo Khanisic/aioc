@@ -22,6 +22,15 @@ The three measurements the plan asks for, and what each one counts here:
   rule cannot see: a precedent asserted for a question the corpus has no answer to.
 - **Tool success rate** - ``ToolCallRef.ok`` over every ``tool_calls`` entry.
 
+**A stitched excerpt is not an invented one.** The first live run flagged two evidence
+excerpts as ungrounded whose every part was in the context word for word: the model had
+quoted two adjacent metric lines as one excerpt, once dropping the list marker between
+them and once joining them with a semicolon. Nothing in them was made up, so counting
+them would have measured this module's line breaks. An excerpt is therefore read three
+ways: ``verbatim`` (it is in the context as written), ``stitched`` (it is not, but every
+part of it is - counted and reported on its own line, never as a hallucination), and
+ungrounded (some part of it is in the context nowhere).
+
 Calibration is scored against the contract's bands (sec 2.1): each scored judgement lands
 in the band its stated confidence names, and a band's accuracy is what that confidence
 was worth.
@@ -34,9 +43,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+import anthropic
+
 from aioc.contracts import AgentResponse, DocsAgentResponse, IncidentAgentResponse, SourceType
 from aioc.coordinator.confidence import BANDS, Band, band
-from aioc.llm import Usage
+from aioc.llm import BatchError, Usage
 
 from .cases import EvalItem, Task
 from .seed import IMPACT_COLUMNS, SeedIncident
@@ -72,13 +83,20 @@ class Judgement:
 
 @dataclass(frozen=True, slots=True)
 class Grounding:
-    """What was looked for in the agent's context, and what was not there."""
+    """What was looked for in the agent's context, and what was not there. ``stitched``
+    is the evidence whose parts are all in the context but not as one run of text; it is
+    among the ``checked`` and is not among the ``ungrounded``."""
 
     checked: int = 0
     ungrounded: tuple[str, ...] = ()
+    stitched: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {"checked": self.checked, "ungrounded": list(self.ungrounded)}
+        return {
+            "checked": self.checked,
+            "ungrounded": list(self.ungrounded),
+            "stitched": list(self.stitched),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +127,10 @@ class ItemScore:
     answered: bool
     error: str | None
     correct: bool | None
+    # Whose failure it was, for an item with no response: the `agent` gave up on its
+    # report (a result of the thing under test), or the `environment` refused the call
+    # (the API, the network, the account - a result of nothing, and worth running again).
+    error_kind: str | None = None
     judgements: tuple[Judgement, ...] = ()
     services_precision: float | None = None
     services_recall: float | None = None
@@ -135,6 +157,7 @@ class ItemScore:
             "incident_id": self.incident_id,
             "answered": self.answered,
             "error": self.error,
+            "error_kind": self.error_kind,
             "correct": self.correct,
             "judgements": [j.to_dict() for j in self.judgements],
             "services_precision": self.services_precision,
@@ -160,6 +183,30 @@ class ItemScore:
 
 def _flat(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+_BULLET = re.compile(r"^\s*[-*]\s+", re.M)
+# Where a model joins two quoted lines: a line break, or a semicolon or a bar between them.
+_JOIN = re.compile(r"\n|;\s+|\s\|\s")
+
+
+def _unlisted(text: str) -> str:
+    """Flattened, with list markers removed - the context is rendered as a list, and a
+    quote that spans two items should not have to reproduce the marker between them."""
+    return _flat(_BULLET.sub("", text))
+
+
+def quoted(excerpt: str, context: str) -> str | None:
+    """How an excerpt stands in the context: ``verbatim``, ``stitched``, or ``None`` when
+    some part of it is not there at all."""
+    shown = _unlisted(context)
+    if _unlisted(excerpt) in shown:
+        return "verbatim"
+    parts = [_unlisted(part).strip(" .;,") for part in _JOIN.split(excerpt)]
+    parts = [part for part in parts if part]
+    if len(parts) > 1 and all(part in shown for part in parts):
+        return "stitched"
+    return None
 
 
 def _judge(name: str, expected: str, actual: Any, confidence: float) -> Judgement:
@@ -188,11 +235,15 @@ def ground_diagnosis(
     flat = _flat(context)
     checked = 0
     missing: list[str] = []
+    stitched: list[str] = []
 
     for entry in response.evidence:
         checked += 1
-        if _flat(entry.excerpt) not in flat:
+        standing = quoted(entry.excerpt, context)
+        if standing is None:
             missing.append(f"evidence {entry.id}: excerpt is not in the context")
+        elif standing == "stitched":
+            stitched.append(f"evidence {entry.id}: joined from lines that are each verbatim")
     for service in response.findings.affected_services:
         checked += 1
         if _flat(service) not in flat:
@@ -216,7 +267,7 @@ def ground_diagnosis(
         if shown is None or float(stated) != float(shown):
             was = "not measured" if shown is None else shown
             missing.append(f"impact.{name}: stated {stated}, the context shows {was}")
-    return Grounding(checked=checked, ungrounded=tuple(missing))
+    return Grounding(checked=checked, ungrounded=tuple(missing), stitched=tuple(stitched))
 
 
 def score_diagnosis(item: EvalItem, response: IncidentAgentResponse) -> ItemScore:
@@ -341,8 +392,14 @@ def score_item(
     return score_recall(item, response, retrieved=retrieved)
 
 
+def is_environment_error(error: BaseException) -> bool:
+    """The call itself failed: the API refused it, the network dropped it, or the batch
+    lost it. Not the agent's doing, and not evidence about the agent."""
+    return isinstance(error, (anthropic.APIError, BatchError))
+
+
 def score_failure(item: EvalItem, error: BaseException) -> ItemScore:
-    """An item whose agent raised. It produced nothing to score, which is a result."""
+    """An item that produced no response, and whose failure it was."""
     notes = getattr(error, "__notes__", [])
     text = f"{type(error).__name__}: {error}"
     if notes:
@@ -355,6 +412,7 @@ def score_failure(item: EvalItem, error: BaseException) -> ItemScore:
         incident_id=None if item.incident is None else item.incident.id,
         answered=False,
         error=" ".join(text.split()),
+        error_kind="environment" if is_environment_error(error) else "agent",
         correct=None,
     )
 
@@ -424,6 +482,7 @@ class Summary:
     # hallucination
     ungrounded: Rate
     items_with_ungrounded: Rate
+    stitched: Rate
     invented_precedents: Rate
     grounding_refusals: Rate
     # tools
@@ -454,6 +513,7 @@ class Summary:
             "hallucination": {
                 "ungrounded": self.ungrounded.to_dict(),
                 "items_with_ungrounded": self.items_with_ungrounded.to_dict(),
+                "stitched": self.stitched.to_dict(),
                 "invented_precedents": self.invented_precedents.to_dict(),
                 "grounding_refusals": self.grounding_refusals.to_dict(),
             },
@@ -539,6 +599,10 @@ def summarise(scores: Sequence[ItemScore]) -> Summary:
         ),
         items_with_ungrounded=Rate(
             sum(1 for s in diagnoses if s.grounding.ungrounded), len(diagnoses)
+        ),
+        stitched=Rate(
+            sum(len(s.grounding.stitched) for s in diagnoses),
+            sum(s.grounding.checked for s in diagnoses),
         ),
         invented_precedents=Rate(sum(1 for s in probes if s.invented_precedent), len(probes)),
         grounding_refusals=Rate(refused, emits),
