@@ -27,11 +27,28 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      # A job-level `if` cannot read secrets, so the check is a step. Without the key the
+      # review is skipped with a warning rather than failed: a red check on every PR until
+      # the secret exists, or on a fork PR that never gets it, trains people to ignore it.
+      - name: Check for the API key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANTHROPIC_API_KEY is not set for this run; the Claude review was skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.key.outputs.present == 'true'
         with:
           fetch-depth: 1
 
       - uses: anthropics/claude-code-action@v1
+        if: steps.key.outputs.present == 'true'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           use_sticky_comment: true
