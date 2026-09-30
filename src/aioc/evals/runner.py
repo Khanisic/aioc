@@ -345,7 +345,10 @@ def run_realtime(
             tally.failed(failure, at=item.key)
     tally.finish()
     run.results = tally.ordered(items)
-    run.seconds = time.monotonic() - started
+    # A realtime run is one item after another, so the items kept from an earlier run
+    # took their own recorded time; a continued run's clock is the whole of it.
+    kept = sum(result.score.seconds or 0.0 for result in (done or {}).values())
+    run.seconds = time.monotonic() - started + kept
     if recording is not None:
         run.retrieval_degraded = recording.degraded()
     return run
@@ -360,12 +363,29 @@ def run_batch(
     progress: Progress | None = None,
     done: Mapping[str, ItemResult] | None = None,
     on_result: Callable[[ItemResult], None] | None = None,
+    submitted: Sequence[str] = (),
+    on_submit: Callable[[str, int], None] | None = None,
 ) -> EvalRun:
+    """``submitted`` names batches an earlier run of these items sent and never read
+    back; their answers are fetched before anything is submitted, so a run that died
+    waiting on a batch pays for it once. ``on_submit`` is told each new batch's id."""
     run = _new_run("batch", client.settings)
     recording = None if retriever is None else RecordingRetriever(retriever)
     tally = _Tally(done, progress, on_result)
     started = time.monotonic()
     waiting = [item for item in items if not tally.has(item)]
+    for batch_id in submitted:
+        if progress is not None:
+            progress(f"  reading batch {batch_id}, submitted by an earlier run")
+        try:
+            earlier = client.attach(batcher, batch_id)
+        except (anthropic.APIError, BatchError) as exc:
+            why = stops_the_run(exc) or "an earlier batch could not be read back"
+            raise _aborted(exc, why, at=f"batch {batch_id}", results=tally.ordered()) from exc
+        if progress is not None:
+            progress(
+                f"  batch {batch_id}: {earlier.succeeded} answer(s) kept, {earlier.failed} failed"
+            )
     # One pass per model call an item can make: the first attempt, then each retry.
     passes = client.settings.max_validation_retries + 1
     for number in range(1, passes + 2):
@@ -390,7 +410,7 @@ def run_batch(
         if progress is not None:
             progress(f"  pass {number}: {len(client.pending)} request(s) submitted as one batch")
         try:
-            batch = client.flush(batcher)
+            batch = client.flush(batcher, on_submit=on_submit)
         except (anthropic.APIError, BatchError) as exc:
             # The batch is how every waiting item is asked: if it cannot be sent or
             # never ends, none of them can be answered.

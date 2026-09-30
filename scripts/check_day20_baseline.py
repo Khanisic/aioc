@@ -108,7 +108,8 @@ def find_resumable(
     results: Path, cases: EvalSet, config: RunConfig, items: list[EvalItem]
 ) -> tuple[Path, int] | None:
     """The run under ``results`` that this configuration can continue from, and how many
-    of ``items`` it has already finished: the one that got furthest, the newest of those."""
+    of ``items`` it has already paid for - finished, or waiting in a batch it submitted:
+    the one that got furthest, the newest of those."""
     wanted = {item.key for item in items}
     best: tuple[int, str, Path] | None = None
     for run_dir in results.glob(f"runs/*/*__llm__evals-{config.mode}*"):
@@ -119,8 +120,12 @@ def find_resumable(
         if config.differs_from(stored.config):
             continue
         kept = len(wanted & set(stored.reusable()))
-        if kept and (best is None or (kept, _started(run_dir)) > (best[0], best[1])):
-            best = (kept, _started(run_dir), run_dir)
+        # A batch submitted and never read back is paid for and waiting: worth as much
+        # as the items it will answer, which is all of the ones not yet done.
+        waiting = 0 if stored.complete or not stored.batches else len(wanted) - kept
+        worth = kept + waiting
+        if worth and (best is None or (worth, _started(run_dir)) > (best[0], best[1])):
+            best = (worth, _started(run_dir), run_dir)
     return None if best is None else (best[2], best[0])
 
 
@@ -273,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 resumable[config.label] = found[0]
                 print(
-                    f"    {config.label:<19} {found[1]} kept from {found[0].name}; "
+                    f"    {config.label:<19} {found[1]} paid for in {found[0].name}; "
                     f"{len(items) - found[1]} to run"
                 )
     if not whole_set:

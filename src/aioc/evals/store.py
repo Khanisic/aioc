@@ -41,6 +41,9 @@ from .runner import ItemResult
 from .scoring import RetryStats, score_failure, score_item
 
 PROGRESS = "progress.jsonl"
+# The batches a run submitted, one line each, written the moment the API returns the
+# id: a batch is paid for at submission and answers for a day, whatever happens here.
+BATCHES = "batches.jsonl"
 
 # Error classes that mean the call failed, not the agent. Used only for records that
 # predate `error_kind`; a new record says which it was.
@@ -107,6 +110,7 @@ class StoredRun:
     config: RunConfig
     results: dict[str, ItemResult]  # every item the run recorded, by key
     complete: bool  # the run ended and wrote its record
+    batches: tuple[str, ...] = ()  # batch ids the run submitted, oldest first
 
     def reusable(self) -> dict[str, ItemResult]:
         """The items a continued run need not ask again."""
@@ -188,6 +192,25 @@ class ProgressFile:
             handle.write(json.dumps(entry(result)) + "\n")
             handle.flush()
 
+    def batch(self, batch_id: str, requests: int) -> None:
+        """A batch was submitted: written before the wait, in `batches.jsonl` beside."""
+        with (self.path.parent / BATCHES).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"batch_id": batch_id, "requests": requests}) + "\n")
+            handle.flush()
+
+
+def submitted_batches(run_dir: Path) -> tuple[str, ...]:
+    path = run_dir / BATCHES
+    if not path.is_file():
+        return ()
+    ids: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            ids.append(str(json.loads(line)["batch_id"]))
+        except (ValueError, KeyError):
+            continue
+    return tuple(ids)
+
 
 def _from_progress(path: Path, items: Mapping[str, EvalItem]) -> tuple[RunConfig, dict[str, Any]]:
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -256,4 +279,5 @@ def read_run(run_dir: Path, cases: EvalSet) -> StoredRun:
         config=config,
         results=results,
         complete=(run_dir / "eval.json").is_file(),
+        batches=submitted_batches(run_dir),
     )

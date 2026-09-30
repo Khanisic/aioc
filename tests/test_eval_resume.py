@@ -34,6 +34,7 @@ from cost_review import review
 
 from aioc.agents import EMIT_TOOL_NAME
 from aioc.evals import (
+    BATCHES,
     MAX_ENVIRONMENT_FAILURES,
     PROGRESS,
     EvalAborted,
@@ -49,13 +50,14 @@ from aioc.evals import (
     score_failure,
     score_item,
     stops_the_run,
+    submitted_batches,
     summarise,
     to_record,
 )
-from aioc.llm import BatchError, DeferredClient, LLMClient
+from aioc.llm import BatchError, DeferredClient, LLMClient, MessageBatcher
 from tests.test_baseline import _BASE, _Billing, _settings, _Wire
 from tests.test_baseline import wired as wired  # noqa: F401 - the fixture, used by name
-from tests.test_batch import _batcher, _FakeBatches, _succeeded
+from tests.test_batch import _batcher, _Clock, _FakeAnthropic, _FakeBatches, _succeeded
 from tests.test_evals import (
     CASES,
     ITEMS,
@@ -259,6 +261,8 @@ def test_a_continued_run_asks_only_for_what_was_not_done():
     assert all(score.answered for score in run.scores)
     # What was kept is what was measured then: the same object, tokens and all.
     assert run.results[0] is done["case_01:diagnose"]
+    # And its time: a continued realtime run's clock is the whole run's, not the rest's.
+    assert run.seconds >= sum(result.score.seconds or 0.0 for result in done.values())
 
 
 def test_a_batch_is_continued_the_same_way():
@@ -277,6 +281,169 @@ def test_a_run_with_nothing_left_makes_no_call():
     wire = _Wire(_Billing())
     run = run_realtime(_SUBSET, _client(wire), _Corpus(), done=done)
     assert wire.calls == [] and len(run.scores) == 7
+
+
+# ================================================== a batch outlives its process
+
+
+class _Weather(_FakeBatches):
+    """A batch endpoint whose polls fail on the calls it is told to."""
+
+    def __init__(self, failing: set[int], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._failing = failing
+        self.polls = 0
+
+    def retrieve(self, batch_id: str) -> SimpleNamespace:
+        self.polls += 1
+        if self.polls in self._failing:
+            raise anthropic.APIConnectionError(request=_request())
+        return super().retrieve(batch_id)
+
+
+def test_one_failed_poll_does_not_end_the_wait():
+    # The first live batch: seventeen minutes of polling, one connection error, and the
+    # process gave up on a batch that finished two hours later with every answer in it.
+    batches = _Weather({2}, statuses=("in_progress", "in_progress", "in_progress", "ended"))
+    seen: list[str] = []
+    batcher, clock = _batcher(batches, on_poll=lambda _id, status, _t: seen.append(status))
+    batcher.wait("msgbatch_1")
+    assert batches.polls == 5  # the failed poll consumed no status
+    assert seen == [
+        "in_progress",
+        "poll failed (APIConnectionError)",
+        "in_progress",
+        "in_progress",
+        "ended",
+    ]
+    assert clock.slept == [20.0] * 4
+
+
+def test_polls_that_keep_failing_end_the_wait_and_name_the_batch():
+    batches = _Weather(set(range(1, 100)), statuses=("in_progress",))
+    batcher, _ = _batcher(batches, max_poll_failures=3)
+    with pytest.raises(BatchError, match="msgbatch_9: 3 polls in a row failed") as caught:
+        batcher.wait("msgbatch_9")
+    assert "results can be read later by that id" in str(caught.value)
+    assert batches.polls == 3
+
+
+def test_a_successful_poll_resets_the_count():
+    batches = _Weather({1, 2, 4, 5}, statuses=("in_progress", "in_progress", "ended"))
+    batcher, _ = _batcher(batches, max_poll_failures=3)
+    batcher.wait("msgbatch_1")  # never three in a row
+    assert batches.polls == 7
+
+
+def test_the_default_patience_is_the_apis_own_day():
+    batcher = MessageBatcher(_FakeAnthropic(_FakeBatches()))  # type: ignore[arg-type]
+    assert batcher._timeout_seconds == 24 * 60 * 60  # noqa: SLF001 - the one thing to pin
+
+
+def test_the_submitter_is_told_the_batch_id_before_the_wait():
+    order: list[str] = []
+    batches = _FakeBatches(statuses=("in_progress", "ended"))
+    clock = _Clock()
+
+    def sleep(seconds: float) -> None:
+        order.append("waited")
+        clock.sleep(seconds)
+
+    batcher = MessageBatcher(_FakeAnthropic(batches), sleep=sleep, clock=clock)  # type: ignore[arg-type]
+    client = DeferredClient(_settings(caching=True))
+    with pytest.raises(Exception):  # noqa: B017, PT011 - queued, whatever it raises
+        client.complete(messages=[{"role": "user", "content": "hello"}])
+    client.flush(batcher, on_submit=lambda batch_id, n: order.append(f"{batch_id}:{n}"))
+    assert order == ["msgbatch_1:1", "waited"]
+
+
+def test_a_client_attaches_to_a_batch_another_process_submitted():
+    # The answers land where a fresh submission's would: the custom_id is the request key.
+    first = DeferredClient(_settings(caching=True))
+    for item in _SUBSET[:3]:
+        from aioc.agents import RetryLog
+        from aioc.evals import run_item
+        from aioc.llm import PendingRequest, Usage
+
+        with pytest.raises(PendingRequest):
+            run_item(item, first, _Corpus(), usage=Usage(), retry_log=RetryLog())
+    batches = _FakeBatches(lambda cid, params: _succeeded(cid, _Billing().answer(params)))
+    batcher, _ = _batcher(batches)
+    batch_id = batcher.submit(first.pending)  # and then the process dies
+
+    second = DeferredClient(_settings(caching=True))
+    kept = second.attach(batcher, batch_id)
+    assert (kept.batch_id, kept.succeeded, kept.failed) == (batch_id, 3, 0)
+    assert set(second.results) == set(first.pending)
+    assert second.runs == [kept]
+    assert len(batches.created) == 1  # nothing was submitted again
+
+
+def test_a_run_reads_back_the_batches_it_was_told_of_before_submitting_anything():
+    first = DeferredClient(_settings(caching=True))
+    for item in _SUBSET:
+        from aioc.agents import RetryLog
+        from aioc.evals import run_item
+        from aioc.llm import PendingRequest, Usage
+
+        with pytest.raises(PendingRequest):
+            run_item(item, first, _Corpus(), usage=Usage(), retry_log=RetryLog())
+    batches = _FakeBatches(lambda cid, params: _succeeded(cid, _Billing().answer(params)))
+    batcher, _ = _batcher(batches)
+    orphan = batcher.submit(first.pending)
+
+    told: list[tuple[str, int]] = []
+    said: list[str] = []
+    run = run_batch(
+        _SUBSET,
+        DeferredClient(_settings(caching=True)),
+        batcher,
+        _Corpus(),
+        submitted=[orphan],
+        on_submit=lambda batch_id, n: told.append((batch_id, n)),
+        progress=said.append,
+    )
+    assert all(score.answered for score in run.scores) and len(run.scores) == 7
+    assert len(batches.created) == 1  # the orphan; nothing new was needed
+    assert told == []
+    assert f"  reading batch {orphan}, submitted by an earlier run" in said
+    assert f"  batch {orphan}: 7 answer(s) kept, 0 failed" in said
+    assert [b.batch_id for b in run.batches] == [orphan]
+
+
+def test_a_batch_that_cannot_be_read_back_stops_the_run():
+    class _Gone(_FakeBatches):
+        def retrieve(self, batch_id: str) -> SimpleNamespace:
+            raise anthropic.NotFoundError(
+                "Error code: 404 - not found",
+                response=httpx.Response(404, request=_request()),
+                body=None,
+            )
+
+    batcher, _ = _batcher(_Gone())
+    with pytest.raises(EvalAborted, match="batch msgbatch_lost: an earlier batch could not"):
+        run_batch(
+            _SUBSET,
+            DeferredClient(_settings(caching=True)),
+            batcher,
+            _Corpus(),
+            submitted=["msgbatch_lost"],
+        )
+
+
+def test_a_submitted_batch_is_written_down_before_the_wait(tmp_path: Path):
+    directory = tmp_path / "a-run"
+    directory.mkdir()
+    progress = ProgressFile(directory, _CONFIG)
+    assert submitted_batches(directory) == ()
+    progress.batch("msgbatch_a", 38)
+    progress.batch("msgbatch_b", 9)
+    assert submitted_batches(directory) == ("msgbatch_a", "msgbatch_b")
+    assert (directory / BATCHES).read_text(encoding="utf-8").splitlines()[0] == (
+        '{"batch_id": "msgbatch_a", "requests": 38}'
+    )
+    stored = read_run(directory, CASES)
+    assert stored.batches == ("msgbatch_a", "msgbatch_b") and stored.results == {}
 
 
 # ======================================================================== the store
@@ -664,6 +831,116 @@ def test_a_rescore_can_be_kept_beside_the_run_it_rescored(
     )
 
 
+def _orphan_batch(state: dict[str, Any]) -> tuple[Path, str]:
+    """A batch run that submitted its batch and died before it ended: the run directory
+    and the batch id, as a crash leaves them."""
+    state["batch_statuses"] = ("in_progress",)
+    state["max_poll_failures"] = 1
+    state["poll_fails"] = True
+    assert run_evals.main([*_FOUR, "--mode", "batch"]) == 2
+    (run,) = [path for path in _runs(state["results"]) if path.name.endswith("evals-batch")]
+    (batch_id,) = submitted_batches(run)
+    state["batch_statuses"] = ("ended",)
+    state["poll_fails"] = False
+    return run, batch_id
+
+
+@pytest.fixture
+def queued(account: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """`account`, with a batch endpoint that remembers its batches across clients and can
+    be made to stall or to refuse polls."""
+    state = account
+    state.update(batch_statuses=("ended",), poll_fails=False, max_poll_failures=5)
+    bill = _Billing()
+    shared = _FakeBatches(lambda cid, params: _succeeded(cid, bill.answer(params)))
+    state["batches"] = shared
+
+    class _Endpoint:
+        def create(self, **kwargs: Any) -> Any:
+            return shared.create(**kwargs)
+
+        def retrieve(self, batch_id: str) -> Any:
+            if state["poll_fails"]:
+                raise anthropic.APIConnectionError(request=_request())
+            shared._statuses = list(state["batch_statuses"])  # noqa: SLF001
+            return shared.retrieve(batch_id)
+
+        def results(self, batch_id: str) -> Any:
+            return shared.results(batch_id)
+
+    def batcher(_cls: Any, *_args: Any, **_kwargs: Any) -> Any:
+        clock = _Clock()
+        return MessageBatcher(
+            SimpleNamespace(messages=SimpleNamespace(batches=_Endpoint())),  # type: ignore[arg-type]
+            sleep=clock.sleep,
+            clock=clock,
+            max_poll_failures=state["max_poll_failures"],
+        )
+
+    monkeypatch.setattr(run_evals.MessageBatcher, "from_settings", classmethod(batcher))
+    return state
+
+
+def test_a_run_that_died_waiting_on_a_batch_records_the_batch_and_says_so(
+    queued: dict[str, Any], capsys: pytest.CaptureFixture[str]
+):
+    run, batch_id = _orphan_batch(queued)
+    err = capsys.readouterr().err
+    assert "ABORTED: stopped at batch submission 1: the batch could not be run" in err
+    assert "polls in a row failed" in err
+    assert f"--resume {run}" in err
+    assert batch_id == "msgbatch_1"
+    assert (run / BATCHES).is_file() and not (run / "eval.json").exists()
+
+
+def test_resuming_reads_the_batch_back_instead_of_paying_for_it_again(
+    queued: dict[str, Any], capsys: pytest.CaptureFixture[str]
+):
+    run, batch_id = _orphan_batch(queued)
+    capsys.readouterr()
+    assert run_evals.main([*_FOUR, "--mode", "batch", "--resume", str(run)]) == 0
+    out = capsys.readouterr().out
+    assert (
+        f"continuing {run.name}: 0 item(s) kept, 7 to run, 1 submitted batch(es) to read back"
+        in out
+    )
+    assert f"reading batch {batch_id}, submitted by an earlier run" in out
+    assert "- Answered: 7/7 = 100%." in out
+    assert len(queued["batches"].created) == 1  # the orphan, and nothing after it
+    finished = next(p for p in _runs(queued["results"]) if p != run and "batch" in p.name)
+    record = json.loads((finished / "eval.json").read_text(encoding="utf-8"))
+    assert [b["batch_id"] for b in record["run"]["batches"]] == [batch_id]
+
+
+def test_a_finished_run_is_not_read_back_again(queued: dict[str, Any]):
+    assert run_evals.main([*_FOUR, "--mode", "batch"]) == 0
+    (finished,) = [p for p in _runs(queued["results"]) if p.name.endswith("evals-batch")]
+    assert submitted_batches(finished) == ("msgbatch_1",)
+    assert run_evals.main([*_FOUR, "--mode", "batch", "--resume", str(finished)]) == 0
+    assert len(queued["batches"].created) == 1  # all seven were kept; no batch was read or sent
+
+
+def test_the_checkpoint_resumes_from_a_batch_it_submitted_and_never_read(
+    queued: dict[str, Any], capsys: pytest.CaptureFixture[str]
+):
+    flags = ("--limit", "6", "--skip-smoke", "--configs", "batch-cached")
+    queued["batch_statuses"], queued["poll_fails"], queued["max_poll_failures"] = (
+        ("in_progress",),
+        True,
+        1,
+    )
+    assert _checkpoint(queued, *flags) == 2
+    queued["batch_statuses"], queued["poll_fails"] = ("ended",), False
+    capsys.readouterr()
+
+    assert _checkpoint(queued, *flags, "--plan", "--resume") == 0
+    assert "batch, cached       6 paid for in" in capsys.readouterr().out
+    assert _checkpoint(queued, *flags, "--resume") == 0
+    out = capsys.readouterr().out
+    assert "1 submitted batch(es) to read back" in out and "--- PASS" in out
+    assert len(queued["batches"].created) == 1
+
+
 # ---------------------------------------------------------------- the checkpoint, resumed
 
 
@@ -697,9 +974,9 @@ def test_the_checkpoint_resumed_pays_for_what_was_left_and_nothing_else(
     assert _checkpoint(account, "--limit", "6", "--resume", "--skip-smoke") == 0
     out = capsys.readouterr().out
     assert "continuing from what is recorded" in out
-    assert "realtime, uncached  5 kept from" in out and "; 1 to run" in out
+    assert "realtime, uncached  5 paid for in" in out and "; 1 to run" in out
     # The smoke test's diagnoses are the cached run's first items: three of its six.
-    assert "realtime, cached    3 kept from" in out and "; 3 to run" in out
+    assert "realtime, cached    3 paid for in" in out and "; 3 to run" in out
     assert "batch, cached       nothing recorded; 6 to run" in out
     assert "--- PASS" in out
     assert _calls(account) - before == 1 + 3  # and the batch, which went to the batcher
@@ -714,7 +991,7 @@ def test_a_configuration_already_run_to_the_end_costs_nothing_the_second_time(
     capsys.readouterr()
     assert _checkpoint(account, *flags, "--resume") == 0
     out = capsys.readouterr().out
-    assert out.count("6 kept from") == 2 and out.count("; 0 to run") == 2
+    assert out.count("6 paid for in") == 2 and out.count("; 0 to run") == 2
     assert _calls(account) == before
 
 
@@ -726,7 +1003,7 @@ def test_the_plan_shows_what_a_resume_would_keep_and_is_still_free(
     capsys.readouterr()
     assert _checkpoint(account, "--plan", "--resume", "--limit", "6") == 0
     out = capsys.readouterr().out
-    assert "realtime, uncached  6 kept from" in out
+    assert "realtime, uncached  6 paid for in" in out
     assert "realtime, cached    nothing recorded; 6 to run" in out
     assert _calls(account) == before
 
@@ -738,3 +1015,37 @@ def test_the_plan_prices_a_diagnosis_and_a_recall_differently():
     assert (key, output) == ("case_01:diagnose", 3_000)
     # Measured: 7,914 input tokens for this request. The estimate has to be in reach.
     assert 7_000 < tokens < 9_000
+
+
+def test_an_item_the_earlier_run_failed_and_this_run_paid_for_is_counted_here(
+    account: dict[str, Any],
+):
+    # Found by the cost review after the first baseline: the run it continued from had
+    # recorded an event for every item, the failed ones with zero usage, so every item
+    # this run paid for was marked as reused and priced nowhere. $1.29 went missing.
+    _budget(account, 3)
+    assert run_evals.main(_FOUR) == 2
+    (stopped,) = _runs(account["results"])
+    # As the old record shape had it: an event with zero usage for each item not answered.
+    with (stopped / "events.jsonl").open("a", encoding="utf-8") as handle:
+        for item in _SUBSET[3:]:
+            handle.write(
+                json.dumps(
+                    {
+                        "name": item.key,
+                        "outcome": "error",
+                        "data": {"usage": {"in": 0, "out": 0}, "error": "BadRequestError"},
+                    }
+                )
+                + "\n"
+            )
+    account["answer"] = None
+    assert run_evals.main([*_FOUR, "--resume", str(stopped)]) == 0
+    finished = next(run for run in _runs(account["results"]) if run != stopped)
+    events = [
+        json.loads(line)
+        for line in (finished / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    reused = sorted(event["name"] for event in events if event["data"].get("reused_from"))
+    assert reused == ["case_01:diagnose", "case_01:recall", "case_02:diagnose"]
+    assert review(account["results"], since=None)["total"].output_tokens == 7 * 900

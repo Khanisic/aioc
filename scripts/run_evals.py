@@ -368,9 +368,10 @@ class Executed:
 
 def _resumed(
     resume_from: Path, cases: EvalSet, config: RunConfig, items: list[EvalItem]
-) -> tuple[dict[str, ItemResult], set[str]]:
-    """The items of ``resume_from`` a run with this configuration need not ask again, and
-    which of them that run already recorded the cost of."""
+) -> tuple[dict[str, ItemResult], set[str], list[str]]:
+    """The items of ``resume_from`` a run with this configuration need not ask again, which
+    of them that run already recorded the cost of, and the batches it submitted and never
+    read back - whose answers were paid for and are waiting."""
     stored = read_run(resume_from, cases)
     differences = config.differs_from(stored.config)
     if differences:
@@ -388,9 +389,11 @@ def _resumed(
                 event = json.loads(line)
             except ValueError:
                 continue
-            if (event.get("data") or {}).get("usage"):
+            # Only an item this run keeps, and only one whose tokens were recorded there:
+            # the earlier run wrote an event for every item it scored, failures included.
+            if str(event.get("name")) in done and (event.get("data") or {}).get("usage"):
                 counted.add(str(event.get("name")))
-    return done, counted
+    return done, counted, list(stored.batches) if not stored.complete else []
 
 
 def _record_items(
@@ -411,8 +414,10 @@ def _record_items(
             "cache_ttl": settings.prompt_cache_ttl,
         }
         if reused_from is not None and score.key in (counted or set()):
-            # The run it was taken from already recorded these tokens. Said here so the
-            # cost review counts them once.
+            # Taken from an earlier run that already recorded these tokens. Said here so
+            # the cost review counts them once. ``counted`` is the kept items only: the
+            # earlier run may have recorded the items it failed too, and those were run
+            # here and paid for here.
             data["reused_from"] = reused_from
         recorder.event(
             score.key,
@@ -453,8 +458,9 @@ def execute(
     )
     done: dict[str, ItemResult] = {}
     counted: set[str] = set()
+    submitted: list[str] = []
     if resume_from is not None:
-        done, counted = _resumed(resume_from, cases, config, items)
+        done, counted, submitted = _resumed(resume_from, cases, config, items)
 
     needs_corpus = any(item.task is Task.RECALL for item in items if item.key not in done)
     retriever = CorpusSearcher(default_embedder()) if needs_corpus else None
@@ -467,6 +473,7 @@ def execute(
         say(
             f"  continuing {resume_from.name}: {len(done)} item(s) kept, "
             f"{len(items) - len(done)} to run"
+            + (f", {len(submitted)} submitted batch(es) to read back" if submitted else "")
         )
     reused_from = None if resume_from is None else resume_from.name
     with RunRecorder(
@@ -506,6 +513,8 @@ def execute(
                     progress=say,
                     done=done,
                     on_result=progress.write,
+                    submitted=submitted,
+                    on_submit=progress.batch,
                 )
             else:
                 run = run_realtime(

@@ -1,0 +1,1223 @@
+{
+  "set": {
+    "name": "seeded-incidents",
+    "version": 1,
+    "sha256": "1dafa5a554b7465e55e368035aeb087b92b1bd1d83edc02f4a511d312a5ff470"
+  },
+  "model": "claude-sonnet-5",
+  "reference": "realtime, uncached",
+  "runs": [
+    {
+      "label": "realtime, uncached",
+      "run_id": "20260930T173417Z__llm__evals-realtime",
+      "mode": "realtime",
+      "prompt_caching": false,
+      "cache_ttl": "5m",
+      "seconds": 800.8,
+      "batches": 0,
+      "items": 38,
+      "rates": {
+        "answered": {
+          "hits": 37,
+          "total": 38,
+          "rate": 0.9736842105263158
+        },
+        "failure_mode": {
+          "hits": 15,
+          "total": 18,
+          "rate": 0.8333333333333334
+        },
+        "severity": {
+          "hits": 10,
+          "total": 18,
+          "rate": 0.5555555555555556
+        },
+        "severity_within_one": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "recall_cited": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "recall_retrieved": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "probes_abstained": {
+          "hits": 1,
+          "total": 1,
+          "rate": 1.0
+        },
+        "ungrounded": {
+          "hits": 2,
+          "total": 270,
+          "rate": 0.007407407407407408
+        },
+        "stitched": {
+          "hits": 5,
+          "total": 270,
+          "rate": 0.018518518518518517
+        },
+        "invented_precedents": {
+          "hits": 0,
+          "total": 1,
+          "rate": 0.0
+        },
+        "grounding_refusals": {
+          "hits": 0,
+          "total": 38,
+          "rate": 0.0
+        },
+        "tool_success": {
+          "hits": 19,
+          "total": 19,
+          "rate": 1.0
+        }
+      },
+      "failure_mode_abstained": 0,
+      "retries": {
+        "accepted_first_try": 30,
+        "recovered": 7,
+        "exhausted": 1,
+        "retry_calls": 9
+      },
+      "calibration": [
+        {
+          "band": "two_sources",
+          "lower": 0.9,
+          "judgements": 3,
+          "correct": 3,
+          "accuracy": 1.0,
+          "mean_confidence": 0.9066666666666667
+        },
+        {
+          "band": "single_source",
+          "lower": 0.7,
+          "judgements": 14,
+          "correct": 12,
+          "accuracy": 0.8571428571428571,
+          "mean_confidence": 0.7778571428571429
+        },
+        {
+          "band": "inferred",
+          "lower": 0.5,
+          "judgements": 16,
+          "correct": 8,
+          "accuracy": 0.5,
+          "mean_confidence": 0.58125
+        },
+        {
+          "band": "hypothesis",
+          "lower": 0.25,
+          "judgements": 3,
+          "correct": 2,
+          "accuracy": 0.6666666666666666,
+          "mean_confidence": 0.4000000000000001
+        },
+        {
+          "band": "speculation",
+          "lower": 0.0,
+          "judgements": 0,
+          "correct": 0,
+          "accuracy": null,
+          "mean_confidence": null
+        }
+      ],
+      "tokens": {
+        "in": 389666,
+        "out": 99020,
+        "cache_read": 0,
+        "cache_write": 0
+      },
+      "cache": {
+        "healthy": null,
+        "reads": 0,
+        "writes": 0,
+        "note": "prompt caching was off for this run"
+      },
+      "usd": 1.7695,
+      "same_tokens": {
+        "realtime_uncached_usd": 1.7695,
+        "change": 0.0
+      },
+      "measured": {
+        "against": "realtime, uncached",
+        "reference_usd": 1.7695,
+        "change": 0.0
+      }
+    },
+    {
+      "label": "realtime, cached",
+      "run_id": "20260930T173419Z__llm__evals-realtime",
+      "mode": "realtime",
+      "prompt_caching": true,
+      "cache_ttl": "5m",
+      "seconds": 773.0,
+      "batches": 0,
+      "items": 38,
+      "rates": {
+        "answered": {
+          "hits": 38,
+          "total": 38,
+          "rate": 1.0
+        },
+        "failure_mode": {
+          "hits": 16,
+          "total": 18,
+          "rate": 0.8888888888888888
+        },
+        "severity": {
+          "hits": 10,
+          "total": 18,
+          "rate": 0.5555555555555556
+        },
+        "severity_within_one": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "recall_cited": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "recall_retrieved": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "probes_abstained": {
+          "hits": 2,
+          "total": 2,
+          "rate": 1.0
+        },
+        "ungrounded": {
+          "hits": 1,
+          "total": 271,
+          "rate": 0.0036900369003690036
+        },
+        "stitched": {
+          "hits": 6,
+          "total": 271,
+          "rate": 0.02214022140221402
+        },
+        "invented_precedents": {
+          "hits": 0,
+          "total": 2,
+          "rate": 0.0
+        },
+        "grounding_refusals": {
+          "hits": 0,
+          "total": 38,
+          "rate": 0.0
+        },
+        "tool_success": {
+          "hits": 20,
+          "total": 20,
+          "rate": 1.0
+        }
+      },
+      "failure_mode_abstained": 0,
+      "retries": {
+        "accepted_first_try": 31,
+        "recovered": 7,
+        "exhausted": 0,
+        "retry_calls": 8
+      },
+      "calibration": [
+        {
+          "band": "two_sources",
+          "lower": 0.9,
+          "judgements": 2,
+          "correct": 2,
+          "accuracy": 1.0,
+          "mean_confidence": 0.91
+        },
+        {
+          "band": "single_source",
+          "lower": 0.7,
+          "judgements": 15,
+          "correct": 13,
+          "accuracy": 0.8666666666666667,
+          "mean_confidence": 0.788
+        },
+        {
+          "band": "inferred",
+          "lower": 0.5,
+          "judgements": 17,
+          "correct": 9,
+          "accuracy": 0.5294117647058824,
+          "mean_confidence": 0.5852941176470589
+        },
+        {
+          "band": "hypothesis",
+          "lower": 0.25,
+          "judgements": 2,
+          "correct": 2,
+          "accuracy": 1.0,
+          "mean_confidence": 0.4
+        },
+        {
+          "band": "speculation",
+          "lower": 0.0,
+          "judgements": 0,
+          "correct": 0,
+          "accuracy": null,
+          "mean_confidence": null
+        }
+      ],
+      "tokens": {
+        "in": 378970,
+        "out": 97094,
+        "cache_read": 279621,
+        "cache_write": 20493
+      },
+      "cache": {
+        "healthy": true,
+        "reads": 279621,
+        "writes": 20493,
+        "note": "every agent's later requests read the prefix the first one wrote"
+      },
+      "usd": 1.2358,
+      "same_tokens": {
+        "realtime_uncached_usd": 1.7289,
+        "change": -0.28521024929145705
+      },
+      "measured": {
+        "against": "realtime, uncached",
+        "reference_usd": 1.7695,
+        "change": -0.3016106244701893
+      }
+    },
+    {
+      "label": "batch, cached",
+      "run_id": "20260930T151610Z__llm__evals-batch",
+      "mode": "batch",
+      "prompt_caching": true,
+      "cache_ttl": "1h",
+      "seconds": 8217.5,
+      "batches": 3,
+      "items": 38,
+      "rates": {
+        "answered": {
+          "hits": 38,
+          "total": 38,
+          "rate": 1.0
+        },
+        "failure_mode": {
+          "hits": 17,
+          "total": 18,
+          "rate": 0.9444444444444444
+        },
+        "severity": {
+          "hits": 12,
+          "total": 18,
+          "rate": 0.6666666666666666
+        },
+        "severity_within_one": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "recall_cited": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "recall_retrieved": {
+          "hits": 18,
+          "total": 18,
+          "rate": 1.0
+        },
+        "probes_abstained": {
+          "hits": 2,
+          "total": 2,
+          "rate": 1.0
+        },
+        "ungrounded": {
+          "hits": 1,
+          "total": 291,
+          "rate": 0.003436426116838488
+        },
+        "stitched": {
+          "hits": 5,
+          "total": 291,
+          "rate": 0.01718213058419244
+        },
+        "invented_precedents": {
+          "hits": 0,
+          "total": 2,
+          "rate": 0.0
+        },
+        "grounding_refusals": {
+          "hits": 0,
+          "total": 38,
+          "rate": 0.0
+        },
+        "tool_success": {
+          "hits": 20,
+          "total": 20,
+          "rate": 1.0
+        }
+      },
+      "failure_mode_abstained": 0,
+      "retries": {
+        "accepted_first_try": 31,
+        "recovered": 7,
+        "exhausted": 0,
+        "retry_calls": 8
+      },
+      "calibration": [
+        {
+          "band": "two_sources",
+          "lower": 0.9,
+          "judgements": 3,
+          "correct": 3,
+          "accuracy": 1.0,
+          "mean_confidence": 0.9066666666666667
+        },
+        {
+          "band": "single_source",
+          "lower": 0.7,
+          "judgements": 14,
+          "correct": 13,
+          "accuracy": 0.9285714285714286,
+          "mean_confidence": 0.7964285714285715
+        },
+        {
+          "band": "inferred",
+          "lower": 0.5,
+          "judgements": 15,
+          "correct": 10,
+          "accuracy": 0.6666666666666666,
+          "mean_confidence": 0.5866666666666667
+        },
+        {
+          "band": "hypothesis",
+          "lower": 0.25,
+          "judgements": 4,
+          "correct": 3,
+          "accuracy": 0.75,
+          "mean_confidence": 0.42500000000000004
+        },
+        {
+          "band": "speculation",
+          "lower": 0.0,
+          "judgements": 0,
+          "correct": 0,
+          "accuracy": null,
+          "mean_confidence": null
+        }
+      ],
+      "tokens": {
+        "in": 383829,
+        "out": 106482,
+        "cache_read": 269046,
+        "cache_write": 32391
+      },
+      "cache": {
+        "healthy": null,
+        "reads": 269046,
+        "writes": 32391,
+        "note": "a batch's requests run concurrently, so reads are best-effort: 269,046 tokens were read and 32,391 written"
+      },
+      "usd": 0.7065,
+      "same_tokens": {
+        "realtime_uncached_usd": 1.8325,
+        "change": -0.6144611186903137
+      },
+      "measured": {
+        "against": "realtime, uncached",
+        "reference_usd": 1.7695,
+        "change": -0.6007346708109637
+      }
+    }
+  ],
+  "agreement": {
+    "items": 38,
+    "same": 35,
+    "differing": {
+      "case_06:diagnose": {
+        "realtime, uncached": false,
+        "realtime, cached": false,
+        "batch, cached": true
+      },
+      "case_15:diagnose": {
+        "realtime, uncached": false,
+        "realtime, cached": true,
+        "batch, cached": true
+      },
+      "case_19:recall": {
+        "realtime, uncached": null,
+        "realtime, cached": true,
+        "batch, cached": true
+      }
+    }
+  },
+  "items": {
+    "case_01:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7914,
+        "output": 3549
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7914,
+        "output": 3199
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7914,
+        "output": 3361
+      }
+    },
+    "case_01:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7972,
+        "output": 959
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7972,
+        "output": 2009
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7972,
+        "output": 2316
+      }
+    },
+    "case_02:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7876,
+        "output": 3026
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 18971,
+        "output": 6120
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7876,
+        "output": 2780
+      }
+    },
+    "case_02:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7917,
+        "output": 1653
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7917,
+        "output": 2070
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7917,
+        "output": 2064
+      }
+    },
+    "case_03:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7873,
+        "output": 2731
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7873,
+        "output": 2257
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7873,
+        "output": 3152
+      }
+    },
+    "case_03:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 18137,
+        "output": 4358
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8014,
+        "output": 1127
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7871,
+        "output": 2304
+      }
+    },
+    "case_04:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7802,
+        "output": 2927
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7802,
+        "output": 2750
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7802,
+        "output": 2885
+      }
+    },
+    "case_04:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7915,
+        "output": 1725
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7993,
+        "output": 2075
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7993,
+        "output": 1336
+      }
+    },
+    "case_05:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7907,
+        "output": 2688
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7907,
+        "output": 3116
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 19090,
+        "output": 6409
+      }
+    },
+    "case_05:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7861,
+        "output": 1377
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7861,
+        "output": 2262
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8032,
+        "output": 1863
+      }
+    },
+    "case_06:diagnose": {
+      "realtime, uncached": {
+        "correct": false,
+        "answered": true,
+        "input": 18289,
+        "output": 4875
+      },
+      "realtime, cached": {
+        "correct": false,
+        "answered": true,
+        "input": 7837,
+        "output": 2776
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7837,
+        "output": 2745
+      }
+    },
+    "case_06:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 17656,
+        "output": 3557
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7844,
+        "output": 1839
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7987,
+        "output": 1743
+      }
+    },
+    "case_07:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 18937,
+        "output": 5824
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7897,
+        "output": 3132
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7897,
+        "output": 3467
+      }
+    },
+    "case_07:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7917,
+        "output": 1071
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 18092,
+        "output": 4079
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 16297,
+        "output": 2204
+      }
+    },
+    "case_08:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7760,
+        "output": 2736
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7760,
+        "output": 2158
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7760,
+        "output": 1962
+      }
+    },
+    "case_08:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7888,
+        "output": 1234
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 17232,
+        "output": 2624
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7989,
+        "output": 1642
+      }
+    },
+    "case_09:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7900,
+        "output": 2821
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7900,
+        "output": 3207
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7900,
+        "output": 2568
+      }
+    },
+    "case_09:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7954,
+        "output": 1219
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7954,
+        "output": 1428
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8063,
+        "output": 2222
+      }
+    },
+    "case_10:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7880,
+        "output": 3080
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7880,
+        "output": 3348
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7880,
+        "output": 3267
+      }
+    },
+    "case_10:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7935,
+        "output": 1020
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7935,
+        "output": 1076
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7999,
+        "output": 1662
+      }
+    },
+    "case_11:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7852,
+        "output": 2696
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7852,
+        "output": 2673
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7852,
+        "output": 2989
+      }
+    },
+    "case_11:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 17604,
+        "output": 3139
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7928,
+        "output": 1154
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8008,
+        "output": 1979
+      }
+    },
+    "case_12:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7825,
+        "output": 2913
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7825,
+        "output": 2472
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7825,
+        "output": 2765
+      }
+    },
+    "case_12:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7855,
+        "output": 1000
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7855,
+        "output": 1923
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7975,
+        "output": 1899
+      }
+    },
+    "case_13:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7860,
+        "output": 2971
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7860,
+        "output": 2696
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7860,
+        "output": 3031
+      }
+    },
+    "case_13:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7951,
+        "output": 2161
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7951,
+        "output": 2305
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8024,
+        "output": 2262
+      }
+    },
+    "case_14:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7897,
+        "output": 2286
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7897,
+        "output": 2582
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 18622,
+        "output": 5323
+      }
+    },
+    "case_14:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 17470,
+        "output": 2833
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7929,
+        "output": 1815
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 18050,
+        "output": 3593
+      }
+    },
+    "case_15:diagnose": {
+      "realtime, uncached": {
+        "correct": false,
+        "answered": true,
+        "input": 7824,
+        "output": 2392
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7824,
+        "output": 2887
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7824,
+        "output": 2935
+      }
+    },
+    "case_15:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7922,
+        "output": 2174
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7922,
+        "output": 2134
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8027,
+        "output": 2045
+      }
+    },
+    "case_16:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 18781,
+        "output": 5986
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 18866,
+        "output": 6100
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 19034,
+        "output": 6476
+      }
+    },
+    "case_16:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7889,
+        "output": 881
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7889,
+        "output": 920
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7948,
+        "output": 2079
+      }
+    },
+    "case_17:diagnose": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7774,
+        "output": 2936
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7774,
+        "output": 2277
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7774,
+        "output": 3303
+      }
+    },
+    "case_17:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7974,
+        "output": 1635
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7974,
+        "output": 1196
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 8039,
+        "output": 987
+      }
+    },
+    "case_18:diagnose": {
+      "realtime, uncached": {
+        "correct": false,
+        "answered": true,
+        "input": 7860,
+        "output": 2460
+      },
+      "realtime, cached": {
+        "correct": false,
+        "answered": true,
+        "input": 7860,
+        "output": 2620
+      },
+      "batch, cached": {
+        "correct": false,
+        "answered": true,
+        "input": 7860,
+        "output": 2444
+      }
+    },
+    "case_18:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7906,
+        "output": 1478
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 17490,
+        "output": 3015
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 7967,
+        "output": 1549
+      }
+    },
+    "case_19:recall": {
+      "realtime, uncached": {
+        "correct": null,
+        "answered": false,
+        "input": 26222,
+        "output": 5550
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 26566,
+        "output": 3323
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 28892,
+        "output": 4386
+      }
+    },
+    "case_20:recall": {
+      "realtime, uncached": {
+        "correct": true,
+        "answered": true,
+        "input": 7910,
+        "output": 1099
+      },
+      "realtime, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 17153,
+        "output": 2350
+      },
+      "batch, cached": {
+        "correct": true,
+        "answered": true,
+        "input": 18299,
+        "output": 4485
+      }
+    }
+  }
+}

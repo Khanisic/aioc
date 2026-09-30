@@ -69,6 +69,7 @@ from .scoring import (
 )
 from .seed import SEED_PATH, SeedError, SeedEvent, SeedIncident, load_seed, parse_seed, seed_by_id
 from .store import (
+    BATCHES,
     PROGRESS,
     ProgressFile,
     RunConfig,
@@ -77,10 +78,12 @@ from .store import (
     failure_kind,
     read_run,
     restore,
+    submitted_batches,
 )
 
 __all__ = [
     "DEFAULT_SET",
+    "BATCHES",
     "PROGRESS",
     "MAX_ENVIRONMENT_FAILURES",
     "REFERENCE",
@@ -141,6 +144,7 @@ __all__ = [
     "seed_by_id",
     "sentences",
     "stops_the_run",
+    "submitted_batches",
     "summarise",
     "to_record",
     "tool_success",

@@ -497,52 +497,59 @@ The live run was attempted and refused: the API key in `.env` has been revoked (
 
 ---
 
-## Day 20 - the first live eval items, and a baseline still to make
+## Day 20 - the baseline
 
-`evaluations/baseline.md` does not exist.
-The key was rotated on 2026-09-29 and the checkpoint was run; the account ran out of credit five items into the first full run.
-Nine items were scored before it did, and these are their numbers - the first the eval harness has ever measured.
+`evaluations/baseline.md`, made 2026-09-30 by `scripts/check_day20_baseline.py` over two sittings: the account ran out of credit five items into the first full run, and the run was continued the next day on an account with credit.
+Every number below is from that file, and `baseline.json` beside it is what Day 24 compares against.
+The set is `seeded-incidents` v1 (sha256 `1dafa5a554b7`), 38 items, `claude-sonnet-5`.
+
+**Scores, by configuration.**
+
+| | realtime, uncached | realtime, cached | batch, cached |
+|---|---|---|---|
+| Answered | 37/38 | 38/38 | 38/38 |
+| Failure mode correct | 15/18 = 83% | 16/18 = 89% | 17/18 = 94% |
+| Severity exact / within one level | 10/18 / 18/18 | 10/18 / 18/18 | 12/18 / 18/18 |
+| Recall cites the incident's own post-mortem | 18/18 | 18/18 | 18/18 |
+| Retrieval returned it | 18/18 | 18/18 | 18/18 |
+| No-precedent probes declined | 1/1 | 2/2 | 2/2 |
+| Ungrounded statements | 2/270 | 1/271 | 1/291 |
+| Evidence joined from verbatim lines (not counted above) | 5/270 | 6/271 | 5/291 |
+| Reports refused by the contract and recovered by a retry | 8 (1 exhausted) | 7 | 7 |
+| Tool calls ok | 19/19 | 20/20 | 20/20 |
+
+**Cost, the two levers.**
+
+| | realtime, uncached | realtime, cached | batch, cached |
+|---|---|---|---|
+| Input tokens | 389,666 | 378,970 | 383,829 |
+| of which read from the cache | 0 | 279,621 (74%) | 269,046 (70%) |
+| Output tokens | 99,020 | 97,094 | 106,482 |
+| Paid | $1.77 | $1.24 | $0.71 |
+| The same tokens, realtime and uncached | $1.77 | $1.73 | $1.83 |
+| What the lever changed, same tokens | - | **-29%** | **-61%** |
+| Wall clock | 801 s | 773 s | 2 h 17 min of queue in the final sitting; the first sitting's batch took 2 h 40 min |
+
+**Agreement.** 35 of 38 items were scored the same in all three runs; the three that differed (`case_06`, `case_15`, `case_19`) are the model answering the same request differently, not the levers.
+
+**Calibration** (stated judgements, accuracy per contract band, uncached / cached / batch):
+
+| Band | Accuracy |
+|---|---|
+| `two_sources` (0.90+) | 3/3, 2/2, 3/3 |
+| `single_source` (0.70-0.89) | 12/14, 13/15, 13/14 |
+| `inferred` (0.50-0.69) | 8/16, 9/17, 10/15 |
+| `hypothesis` (0.25-0.49) | 2/3, 2/2, 3/4 |
+
+- **The levers change the bill and not the answers.** Each cached run scored at least as well as the reference on every headline, within the noise the agreement table shows, and the reference run's one unanswered item was the Docs agent giving up on a probe report that the other two runs got right.
+- **Caching in a batch works.** 70% of a batch's input was read from the cache, against 74% realtime, so the batch is the cheaper lever by a distance: 61% off the same tokens. Its price is the queue: three batches took 2 h 40 min, 1 h 42 min, and 45 min.
+- **Calibration reads the way the bands say it should.** Accuracy falls with the band: 100% at two sources, 86-93% at one, 50-67% inferred. The `inferred` band is where the misses live: an incident whose signals correlate with two failure modes is called at 0.5-0.69 and is right half the time.
+- **Severity is the weak judgement and the expected one.** Exact on 56-67%, never more than one level out. The recorded severities are withheld and the contract does not define the levels; a rubric would move this number, and nothing else would.
+- **What the baseline cost to make.** $3.72 recorded for the three runs plus about $0.27 in a run that recorded nothing; the harness's own failures (a revoked key, an empty account, a poll that died) cost the two days, not the money. Recorded spend for the project is now **$10.85**, 11% of the alert.
 
 | | |
 |---|---|
-| Items scored | 9: four cached diagnoses (the smoke test) and five uncached items (three diagnoses, two recalls) |
-| Spent | about $0.65: $0.38 on the nine recorded items, about $0.27 on a run stopped by hand that recorded nothing |
-| Headline correct | 9 of 9 (failure mode on the seven diagnoses, the expected post-mortem cited on the two recalls) |
-| Severity, smoke test | exact on 1 of 4, within one level on 4 of 4 |
-| Reports refused and recovered by the retry loop | 1 of 9 (a `format` rejection, accepted on the second attempt) |
-| Invented detail, smoke test | 1 of 69 checked statements: an affected service given as "service (unnamed, 2 additional dependents)" |
-| Evidence joined from verbatim lines | 1 of 69, counted apart (it was 2 of the first 3 flags before the rule was corrected) |
-| Pace | about 28 seconds an item, realtime |
-
-**Prompt caching, measured.**
-
-| | |
-|---|---|
-| Shared prefix (system prompt plus emit schema, Incident agent) | 7,272 tokens |
-| First request | wrote 7,272, read 0 |
-| Each later request | wrote 0, read 7,272 (14,544 for the one that retried: two calls) |
-| Four diagnoses, as run | $0.1797 |
-| The same tokens, uncached | $0.2284 |
-| What the cache changed | -21% |
-
-**What a request costs, measured against what was projected.**
-
-| | Projected on Day 19 | Measured |
-|---|---|---|
-| Input tokens, a diagnosis | ~4,750 | 7,802-7,914 |
-| Input tokens, a recall | ~5,100 | 7,917-7,972 |
-| Output tokens, a diagnosis | 2,000 | 2,257-3,549 |
-| Output tokens, a recall | 2,000 | 959-1,653 |
-| One full run, uncached | ~$1.13 | ~$1.44 (re-projected from the measured sizes) |
-
-- **The projection was wrong in both directions and nearly right in total.** Input was 40% low because a request is mostly JSON Schema, which tokenises at about 2.4 characters a token rather than 4. Output was one number for two kinds of report, high for a recall and low for a diagnosis. `--dry-run` now uses the measured figures.
-- **The cache saving is smaller than the prefix suggests.** The prefix is 92% of a diagnosis's input, and reading it at a tenth of the price cut the bill by 21%, because output is about two thirds of what a diagnosis costs and the cache does not touch it.
-- **Nine items are not a score.** Nine of nine is what the easy third of the set looks like: the smoke test is the first four cases, all `resource_exhaustion`. The hard cases (`case_07`, `case_13`, `case_08`) have not been asked.
-- **What is left.** 105 calls, about $3.25 before caching and about $2.80 after, by `check_day20_baseline.py --resume --skip-smoke`.
-
-| | |
-|---|---|
-| Offline suite | 1013 passed with the stack up (918 before Day 20; 51 baseline tests, 43 for stopping and resuming, 1 for the run-id fix) |
+| Offline suite | 1027 passed with the stack up (918 before Day 20) |
 
 ---
 
@@ -550,10 +557,10 @@ Nine items were scored before it did, and these are their numbers - the first th
 
 Say this plainly rather than letting it be discovered:
 
-- **No eval score and no baseline.** Nine of the 38 items have been scored once (Day 20); the account ran out of credit before the first full run ended. Accuracy, hallucination rate, and calibration over the whole set are unmeasured, and so is the batch-against-realtime delta; tool success is measured only over recorded runs.
+- **The eval baseline is one model, two agents, and one run per configuration.** `evaluations/baseline.md` (Day 20) scores the Incident and Docs agents on the seeded set with Sonnet 5; the GitHub and Deployment agents, the planner, and the synthesis have no eval, and a single run per configuration cannot separate the model's variance from a change. Day 24 re-runs it against the same file.
 - **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
 - **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
 - **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
-- **Prompt caching is measured on one agent and four requests.** The Incident agent's prefix is read from the cache by every request after the first (Day 20). The Docs agent's has not been measured cached, the tool loop's moving marker has never run live, and whether a batch's requests read each other's cache at all is still open.
-- **The Batch API path has never met the real API.** It is proven against a scripted batch endpoint, including the retry as a second batch. Its first live run is Day 20's.
+- **Prompt caching is measured on the forced-emit agents only.** Both eval agents read their prefix from the cache, realtime and in a batch (Day 20). The tool loop's moving marker - the GitHub and Deployment agents' rounds, where the 22k-token PR read is re-sent - has never run live with caching on; `check_day15_integration.py` is where that number comes from.
+- **The Batch API's queue time is a sample of three.** 2 h 40 min, 1 h 42 min, and 45 min on one day; a batch is the cheaper lever only for work nobody is waiting on.

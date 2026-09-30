@@ -665,3 +665,19 @@ Because scoring is pure and responses are kept, the run was re-scored from disk 
 
 **What I would watch.** Three in a row is a guess at where weather ends.
 It has never been tested against a real outage, only against a scripted one.
+
+## 39. A batch outlives the process that submitted it
+
+**Context.** The first live batch sat in the queue for two hours and forty minutes.
+The process polling it died after seventeen, on one connection error, and the checkpoint reported that the batch could not be run.
+The batch finished anyway, with all 38 answers, and they waited on the server for a day.
+
+**Decision.** A poll that fails says nothing about the batch, so the wait tolerates failed polls until several in a row (`max_poll_failures`), and its default patience is the API's own maximum of a day rather than two hours.
+A run writes each batch id to `batches.jsonl` the moment the API returns it, before the wait begins, because the batch is paid for at submission.
+A continued run reads those batches back (`DeferredClient.attach`) before it submits anything: the `custom_id` is the request's content hash, so the answers land exactly where a fresh submission's would, and a retry that needs a second batch is submitted only for what the first did not settle.
+The checkpoint's `--resume` counts a submitted, unread batch as items already paid for when it chooses which run to continue.
+
+**What it saved.** The 38-answer batch was read back for nothing after the process that submitted it had died, and the final baseline was assembled from three runs of which not one item was paid for twice.
+
+**What I would watch.** Batch results expire after 29 days, and nothing here notices an id that has.
+The queue times were 2 h 40 min, 1 h 42 min, and 45 min in one day; the batch is the cheaper lever for work nobody is waiting on, and for nothing else.
