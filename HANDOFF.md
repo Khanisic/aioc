@@ -966,8 +966,9 @@ for github queries.
    two things only the repository owner can do: an `ANTHROPIC_API_KEY` repository secret on
    `m-misbahuddin/aioc` (Settings -> Secrets and variables -> Actions), and the Claude GitHub
    App installed on the repository (https://github.com/apps/claude, or `/install-github-app`
-   from Claude Code). Until then the job fails at the action step on every PR; CI is
-   unaffected. Each review is billed (Sonnet 5.5, capped at 30 turns); watch the first few
+   from Claude Code). Until then the job passes with a warning that the review was skipped
+   (verified on PR #25); CI is unaffected. Once the key exists, the next push is the first
+   real review. Each review is billed (Sonnet 5.5, capped at 30 turns); watch the first few
    in `cost_review.py`'s blind spot - Actions runs are not in `test-results/`, so the
    Console is the only record of their cost.
 46. **Why the round-1 Deployment call hit `max_tokens` is not known.** 8,192 output tokens in
