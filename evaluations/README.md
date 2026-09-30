@@ -8,7 +8,7 @@ Committed eval sets and committed eval results.
 | Path | What it is |
 |---|---|
 | `cases/seeded-incidents.json` | The eval set: 20 cases, 38 items. One case for each of the 18 seeded incidents, each with a diagnose task and a recall task, plus two no-precedent recall probes. |
-| `baseline.md`, `baseline.json` | The Day 20 baseline: the whole set run once for each configuration of the two cost levers, side by side. The Markdown is for reading; the JSON is what a later run is compared against. **Neither exists yet** - the run has not been made. |
+| `baseline.md`, `baseline.json` | The Day 20 baseline (2026-09-30): the whole set run once for each configuration of the two cost levers, side by side. The Markdown is for reading; the JSON is what a later run is compared against. |
 | `results/` | One report for each run in the baseline, written with it. |
 
 ## The one rule: a case selects, it never authors
@@ -52,6 +52,7 @@ uv run python scripts/run_evals.py --mode batch # live, the Batch API at half pr
 ```bash
 uv run python scripts/check_day20_baseline.py --plan   # free: what it will do and cost
 uv run python scripts/check_day20_baseline.py          # live, 118 calls
+uv run python scripts/check_day20_baseline.py --resume # live, only what is not yet done
 uv run python scripts/eval_baseline.py --against evaluations/baseline.json <run-dir>   # free
 ```
 

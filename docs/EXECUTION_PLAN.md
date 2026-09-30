@@ -504,6 +504,26 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   run's bill against another's), and names every item the runs scored differently; `compare`
   reads a later run against it, which is Day 24's token reduction. Every report carries a cache
   verdict. 970 offline tests. **The done-when is the committed baseline, and it is still open.**
+- **First live run (2026-09-29), stopped by an empty account.** With the key rotated the smoke
+  test passed - the cache was measured reading a 7,272-token prefix, four diagnoses 21% cheaper
+  than their own tokens uncached - and the first full run scored five items before every call
+  returned `credit balance is too low`. Nine items are measured and kept; about $0.65 was spent.
+  The run changed the harness: a failure that is the environment's stops the run instead of
+  being scored (at once for the key or the account, at the third in a row otherwise); every item
+  is written to `progress.jsonl` as it is scored and `--resume` continues a stopped run without
+  paying twice or counting twice (`src/aioc/evals/store.py`); an excerpt joined from verbatim
+  lines is `stitched`, not invented; and the cost projection was re-calibrated from measured
+  requests. 1013 offline tests.
+- **Done (2026-09-30).** `evaluations/baseline.md` and `baseline.json`: the 38 items on
+  `claude-sonnet-5` realtime uncached, realtime cached, and batch cached. Failure mode correct
+  15, 16, and 17 of 18; recall cites its own post-mortem 18/18 in every run; 1-2 ungrounded
+  statements in about 270; 35 of 38 items scored the same in all three, so the levers change
+  the bill and not the answers. On the same tokens: cached realtime -29%, cached batch -61%,
+  with 70-74% of input read from the cache in both. Made in two sittings across an empty
+  account and a poll that died while its batch ran on; the run was continued each time without
+  paying for an answer twice, and a batch submitted by a dead process was read back
+  (`DeferredClient.attach`). The three batches took 2 h 40 min, 1 h 42 min, and 45 min of
+  queue. $3.72 recorded; project spend $10.85, 11% of the alert. 1027 offline tests.
 
 ---
 

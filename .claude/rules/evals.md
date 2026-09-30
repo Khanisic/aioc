@@ -24,8 +24,16 @@ the rules below are about those two things.
 - An abstention is not a wrong answer and is not a right one. The contract asks for a null over a
   guess; count the two apart or the score rewards guessing.
 - `null` is not zero here either. A rate over an empty denominator is `n/a`, not 0%.
-- An agent that raised is a scored item. A refused credential is not - it aborts the run
-  (`EvalAborted`), because every remaining item would repeat it.
+- An agent that raised is a scored item. A call the environment failed is not. Tell them apart
+  by what raised (`is_environment_error`), and record which (`error_kind`). A refused key or an
+  empty account stops the run at once; anything else the API fails on stops it at the third in
+  a row. Never add an exception class to a list to make a run carry on.
+- What was paid for is kept. An item is written to `progress.jsonl` when it is scored, not when
+  the run ends, and a continued run reuses answered items and agent failures only.
+- A token is counted once. An item a continued run took from an earlier one is marked
+  `reused_from` when that run recorded its cost.
+- An excerpt whose every part is in the context is not invented, however it was joined
+  (`quoted`). Count what is made up; do not count formatting.
 - Score the shipped code path. The runner calls `IncidentAgent.diagnose` and `DocsAgent.answer`
   with an explicit context, exactly as the executor does. Do not build an eval-only prompt.
 - Every live run costs money. Say the call count and quote `--dry-run` before running one; do not

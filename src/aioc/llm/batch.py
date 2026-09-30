@@ -23,6 +23,15 @@ Two pieces:
 
 Not batchable, and refused rather than approximated: streaming, and the tool loop (its
 tools would run again on every pass).
+
+**A batch outlives the process that submitted it.** The first live batch sat in the queue
+for two hours and forty minutes, and the process polling it died on one connection error
+after seventeen; the batch finished anyway and its 38 results waited on the server. So
+polling tolerates a few failed polls in a row (`max_poll_failures`), the default patience
+is the API's own maximum of a day, and a `DeferredClient` can `attach` to a batch it did
+not submit in this process, so a run resumed after a crash reads what was paid for
+instead of paying again. Whoever submits a batch is told its id at once (`on_submit`) so
+it can be written down before anything else can go wrong.
 """
 
 from __future__ import annotations
@@ -100,7 +109,8 @@ class MessageBatcher:
         client: anthropic.Anthropic,
         *,
         poll_seconds: float = 20.0,
-        timeout_seconds: float = 2 * 60 * 60,
+        timeout_seconds: float = 24 * 60 * 60,
+        max_poll_failures: int = 5,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         on_poll: Callable[[str, str, float], None] | None = None,
@@ -108,6 +118,7 @@ class MessageBatcher:
         self._client = client
         self._poll_seconds = poll_seconds
         self._timeout_seconds = timeout_seconds
+        self._max_poll_failures = max_poll_failures
         self._sleep = sleep
         self._clock = clock
         self._on_poll = on_poll
@@ -135,12 +146,30 @@ class MessageBatcher:
         return batch.id
 
     def wait(self, batch_id: str) -> Any:
-        """Poll until the batch has ended. `BatchError` when it has not inside the timeout -
-        the batch itself is left running, and its id is in the message."""
+        """Poll until the batch has ended. `BatchError` when it has not inside the timeout,
+        or when the polls themselves keep failing - the batch is left running either way,
+        and its id is in the message so it can be attached to later."""
         started = self._clock()
+        failures = 0
         while True:
-            batch = self._client.messages.batches.retrieve(batch_id)
             elapsed = self._clock() - started
+            try:
+                batch = self._client.messages.batches.retrieve(batch_id)
+            except (anthropic.APIConnectionError, anthropic.InternalServerError) as exc:
+                # One failed poll says nothing about the batch. Several in a row say the
+                # API cannot be reached from here, and waiting longer will not change it.
+                failures += 1
+                if self._on_poll is not None:
+                    self._on_poll(batch_id, f"poll failed ({type(exc).__name__})", elapsed)
+                if failures >= self._max_poll_failures:
+                    raise BatchError(
+                        f"batch {batch_id}: {failures} polls in a row failed "
+                        f"({type(exc).__name__}: {exc}); it is still running and its "
+                        "results can be read later by that id"
+                    ) from exc
+                self._sleep(self._poll_seconds)
+                continue
+            failures = 0
             if self._on_poll is not None:
                 self._on_poll(batch_id, batch.processing_status, elapsed)
             if batch.processing_status == "ended":
@@ -165,23 +194,37 @@ class MessageBatcher:
         return out
 
     def run(
-        self, requests: Mapping[str, Mapping[str, Any]]
+        self,
+        requests: Mapping[str, Mapping[str, Any]],
+        *,
+        on_submit: Callable[[str, int], None] | None = None,
     ) -> tuple[BatchRun, dict[str, BatchResult]]:
-        """Submit, wait, read - and say what came back for every request that was sent."""
+        """Submit, wait, read - and say what came back for every request that was sent.
+        ``on_submit`` is told the batch id and size as soon as the batch exists."""
         started = self._clock()
         batch_id = self.submit(requests)
+        if on_submit is not None:
+            on_submit(batch_id, len(requests))
+        return self.collect(batch_id, expected=list(requests), started=started)
+
+    def collect(
+        self, batch_id: str, *, expected: Sequence[str] = (), started: float | None = None
+    ) -> tuple[BatchRun, dict[str, BatchResult]]:
+        """Wait for a batch that already exists and read it. ``expected`` names the
+        requests that must have a result; any missing gets one that says so."""
+        began = self._clock() if started is None else started
         self.wait(batch_id)
         results = self.results(batch_id)
-        for cid in requests:
+        for cid in expected:
             if cid not in results:
                 results[cid] = BatchResult(cid, None, "the batch ended with no result for it")
         succeeded = sum(1 for r in results.values() if r.message is not None)
         run = BatchRun(
             batch_id=batch_id,
-            requests=len(requests),
+            requests=max(len(expected), len(results)),
             succeeded=succeeded,
             failed=len(results) - succeeded,
-            seconds=self._clock() - started,
+            seconds=self._clock() - began,
         )
         return run, results
 
@@ -236,20 +279,33 @@ class DeferredClient(LLMClient):
         self.pending[key] = params
         raise PendingRequest(key)
 
-    def flush(self, batcher: MessageBatcher) -> BatchRun | None:
+    def flush(
+        self, batcher: MessageBatcher, *, on_submit: Callable[[str, int], None] | None = None
+    ) -> BatchRun | None:
         """Send everything queued as one batch and keep the answers. ``None`` when the
         queue is empty - nothing is waiting, so there is nothing to submit."""
         if not self.pending:
             return None
         queued, self.pending = self.pending, {}
-        run, results = batcher.run(queued)
+        run, results = batcher.run(queued, on_submit=on_submit)
+        self._keep(run, results)
+        return run
+
+    def attach(self, batcher: MessageBatcher, batch_id: str) -> BatchRun:
+        """Keep the answers of a batch submitted earlier - by a process that has since
+        died, or by this one before a crash. A request's ``custom_id`` is its key, so the
+        answers land exactly where a fresh submission's would."""
+        run, results = batcher.collect(batch_id)
+        self._keep(run, results)
+        return run
+
+    def _keep(self, run: BatchRun, results: Mapping[str, BatchResult]) -> None:
         for key, result in results.items():
             if result.message is not None:
                 self.results[key] = result.message
             else:
                 self.failed[key] = result.error or "no result"
         self.runs.append(run)
-        return run
 
     def stream_text(self, **_kwargs: Any) -> Iterator[str]:
         raise BatchError("streaming cannot be batched - a batch has nobody to stream to")

@@ -333,6 +333,33 @@ A harness that turns every exception into a data point will faithfully measure y
 
 ---
 
+## 13. The fix for the last failure was a list, and the next failure was not on it
+
+**Symptom.** With the key rotated, the Day 20 checkpoint passed its smoke test, scored five items of its first full run, and then printed `FAILED` thirty-three times in under a minute.
+It moved on to the second run and started failing that one too.
+
+**What it was.** `400 Your credit balance is too low to access the Anthropic API`.
+The account had less than a dollar in it.
+The day before, war story #12 had taught the harness to stop on a refused credential, and I had taught it with a tuple of two exception classes: `AuthenticationError` and `PermissionDeniedError`.
+An empty balance arrives as a `BadRequestError`, so the harness did what it does with anything not on the list: scored it as the agent's failure and carried on.
+I had fixed the instance and called it the rule.
+
+**What it cost.** The refused calls were free.
+What was not free was the run I had stopped by hand twenty minutes earlier to restart it detached: six answered items, about 27 cents, kept nowhere, because a run held its results in memory until it finished.
+That is a small number and it was the whole lesson.
+Every item is one call that was already paid for the moment it returned.
+
+**Fix.** The question is whose failure it was, and that has an answer that does not need a list: if the API client raised it, the call failed, not the agent.
+A refusal about the caller stops the run at once; anything else the API fails on is recorded and tolerated until three in a row.
+Every item is written to disk as it is scored, and `--resume` continues a stopped run, asking only for what it did not finish.
+The five answers from the interrupted run and the four from the smoke test are the first nine items of the baseline.
+
+**Transferable lesson.** When a failure surprises you twice, the first fix was a special case.
+Ask what the two have in common, and test for that.
+And find out what your process holds in memory that somebody has already paid for.
+
+---
+
 ## How to tell these in an interview
 
 Lead with the symptom, not the answer.
@@ -340,5 +367,5 @@ Lead with the symptom, not the answer.
 Opening with "I had a max_tokens misconfiguration" throws the story away.
 
 Have one sentence ready for what you changed *besides* the fix.
-Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error, the test that pins the roster's capability claims, the run that stops on a refused credential instead of scoring it.
+Every story above has one: the truncation check, the import-time drift guard, the `--repeat` flag, the skip-with-diagnosis, the query idiom, the comment explaining a deliberate absence, the fail-fast auth check, the gap that keeps the whole error, the test that pins the roster's capability claims, the run that stops on a refused credential instead of scoring it, the progress file that keeps what a stopped run paid for.
 Fixing the bug is table stakes. Making the failure legible next time is the part that reads as seniority.

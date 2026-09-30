@@ -3,6 +3,7 @@
     uv run python scripts/check_day20_baseline.py --plan       # free - what it will do and cost
     uv run python scripts/check_day20_baseline.py              # LIVE - 118 calls
     uv run python scripts/check_day20_baseline.py --limit 6    # LIVE - a rehearsal, 22 calls
+    uv run python scripts/check_day20_baseline.py --resume     # LIVE - only what is not done
 
 **Cost.** A smoke test of 4 calls, then the whole eval set (38 items) once for each
 configuration: realtime and uncached, realtime and cached, batch and cached. 118 Claude
@@ -16,6 +17,12 @@ an hour.
 passes, because the two things it checks fail silently: a request whose prefix varies is
 served and billed as a cache write every time, and a wire that is wrong for one item is
 wrong for thirty-eight. Four calls find out for about twelve cents.
+
+**`--resume` never pays for an answer twice.** For each configuration it looks under
+`test-results/` for a run of the same set, model, and configuration, takes the one that
+got furthest, and asks only for the items that run did not finish. A configuration that
+was already run to the end costs nothing the second time. This is what to run after the
+checkpoint has been stopped - by an empty balance, a revoked key, or a closed laptop.
 
 **What it writes.** Each run records itself under `test-results/` as `run_evals.py` would.
 On the full set it also writes `evaluations/results/<configuration>.md` for each run and
@@ -43,17 +50,20 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import run_evals  # noqa: E402 - needs the sys.path insert above
-from eval_baseline import _write  # noqa: E402
-from runlog import RunRecorder  # noqa: E402
+from eval_baseline import _started, _write  # noqa: E402
+from runlog import RESULTS_ROOT, RunRecorder  # noqa: E402
 
 from aioc.evals import (  # noqa: E402
     EvalAborted,
     EvalItem,
     EvalSet,
+    RunConfig,
+    StoreError,
     Task,
     build_baseline,
     cache_health,
     load_cases,
+    read_run,
     render_baseline,
 )
 from aioc.llm import LLMSettings  # noqa: E402
@@ -94,34 +104,67 @@ CONFIGS = {
 DEFAULT_CONFIGS = ("realtime-uncached", "realtime-cached", "batch-cached")
 
 
+def find_resumable(
+    results: Path, cases: EvalSet, config: RunConfig, items: list[EvalItem]
+) -> tuple[Path, int] | None:
+    """The run under ``results`` that this configuration can continue from, and how many
+    of ``items`` it has already paid for - finished, or waiting in a batch it submitted:
+    the one that got furthest, the newest of those."""
+    wanted = {item.key for item in items}
+    best: tuple[int, str, Path] | None = None
+    for run_dir in results.glob(f"runs/*/*__llm__evals-{config.mode}*"):
+        try:
+            stored = read_run(run_dir, cases)
+        except StoreError:
+            continue
+        if config.differs_from(stored.config):
+            continue
+        kept = len(wanted & set(stored.reusable()))
+        # A batch submitted and never read back is paid for and waiting: worth as much
+        # as the items it will answer, which is all of the ones not yet done.
+        waiting = 0 if stored.complete or not stored.batches else len(wanted) - kept
+        worth = kept + waiting
+        if worth and (best is None or (worth, _started(run_dir)) > (best[0], best[1])):
+            best = (worth, _started(run_dir), run_dir)
+    return None if best is None else (best[2], best[0])
+
+
 def smoke_items(cases: EvalSet) -> list[EvalItem]:
     return list(cases.select(tasks={Task.DIAGNOSE}))[:SMOKE_ITEMS]
 
 
 def plan(
-    items: list[EvalItem], configs: list[Config], settings: LLMSettings, *, smoke: bool
+    items: list[EvalItem],
+    configs: list[Config],
+    settings: LLMSettings,
+    *,
+    smoke: list[EvalItem] | None,
 ) -> tuple[list[str], float | None]:
-    """What will run and what it is projected to cost, before caching."""
+    """What will run and what it is projected to cost, before caching. ``smoke`` is the
+    smoke test's items, or ``None`` when it is skipped."""
     projection = run_evals.project(items, settings)
     flat = projection.realtime_uncached_usd
     lines = [f"model {settings.model}, {len(items)} item(s) a run"]
     total = 0.0 if flat is not None else None
-    if smoke:
-        share = None if flat is None else flat * SMOKE_ITEMS / max(len(projection.sized), 1)
-        lines.append(f"  smoke test          {SMOKE_ITEMS:>4} calls   {_usd(share)}")
+    calls = 0
+    if smoke is not None:
+        share = run_evals.project(smoke, settings).realtime_uncached_usd
+        lines.append(f"  smoke test          {len(smoke):>4} calls   {_usd(share)}")
+        calls += len(smoke)
         if total is not None and share is not None:
             total += share
     for config in configs:
         cost = None if flat is None else flat * (0.5 if config.mode == "batch" else 1.0)
         lines.append(f"  {config.label:<19} {len(items):>4} calls   {_usd(cost)}")
+        calls += len(items)
         if total is not None and cost is not None:
             total += cost
-    calls = (SMOKE_ITEMS if smoke else 0) + len(items) * len(configs)
     lines.append(f"  {'total':<19} {calls:>4} calls   {_usd(total)}")
     lines.append(
-        f"  projected from ~{projection.input_tokens:,} input tokens a run (chars / 4) and "
-        f"{projection.output_tokens:,} output assumed; the cached runs will cost less, and a "
-        "validation retry is one more call"
+        f"  projected from ~{projection.input_tokens:,} input and "
+        f"~{projection.output_tokens:,} output tokens a run, both estimated from what the "
+        "first live items measured; the cached runs will cost less, and a validation "
+        "retry is one more call"
     )
     for key, why in projection.unbuildable:
         lines.append(f"  CANNOT BUILD {key}: {why}")
@@ -176,6 +219,12 @@ def main(argv: list[str] | None = None) -> int:
         help=f"comma-separated, from: {', '.join(CONFIGS)}",
     )
     parser.add_argument("--skip-smoke", action="store_true", help="go straight to the runs")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue from the recorded runs of this set: ask only for what is not done",
+    )
+    parser.add_argument("--results", type=Path, default=RESULTS_ROOT, help="test-results directory")
     parser.add_argument("--set", type=Path, default=None, help="a case file (default: seeded)")
     parser.add_argument("--tasks", default=None, help="diagnose, recall, or both comma-separated")
     parser.add_argument("--cases", default=None, help="case ids, comma-separated")
@@ -202,9 +251,36 @@ def main(argv: list[str] | None = None) -> int:
     if args.model:
         settings = settings.model_copy(update={"model": args.model})
 
-    lines, _total = plan(items, configs, settings, smoke=not args.skip_smoke)
+    lines, _total = plan(
+        items, configs, settings, smoke=None if args.skip_smoke else smoke_items(cases)
+    )
     print("Day 20 baseline - the plan")
     print("\n".join(lines))
+
+    resumable: dict[str, Path] = {}
+    if args.resume:
+        print("  continuing from what is recorded, so less than that:")
+        for config in configs:
+            found = find_resumable(
+                args.results,
+                cases,
+                RunConfig(
+                    set_sha256=cases.sha256,
+                    model=settings.model,
+                    mode=config.mode,
+                    prompt_caching=config.caching,
+                    cache_ttl=config.cache_ttl,
+                ),
+                items,
+            )
+            if found is None:
+                print(f"    {config.label:<19} nothing recorded; {len(items)} to run")
+            else:
+                resumable[config.label] = found[0]
+                print(
+                    f"    {config.label:<19} {found[1]} paid for in {found[0].name}; "
+                    f"{len(items) - found[1]} to run"
+                )
     if not whole_set:
         print(
             f"  a rehearsal: {len(items)} of {len(cases.items)} items, so nothing is written "
@@ -267,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                     mode=config.mode,
                     poll_seconds=args.poll_seconds,
                     command=f"check_day20_baseline.py ({config.name})",
+                    resume_from=resumable.get(config.label),
                 )
                 recorder.event(
                     config.name,
@@ -278,6 +355,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
         except EvalAborted as exc:
             print(f"\nABORTED: {exc}", file=sys.stderr)
+            print(
+                "  what was finished is kept. When the cause is fixed, continue with:\n"
+                "    uv run python scripts/check_day20_baseline.py --resume --skip-smoke",
+                file=sys.stderr,
+            )
             recorder.event("aborted", outcome="error", message=str(exc))
             return 2
 

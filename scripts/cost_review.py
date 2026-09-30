@@ -129,6 +129,11 @@ def tally_run(run_dir: Path) -> Tally:
                 continue
             event = json.loads(line)
             data = event.get("data") or {}
+            if data.get("reused_from"):
+                # A continued eval run lists the items it took from the run before it.
+                # That run recorded their tokens; counting them here would be twice.
+                measured = True
+                continue
             usage = _tokens(data)
             if usage is None or (usage.input_tokens, usage.output_tokens) == (0, 0):
                 continue

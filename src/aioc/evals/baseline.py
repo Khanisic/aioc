@@ -41,6 +41,7 @@ _RATES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("recall_retrieved", ("accuracy", "recall_retrieved"), "Retrieval returned it"),
     ("probes_abstained", ("accuracy", "probes_abstained"), "Probes declined"),
     ("ungrounded", ("hallucination", "ungrounded"), "Ungrounded statements"),
+    ("stitched", ("hallucination", "stitched"), "Evidence joined from verbatim lines"),
     (
         "invented_precedents",
         ("hallucination", "invented_precedents"),
