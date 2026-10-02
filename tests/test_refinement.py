@@ -135,11 +135,11 @@ def test_a_resolvable_gap_is_re_delegated_with_its_suggested_query_verbatim():
     assert [inv.round for inv in resp.selected_agents] == [0, 1]
 
 
-def test_the_re_delegated_context_is_planner_block_then_refinement_block_then_digest():
+def test_the_re_delegated_context_is_planner_block_then_digest_then_refinement_block():
     """Explicit context passing survives the loop: the re-delegated agent receives the
-    planner's block for its agent, then a block naming the gaps it is closing (with the
-    suggested query verbatim), then the digest of the response that raised them - and the
-    response records that composed block verbatim."""
+    planner's block for its agent, then the digest of the response that raised the gaps,
+    then a block naming the gaps it is closing (with the suggested query verbatim), last
+    and next to the query since Day 22 - and the response records that block verbatim."""
     runner = _ScriptedRunner([_gappy([_gap()]), _clean])
     plan = _plan([_invocation("incident")])
     resp = Executor({AgentName.INCIDENT: runner}).execute(plan, "Why is checkout failing?")
@@ -154,9 +154,10 @@ def test_the_re_delegated_context_is_planner_block_then_refinement_block_then_di
     assert f'asked: "{LOOKBACK_QUERY}"' in context
     assert HANDOFF_HEADER in context
     assert '<handoff from="incident" invocation_id="inv_incident"' in context
-    assert context.index(_CONTEXT) < context.index(header) < context.index(HANDOFF_HEADER), (
-        "planner block, then refinement block, then the digest closest to the query"
+    assert context.index(_CONTEXT) < context.index(HANDOFF_HEADER) < context.index(header), (
+        "planner block, then the digest, then the gaps to close closest to the query"
     )
+    assert context.rstrip().endswith(f'asked: "{LOOKBACK_QUERY}"')
     # The re-delegation depends on the response that raised the gap, and says so.
     assert refined.mode is InvocationMode.SEQUENTIAL
     assert refined.depends_on == ["inv_incident"]
@@ -354,7 +355,12 @@ def test_a_cross_agent_gap_hands_the_raising_agents_digest_to_the_target():
     (refined,) = _round(resp, 1)
     assert refined.agent is AgentName.DEPLOYMENT
     assert refined.mode is InvocationMode.SEQUENTIAL and refined.depends_on == ["inv_gh"]
-    assert refined.context_passed.startswith(REFINEMENT_HEADER.format(round=1))
+    # No planner's block for an agent the plan skipped: the digest leads, with nothing
+    # blank before it, and the gaps to close come last.
+    assert refined.context_passed.startswith(HANDOFF_HEADER)
+    assert refined.context_passed.index(HANDOFF_HEADER) < refined.context_passed.index(
+        REFINEMENT_HEADER.format(round=1)
+    )
     # Not a planned agent, so no roster: nothing in the plan assigned it a part.
     assert ROSTER_HEADER not in refined.context_passed
     assert "(raised by github, invocation inv_gh)" in refined.context_passed

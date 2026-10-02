@@ -76,6 +76,7 @@ Written after the code, like the Day 16 entry, and acceptable for the same reaso
 | Why this is not a change | The contract never said what `message` holds; the §7.3 example is `"message": "..."`. Part 3 of the tool's description now says it is the subject line, so a consumer is told rather than left to notice. |
 | What was considered instead | (a) An additive `message_truncated` flag, as the GitHub tools now carry - a patch bump through the full §0 process for a boolean the description already states for every commit. (b) Defaulting `include` to `config` so commits are opt-in, as HANDOFF item 13 proposed - a changed default on a frozen input, which is a behaviour change for any consumer relying on `all`. Neither was worth a version for what one sentence of part 3 says. |
 | Not covered by this entry | The GitHub tools (`get_pull_request`, `list_commits`, `diff_refs`) are not among the six named tools, so their new fields (`message_truncated`, `pull_request_title`, `patch_paths`) and `touched_paths: null` for "not asked" are free to churn and need no entry. |
+| Found afterwards | The first local run of the review prompt (Day 22) pointed out that the GitHub agent stamps the tool's `touched_paths: null` into `CommitRef.touched_paths` as `[]`, which under §1 reads "looked, touched nothing". It was `[]` before Day 21 too; Day 21 only made the distinction visible at the tool. The contract field is a non-nullable list, so the honest form needs a type change - recorded as anticipated item 2 below, not patched around in the agent. |
 
 ### Anticipated, not yet made
 
@@ -84,3 +85,10 @@ Written after the code, like the Day 16 entry, and acceptable for the same reaso
    `PROMETHEUS_TIMEOUT` in §7.1 would be a false value in a programmatically matched
    field. Additive, so patch level. Flagged in the module docstring since Day 6 and still
    pending an entry here plus a §9 row.
+2. **`CommitRef.touched_paths` cannot say "not asked" (major).**
+   The field is a non-nullable `list[str]`, so a commit whose paths no tool fetched is
+   reported as `[]`, which §1 reads as "looked, touched nothing". Since Day 21 the GitHub
+   tools return `null` for "not asked"; the agent has no honest way to carry it into the
+   report. The same shape as the Day 16 audit's finding 4 (`changed_config_keys`), and the
+   same remedy: a nullable type, which is a type change and therefore major. Found by the
+   first local run of the review prompt (Day 22).

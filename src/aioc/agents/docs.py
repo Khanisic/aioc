@@ -475,8 +475,11 @@ class DocsAgent:
             lines.append("</document>")
         lines.append("</documents>")
         documents_block = "\n".join(lines)
+        # Long reference material first, then the situation, then the query (Day 22): the
+        # documents are the bulk of the prompt, and what this request is about belongs
+        # next to the question, where a long prompt's attention is strongest.
         return (
-            f"<context>\n{context}\n</context>\n\n{documents_block}\n\nDocumentation query: {query}"
+            f"{documents_block}\n\n<context>\n{context}\n</context>\n\nDocumentation query: {query}"
         )
 
 

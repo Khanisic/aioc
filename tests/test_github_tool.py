@@ -367,7 +367,7 @@ def test_a_binary_file_stays_distinct_from_one_the_budget_missed():
     assert entry["patch"] is None and entry["patch_truncated"] is False
 
 
-@pytest.mark.parametrize("bad", ["HANDOFF.md", [""], [1], ["x"] * (gs.MAX_PATCH_PATHS + 1)])
+@pytest.mark.parametrize("bad", ["HANDOFF.md", [], [""], [1], ["x"] * (gs.MAX_PATCH_PATHS + 1)])
 def test_patch_paths_is_validated_structurally(bad: Any):
     p = _payload(gs.call("get_pull_request", {"number": 12, "patch_paths": bad}, api=_api(_happy)))
     assert p["ok"] is False and p["error"]["class"] == "validation"

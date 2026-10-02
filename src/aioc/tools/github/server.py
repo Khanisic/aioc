@@ -234,6 +234,7 @@ GET_PULL_REQUEST_SCHEMA: dict[str, Any] = {
         "patch_paths": {
             "type": ["array", "null"],
             "items": {"type": "string"},
+            "minItems": 1,
             "maxItems": MAX_PATCH_PATHS,
             "default": None,
             "description": (
@@ -305,6 +306,7 @@ DIFF_REFS_SCHEMA: dict[str, Any] = {
         "patch_paths": {
             "type": ["array", "null"],
             "items": {"type": "string"},
+            "minItems": 1,
             "maxItems": MAX_PATCH_PATHS,
             "default": None,
             "description": (
@@ -409,9 +411,12 @@ def _paths(args: dict[str, Any], field: str) -> list[str] | None:
     value = args.get(field)
     if value is None:
         return None
-    expected = f"a list of at most {MAX_PATCH_PATHS} non-empty file paths, or null"
+    # An empty list names no file: it would return no patches and say nothing about it.
+    # Omitting the field is how to ask for none (Day 22, found by the review prompt).
+    expected = f"a list of 1-{MAX_PATCH_PATHS} non-empty file paths, or null"
     if (
         not isinstance(value, list)
+        or not value
         or len(value) > MAX_PATCH_PATHS
         or not all(isinstance(v, str) and v.strip() for v in value)
     ):
