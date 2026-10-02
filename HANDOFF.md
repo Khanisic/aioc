@@ -1,14 +1,14 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 21** of 30. The four-agent run was re-made with caching, the
-roster, and the retry loop all live: **PASS, $0.74** against Day 15's ~$1.16, one refinement
-re-delegation instead of four. It found two harness defects (a conversation the API refuses,
-and the synthesis outside the retry loop), both fixed and pinned. The GitHub and deployment
-tool replies are trimmed by 34% on the run's own calls, and the repository has CI and a
-Claude Code PR-review workflow - the latter waiting on a secret and an app install only the
-owner can do (§7 item 45).
+Written at the end of **Day 22** of 30. **From now on the project spends $0 on the
+Anthropic API (§1)**; the one exception is a single deployed run at Day 25, and only with the
+owner's yes. Day 22 gave every prompt one ordering rule, moved the review prompt into
+`.github/claude/review.md`, and tuned it on five scored local reviews: no false positives,
+and one added paragraph that took recall on planted defects from 1 of 2 to 2 of 2 and found a
+real Day 21 bug. Both Claude jobs are label-triggered on a subscription token and have never
+run (§7 item 45).
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 22.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 23.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -18,7 +18,20 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 1056-test suite makes **zero API calls and zero network calls**
+- **Days 22-30 run on $0 of Anthropic API spend (decided 2026-10-01).** The one exception is
+  a single real four-agent run against the deployed stack at Day 25 (~$0.55 with
+  `--max-rounds 0 --deterministic-synthesis`), and it still needs the user's yes at the time.
+  Everything else is done without API calls:
+  - **Token counts:** the free token-counting endpoint, not live runs.
+  - **Day 23 model routing:** a projection, labelled as one.
+  - **Demo video:** rendered from recorded runs.
+  - **Smoke test:** fake agents.
+  - **PR review and test generation:** label-triggered, on the user's Claude subscription
+    token (`CLAUDE_CODE_OAUTH_TOKEN`), never on API credit.
+
+  The user saw ~$4 go in one day and asked for this; quote it if a plan starts to need a
+  paid call.
+- **Keep costs low.** The 1058-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -109,7 +122,9 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `evals/scoring.py` `quoted` | **Day 20, after the first live run.** An evidence excerpt is `verbatim`, `stitched` (every part is in the context, joined by the model - counted on its own line, never as a hallucination), or ungrounded. Two of the first three live flags were stitched. |
 | `llm/batch.py` reattach | **Day 20, after the first live batch.** `MessageBatcher.wait` tolerates failed polls (`max_poll_failures`, 5) and waits up to a day; `run(on_submit=)` names the batch as soon as it exists; `DeferredClient.attach(batcher, batch_id)` keeps a batch's answers without having submitted it. A run writes each batch id to `batches.jsonl` before waiting (`store.py`), `read_run` returns them, and `run_batch(submitted=...)` reads them back before submitting anything. |
 | `.github/workflows/ci.yml` | **Day 21.** Lint, mypy, and the offline suite (`-m "not integration"`) on every push to `main` and every PR, no secrets. Rehearsed in a fresh clone with no `.env`: 1010 passed, the same as this machine without Docker. The first real run is the Day 21 PR. |
-| `.github/workflows/claude-review.yml` | **Day 21. Written, never run.** `anthropics/claude-code-action@v1` on every non-draft PR update, `claude-sonnet-5-5`, 30 turns, 20 minutes, a superseded run cancelled. Read-only tools plus inline comments and one sticky summary. The prompt lists this repository's defect classes and demands a failure scenario per finding; "No defects found." is a valid review. **Needs the `ANTHROPIC_API_KEY` repo secret and the Claude GitHub App installed** (§7 item 45). Billed per PR. |
+| `.github/workflows/claude-review.yml` | **Superseded on Day 22 (next row).** Day 21: written, never run. `anthropics/claude-code-action@v1` on every non-draft PR update, `claude-sonnet-5-5`, 30 turns, 20 minutes, a superseded run cancelled. Read-only tools plus inline comments and one sticky summary. The prompt lists this repository's defect classes and demands a failure scenario per finding; "No defects found." is a valid review. **Needs the `ANTHROPIC_API_KEY` repo secret and the Claude GitHub App installed** (§7 item 45). Billed per PR. |
+| `.github/workflows/claude-review.yml` (Day 22) + `.github/claude/review.md` | **Day 22. Label-triggered, subscription-billed, never run.** Workflow `claude`: the `claude-review` label runs a read-only review whose instructions are `.github/claude/review.md` (read at run time); the `claude-tests` label writes tests, runs the offline suite, and commits - a workflow step pushes only if every changed file is under `tests/` and the suite passes. Auth is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`); without it each job skips with a warning. Prompt tuning is local and recorded in `docs/design-notes/review-prompt-tuning.md`. |
+| Prompt ordering (Day 22) | One rule (decision #43): stable reference first, freshest and most specific last, query at the end. `build_incident_context` ends with the live observations; the Docs agent's documents precede its context; a refinement round is planner's block, digests, then the gaps to close. Each pinned by a test. Unmeasured for accuracy under the $0 rule. |
 | `tools/github/` trimming | **Day 21.** A commit is its subject line (`commits.commit_headline`), `message_truncated`, and for a merge commit `pull_request_title` from the body. Patches share `PATCH_BUDGET_CHARS` (8,000) a reply, spent by `patch_priority` (config, code, tests, docs); a file the budget missed is `patch: null, patch_truncated: true`, and the new `patch_paths` input asks for it. `touched_paths` is `null` when not asked (was `[]`). `diff_release` commits are subject-only too, no shape change (`contract-changes.md`, 2026-09-30). `scripts/measure_tool_replies.py` (free, GitHub reads) is the before/after: -34% on the run's five calls. |
 | `llm/client.py` cut-off calls | **Day 21.** `run_tool_loop` answers a `tool_use` in a round that stopped for any reason but `tool_use` (in practice `max_tokens`) with an error `tool_result`, and never runs it. Before, the conversation went on with the call unanswered and the API refused the next request (war story #14). Every scripted fake client now checks the API's pairing rule on every request (`tests/wire.py`). |
 | `coordinator/synthesis.py` retries | **Day 21.** `ModelSynthesiser` runs inside `emit_with_retry` like every agent (`agent="synthesis"` in the `RetryLog`); a malformed payload and a confident uncited answer are `format`, an invented id `grounding` with synthesis-specific advice (`emit_with_retry(grounding_advice=)`), truncation and no call never retried. |
@@ -245,12 +260,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1056 passed
+uv run pytest -q                                                   # expect 1058 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1056 passed** with the stack up at the end of Day 21 (2026-09-30);
-without Docker Desktop the 17 `integration`-marked tests skip and it is 1039. CI runs the
+Costs nothing. Last run: **1058 passed** with the stack up at the end of Day 22 (2026-10-01);
+without Docker Desktop the 17 `integration`-marked tests skip and it is 1041. CI runs the
 latter on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
@@ -292,7 +307,33 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 22 - ordering + false positives
+## 6. Next work: Day 23 - handoffs + model routing, at $0
+
+**From the plan:** A: structured digests across handoffs - Incident passes a digest to
+Deployment, not a raw dump. B: model routing experiment - Haiku/Sonnet for subagents, Opus
+for the coordinator; measure cost and latency per configuration.
+
+**A is mostly a check.** The digest exists since Day 13 (`coordinator/handoff.py`) and the
+executor hands any direct dependency's digest to its dependent, whatever the agents. What
+is not shown is the Incident -> Deployment edge specifically: a plan where Deployment
+`depends_on` Incident. That is an offline test with scripted runners, free.
+
+**B is a projection under the $0 rule (§1), and must say so.** Cost per configuration =
+exact input tokens (the token-counting endpoint, if it is free - confirm with the
+`claude-api` skill before relying on it) plus the output tokens measured on the recorded
+runs, priced by `llm/pricing.py` for each model. Latency and quality per model cannot be
+measured without calls; the write-up says that rather than guessing. Recorded runs to
+price: the Day 21 four-agent run and the Day 20 eval runs.
+
+**Waiting on the owner:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) as a repo
+secret and the Claude GitHub App, for the first labelled review. The Day 21
+`ANTHROPIC_API_KEY` secret is no longer used.
+
+<!-- superseded Day 22 notes follow, kept for the record -->
+**Day 22 as planned:** A: position-aware input ordering. B: tune the review prompt for low
+false-positive feedback; add test generation. Done 2026-10-01 at $0; see §3, decisions
+#43-44, and `docs/design-notes/review-prompt-tuning.md`.
+
 
 **From the plan:** A: position-aware input ordering - freshest signals and the query where
 attention is strongest. B: tune the review prompt for low false-positive feedback; add test
@@ -962,7 +1003,9 @@ for github queries.
    801 s and 773 s against 703 s and 661 s measured on the original runs plus the nine items
    kept from the day before. Close enough to quote as "about 13 minutes a run"; not
    measured as one wall clock.
-45. **The Claude review workflow has never run.** `.github/workflows/claude-review.yml` needs
+45. **The Claude review workflow has never run.** *(Day 22: it now needs
+   `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`, and a label to start; the rest
+   of this item stands.)* `.github/workflows/claude-review.yml` needs
    two things only the repository owner can do: an `ANTHROPIC_API_KEY` repository secret on
    `m-misbahuddin/aioc` (Settings -> Secrets and variables -> Actions), and the Claude GitHub
    App installed on the repository (https://github.com/apps/claude, or `/install-github-app`

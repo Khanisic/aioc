@@ -615,6 +615,29 @@ Trace `315f9cd06161e2912e7f29c2581ea99a`; records `test-results/runs/2026-09-30/
 
 ---
 
+## Day 22 - the review prompt, scored locally ($0 of API spend)
+
+Five blind reviews by a fresh Sonnet 5 subagent with `.github/claude/review.md` as its only instructions, run in a Claude Code session rather than on API credit; every finding checked against the code by hand (`docs/design-notes/review-prompt-tuning.md`).
+
+| Prompt | Diff | Findings | True | False | Planted defects caught |
+|---|---|---|---|---|---|
+| v1 | PR #25 | 1 | 1 | 0 | - |
+| v1 | PR #24 | 0 | - | - | - |
+| v1 | PR #25, two defects planted | 1 | 1 | 0 | 1 of 2 |
+| v2 | PR #25, two defects planted | 2 | 2 | 0 | 2 of 2 |
+| v2 | PR #25 | 2 | 2 | 0 | - |
+
+- **Six findings, no false positives.** The prompt's demand for a failure scenario per finding holds.
+- **Recall was the gap.** v1 missed a budget the change declared and never spent; v2 adds "check the change against its own words" and caught it.
+- **v2 found a real bug in Day 21's code**: `patch_paths: []` with `include_patch: true` returned no patches and said nothing. Now a `validation` error.
+- **One run per cell.** Output varies run to run; two planted defects is a smoke test of recall, not a rate.
+
+| | |
+|---|---|
+| Offline suite | 1058 passed with the stack up (1056 after Day 21) |
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:

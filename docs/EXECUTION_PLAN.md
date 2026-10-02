@@ -553,6 +553,16 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 ### Day 22 — Ordering + false positives
 - **A:** Position-aware input ordering — freshest signals and the query where attention is strongest.
 - **B:** Tune the review prompt for **low false-positive** feedback; add test generation.
+- **Done (2026-10-01), at $0 of API spend** (the rule from this day on, HANDOFF sec 1). A: one
+  ordering rule for every prompt - stable reference first, freshest and most specific last,
+  query at the end - applied to the live-metrics block (observations last), the Docs agent
+  (documents before context), and refinement rounds (the gaps to close after the digests);
+  each pinned by a test, and unmeasured for accuracy because no paid eval runs. B: the review
+  prompt moved to `.github/claude/review.md` and was tuned on scored local reviews
+  (`docs/design-notes/review-prompt-tuning.md`): v1 made no false positives on two merged PRs
+  but missed a planted budget bug; v2 adds "check the change against its own words" and caught
+  both planted defects. Both Claude jobs are label-triggered on a subscription token; test
+  generation commits, and a workflow step pushes only a tests-only commit that passes.
 
 ### Day 23 — Handoffs + model routing
 - **A:** Structured digests across handoffs — Incident passes a digest to Deployment, not a raw dump.

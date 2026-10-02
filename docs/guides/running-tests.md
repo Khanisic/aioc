@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 1056 tests, no network, no API key; 17 skip without the Docker stack
+uv run pytest -q              # 1058 tests, no network, no API key; 17 skip without the Docker stack
 ```
 
 Selecting a subset:

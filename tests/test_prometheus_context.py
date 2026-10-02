@@ -197,6 +197,22 @@ def test_context_explains_the_fan_out_topology():
     assert "502" in context and "downstream" in context
 
 
+def test_the_live_observations_come_last_where_the_query_follows():
+    # Day 22: what does not change between requests first, the freshest signals last. The
+    # agent's query is appended after this block, so the observations sit next to it.
+    context = build_incident_context(
+        _client(_healthy_responder),
+        Window.last(15, now=_NOW),
+        extra_notes="On-call note: a deploy went out at 11:50Z.",
+    )
+    inventory = context.index("Service inventory:")
+    topology = context.index("Topology:")
+    notes = context.index("On-call note:")
+    observations = context.index("Prometheus observations")
+    assert inventory < topology < notes < observations
+    assert context.rstrip().splitlines()[-1].startswith(f"- {DEMO_SERVICES[-1]}")
+
+
 def test_error_ratio_query_yields_zero_rather_than_nothing_when_there_are_no_errors():
     # Measured against live Prometheus: the bare division returns NO series for a service with
     # traffic and no 5xx, which renders as "not measured" - i.e. the agent is told nobody

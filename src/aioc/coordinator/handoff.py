@@ -89,7 +89,7 @@ HANDOFF_HEADER = (
 REFINEMENT_HEADER = (
     "Refinement round {round}. The coordinator is re-delegating to you because an earlier "
     "round could not establish the following. Close exactly these gaps; the handed-off "
-    "results below are what that round found and must not be re-derived."
+    "results above are what that round found and must not be re-derived."
 )
 
 

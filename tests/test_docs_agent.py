@@ -271,6 +271,12 @@ def test_prompt_carries_context_documents_and_query_explicitly():
     assert _DOC_1_TEXT in prompt
     assert 'retrieved="2" searched="18" mode="hybrid"' in prompt
     assert prompt.endswith(f"Documentation query: {_QUERY}")
+    # Long reference material first, the situation next to the query (Day 22).
+    assert (
+        prompt.index("<documents ")
+        < prompt.index("<context>")
+        < prompt.index("Documentation query:")
+    )
 
     system = system_text(call["system"])
     assert system == DOCS_STRUCTURED_SYSTEM_PROMPT

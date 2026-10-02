@@ -734,3 +734,38 @@ The reviewer can read, grep, view the diff, and comment inline; it cannot push, 
 Letting the reviewer run the tests: CI already does, and a reviewer with a shell is a reviewer with the repository's secrets in reach.
 
 **What I would watch.** Day 22 is tuning it for false positives, which needs its first real reviews to measure; until the repository secret and the Claude GitHub App are in place, the workflow is written and has never run.
+
+## 43. One ordering rule for every prompt: stable reference first, freshest and most specific last, the query at the end
+
+**Context.** Day 22's plan was position-aware input ordering: the freshest signals and the query where a long prompt's attention is strongest.
+Every agent already put its query last.
+What sat in front of it had grown by accretion: the live-metrics block put the observations in the middle and the static topology next to the query; the Docs agent put the short situation before the long documents; and a refinement round put the one instruction specific to that call, the gaps it must close, above several thousand characters of digest.
+
+**Decision.** One rule, applied wherever a prompt is composed: what does not change between requests first, long reference material next, then the situation, then the most specific and freshest part, then the query.
+The metrics block is inventory and topology, then the on-call's notes, then the observations.
+The Docs agent's documents come before its context.
+A refinement round's context is the planner's block, then the digests, then the gaps to close.
+Each order is pinned by a test, so the next change to a prompt cannot undo it by accident.
+The system prompts did not move: they are the cache prefix (decision #35), and nothing in this rule needs them to.
+
+**What moving it found.** The refinement block's own text said "the handed-off results below"; after the move they were above it, and a reader of the prompt would have been pointed at nothing.
+And an agent the plan skipped has no planner's block, so the composed context began with two blank lines until the composition stripped them.
+
+**What I would watch.** This is applied on Anthropic's published long-context guidance, not on a measurement here: the project's $0 rule (HANDOFF sec 1) leaves no eval run to score it, and token counts cannot see an ordering.
+If a paid eval is ever run again, it is the first thing it should say something about.
+
+## 44. Claude on pull requests runs on request, on a subscription, and cannot push past its own boundary
+
+**Context.** The Day 21 review workflow ran on every push, billed API credit, and had never run.
+Day 22 added test generation, which writes code, and the project moved to spending nothing on the API for the rest of the build.
+
+**Decision.** Both jobs start from a label (`claude-review`, `claude-tests`), never from a push: a review nobody asked for is the one nobody reads, and each run costs usage.
+They authenticate with a Claude subscription token, not an API key.
+The review's instructions live in `.github/claude/review.md`, read by the workflow at run time, so the prompt that is tuned locally is the prompt that runs.
+Test generation may edit, run the offline suite, and commit; it may not push.
+A workflow step pushes the commit, and only when every file it changes is under `tests/` and the suite passes on it - the boundary is enforced by the runner, not asked of the model.
+
+**What tuning measured.** Five blind local reviews, six findings, all real (`docs/design-notes/review-prompt-tuning.md`).
+False positives were never the problem; recall was. v1 missed a planted bug of a kind it does not list - a budget the change declares and never spends - and v2's one added paragraph ("check the change against its own words") caught it, then found a real bug of the same shape in Day 21's own code.
+
+**What I would watch.** A push made with the workflow's own token does not trigger CI on the new commit, so generated tests are checked by the step that pushes them and not by `ci.yml` until the next human push.

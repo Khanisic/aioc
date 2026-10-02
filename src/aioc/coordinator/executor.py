@@ -579,12 +579,15 @@ class Executor:
         }
         planned = next((inv for inv in plan.selected_agents if inv.agent is agent), None)
         planner_block = _planned_context(planned, plan) if planned is not None else None
-        head = refinement_block(round_number, gaps, raised_by)
-        if planner_block:
-            head = f"{planner_block.rstrip()}\n\n{head}"
+        # The planner's block, the raising responses' digests, then the refinement block
+        # (Day 22): the gaps this invocation must close are the most specific thing it is
+        # told, so they sit last, next to the query that asks for them, rather than under
+        # several thousand characters of digest.
         context = compose_dependent_context(
-            head, [(run.executed[src], run.by_invocation[src]) for src in sources]
-        )
+            planner_block or "", [(run.executed[src], run.by_invocation[src]) for src in sources]
+        ).strip()
+        tail = refinement_block(round_number, gaps, raised_by)
+        context = f"{context}\n\n{tail}" if context else tail
         ids = ", ".join(g.id for g in gaps)
         invocation = AgentInvocation(
             invocation_id=_new_id("inv"),

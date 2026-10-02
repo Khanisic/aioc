@@ -258,10 +258,11 @@ def build_incident_context(
 ) -> str:
     """Render live Prometheus data as the Incident agent's explicit context block.
 
-    This is the Day 5 replacement for the hand-written fixture. The shape deliberately
-    matches what the Day 3/4 prompt was already written against - service inventory, then
-    per-service observations, then the operational notes an on-call would have - so the
-    agent's prompt did not have to change to consume real data.
+    This is the Day 5 replacement for the hand-written fixture. Ordered by how fast each
+    part goes stale (Day 22): the service inventory and the topology, which do not change
+    between requests, then the operational notes an on-call would have, then the live
+    observations last - the agent's query follows this block, and the freshest signals sit
+    next to it, where a long prompt's attention is strongest.
 
     "not measured" is used rather than 0 wherever a series is absent, because the agent is
     required to distinguish "looked and found nothing" from "could not look", and a zero
@@ -273,6 +274,14 @@ def build_incident_context(
     lines = [
         "Service inventory: checkout-api (front, fans out to both downstreams), "
         "payments-api, inventory-api (downstreams).",
+        "",
+        "Topology: every checkout-api /process call fans out to payments-api and "
+        "inventory-api and returns 502 if either downstream fails, so a checkout-api "
+        "502 rate implicates a downstream rather than checkout-api itself.",
+    ]
+    if extra_notes:
+        lines += ["", extra_notes.strip()]
+    lines += [
         "",
         f"Prometheus observations, window {start} to {end} (rates over {window.lookback}):",
     ]
@@ -293,15 +302,6 @@ def build_incident_context(
             f"RSS {_fmt_mb(m.get('rss_bytes'))}, "
             f"CPU {m.get('cpu_seconds', float('nan')):.3f} cores"
         )
-
-    lines += [
-        "",
-        "Topology: every checkout-api /process call fans out to payments-api and "
-        "inventory-api and returns 502 if either downstream fails, so a checkout-api "
-        "502 rate implicates a downstream rather than checkout-api itself.",
-    ]
-    if extra_notes:
-        lines += ["", extra_notes.strip()]
 
     rendered = "\n".join(lines)
     # Belt and braces: the guard above checks the queries, this checks the output. A metric
