@@ -553,14 +553,76 @@ The set is `seeded-incidents` v1 (sha256 `1dafa5a554b7`), 38 items, `claude-sonn
 
 ---
 
+## Day 21 - the four-agent run with caching and the roster, then the trimming
+
+### The run
+
+`scripts/check_day15_integration.py --deploy --max-rounds 1`, Sonnet 5, 2026-09-30.
+The Day 15 scenario unchanged (PR #11's release, `downstream_latency` injected), run for the first time with prompt caching on (Day 19), the sibling roster in every context (Day 16), and the validation-retry loop (Day 17).
+**PASS**: all four planned and answering, three overlapping parallel pairs, Deployment sequential after GitHub with its digest.
+The answer was the Day 15 answer: PR #11 touches tracing code only, the release changed no configuration, image, or manifest, and the slow origin is payments-api.
+
+| | Day 15 attempt 2 | Day 21 |
+|---|---|---|
+| Round-1 re-delegations | 4 (every agent re-asked for its siblings' parts) | 1 (Deployment, on Incident's gap) |
+| Unresolved gaps | 14 | 6 |
+| Input tokens | 342.9k | 311.9k, 62% read from the cache |
+| Output tokens | 47.5k | 41.4k |
+| Cost | ~$1.16 | **$0.74** ($1.04 for the same tokens uncached) |
+| Wall clock | 279.0 s | 402.6 s |
+
+| Round | Invocation | Span | Result |
+|---|---|---|---|
+| 0 | Incident | 0.0 -> 26.9 s | `partial` @ 0.55, no tools |
+| 0 | Docs | 0.0 -> 51.7 s | `partial` @ 0.60; the first report refused (`format`: a confident answer with no evidence) and recovered by one retry |
+| 0 | GitHub | 0.0 -> 140.3 s | `complete` @ 0.85; `get_pull_request`, 2x `list_commits`, `diff_refs` |
+| 0 | Deployment | 140.3 -> 214.1 s | `complete` @ 0.74; `diff_release`, 2x `check_rollout_health` |
+| 1 | Deployment | 214.1 -> 366.6 s | **failed: API 400**, `tool_use` without `tool_result` (below) |
+
+The roster did what Day 16 built it for: one re-delegation instead of four.
+The tool loop's moving cache marker is measured live for the first time: 193k of 312k input tokens were cache reads.
+Output is now the larger half of the bill ($0.41 of $0.74), and cache writes the next ($0.26); uncached input is $0.03.
+The retry loop's first live numbers: 4 reports emitted, 3 accepted first time, 1 recovered by one retry (`format`), 0 exhausted.
+
+Two defects, both the harness's, both fixed and pinned offline the same day:
+
+- **The API refused the round-1 Deployment call with a 400.** A tool-loop round that stops at `max_tokens` part-way through a `tool_use` returned its conversation with that call unanswered, and the forced emit appended to it. `run_tool_loop` now answers a cut-off call with an error `tool_result` and never runs it. Every scripted fake client now enforces the API's pairing rule (`tests/wire.py`), and the reproduction failed with the API's own message before the fix (war story #14).
+- **The model synthesis fell back to the deterministic form** because its payload lacked `answer` and `confidence`, a format slip the retry loop exists for, and the synthesis was the one forced emit not inside it. It is now (`ModelSynthesiser` through `emit_with_retry`, with advice that fits a report with no gaps).
+
+Trace `315f9cd06161e2912e7f29c2581ea99a`; records `test-results/runs/2026-09-30/20260930T184259Z__llm__day15-integration`.
+
+### The trimming
+
+`uv run python scripts/measure_tool_replies.py` (free; GitHub reads only), the run's own calls, `main` against the Day 21 branch on the same repository state:
+
+| Reply | Before (chars) | After (chars) | |
+|---|---|---|---|
+| `get_pull_request` #11 | 4,731 | 3,847 | -19% |
+| `get_pull_request` #11 with patches | 16,811 | 12,309 | -27% |
+| `list_commits` (20) | 16,820 | 8,948 | -47% |
+| `diff_refs` with patches | 14,924 | 10,473 | -30% |
+| `diff_release` | 1,847 | 837 | -55% |
+| **All five** | **55,133** | **36,414** | **-34%** |
+
+- **Commit messages were nine tenths of a commit list.** 535 characters on average against a 64-character subject line. A commit now carries its subject, `message_truncated`, and for a GitHub merge commit the PR title read out of its body, because the subject of a merge commit names only a branch.
+- **Patches share an 8,000-character budget a reply**, spent on configuration and code before tests and documentation. On PR #11 the budget cut `HANDOFF.md`, the largest patch in the PR and the least relevant to a latency question. A file the budget did not reach says so, and `patch_paths` asks for it.
+- **The run read the same six patches twice**, once through the PR and once through `diff_refs` over the PR's merge range. The GitHub agent's rules now say so.
+- **Not yet measured live.** These are reply sizes; the effect on a run's bill needs the next four-agent run. At today's split, a smaller reply saves its one cache write and its reads, not its full input price.
+
+| | |
+|---|---|
+| Offline suite | 1056 passed with the stack up (1027 before Day 21) |
+
+---
+
 ## What is not measured yet
 
 Say this plainly rather than letting it be discovered:
 
 - **The eval baseline is one model, two agents, and one run per configuration.** `evaluations/baseline.md` (Day 20) scores the Incident and Docs agents on the seeded set with Sonnet 5; the GitHub and Deployment agents, the planner, and the synthesis have no eval, and a single run per configuration cannot separate the model's variance from a change. Day 24 re-runs it against the same file.
-- **No token-reduction baseline.** `meta.token_estimate` exists on every tool response so there *will* be a baseline; nothing has been reduced yet.
+- **Token reduction is measured on the replies, not yet on a run.** Day 21 cut the five commit-bearing replies by 34% (`scripts/measure_tool_replies.py`); what that does to a four-agent run's bill is the next `check_day15_integration.py` run, and Day 24's eval re-run covers the two forced-emit agents.
 - **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
 - **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
-- **Prompt caching is measured on the forced-emit agents only.** Both eval agents read their prefix from the cache, realtime and in a batch (Day 20). The tool loop's moving marker - the GitHub and Deployment agents' rounds, where the 22k-token PR read is re-sent - has never run live with caching on; `check_day15_integration.py` is where that number comes from.
+- **Prompt caching in the tool loop is one run's measurement.** The Day 21 four-agent run read 62% of its input from the cache; HANDOFF item 33's claim that the forced emit after a tool loop re-reads its conversation at full price is still reasoned from the documentation, not isolated in a measurement.
 - **The Batch API's queue time is a sample of three.** 2 h 40 min, 1 h 42 min, and 45 min on one day; a batch is the cheaper lever only for work nobody is waiting on.

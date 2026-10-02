@@ -1,0 +1,45 @@
+# The offline gate: the suite, lint, and types, on every push to main and every PR.
+#
+# The suite makes no API and no network calls by design (HANDOFF sec 1), so it runs here
+# with no secrets at all. The `integration`-marked tests need the Docker stack and its
+# seeded corpus; they are deselected rather than left to time out, as `make test` does.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --all-groups --locked
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Types
+        run: uv run mypy
+
+      - name: Tests (offline)
+        env:
+          AIOC_RUNLOG: "0"
+        run: uv run pytest -q -m "not integration"

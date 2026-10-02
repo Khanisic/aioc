@@ -215,6 +215,32 @@ class LLMClient:
                 continue
 
             if resp.stop_reason != "tool_use":
+                # A turn cut off at max_tokens can end part-way through a tool call. Its input
+                # is whatever was written before the cut, so it is never run - but it is
+                # answered, because the API refuses any later request that leaves a
+                # `tool_use` without its `tool_result` (the 2026-09-30 live 400).
+                unanswered = [b for b in resp.content if isinstance(b, ToolUseBlock)]
+                if unanswered:
+                    convo.append(
+                        cast(
+                            "MessageParam",
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": block.id,
+                                        "content": (
+                                            f"Not run: this call was cut off at the "
+                                            f"{resp.stop_reason} stop before it was complete."
+                                        ),
+                                        "is_error": True,
+                                    }
+                                    for block in unanswered
+                                ],
+                            },
+                        )
+                    )
                 return ToolLoopResult(
                     final_message=resp,
                     messages=convo,

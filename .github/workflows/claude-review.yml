@@ -1,0 +1,94 @@
+# Claude Code as the PR reviewer (CCA-F Domain 3, the workflow half).
+#
+# Runs on every non-draft PR update and posts inline comments on the lines it finds
+# something wrong with, plus one summary comment. It reads the code and the PR; it
+# cannot push, merge, or run the project. Billed per run, so it is capped by turns,
+# by wall clock, and by cancelling a superseded run when a new commit lands.
+#
+# Needs, once: the `ANTHROPIC_API_KEY` repository secret, and the Claude GitHub App
+# installed on the repository (https://github.com/apps/claude), which is what posts.
+name: claude-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      # A job-level `if` cannot read secrets, so the check is a step. Without the key the
+      # review is skipped with a warning rather than failed: a red check on every PR until
+      # the secret exists, or on a fork PR that never gets it, trains people to ignore it.
+      - name: Check for the API key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANTHROPIC_API_KEY is not set for this run; the Claude review was skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.key.outputs.present == 'true'
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.key.outputs.present == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 30
+            --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),mcp__github_inline_comment__create_inline_comment"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are reviewing a pull request on AIOC, a multi-agent AIOps system.
+            Read CLAUDE.md first; it is the project's own description of its rules.
+            Get the change with `gh pr diff` and read the surrounding code before judging a line.
+
+            Report only defects: something that is wrong, with a concrete failure you can name
+            (these inputs or this state -> this wrong output, crash, or broken invariant).
+            A finding you cannot state that way is not a finding. Do not report style that ruff
+            enforces, naming preferences, missing docstrings, or praise. Silence is a valid review.
+
+            What this repository treats as a defect, beyond ordinary bugs:
+            - A change to a frozen shape in docs/CONTRACTS.md or src/aioc/contracts/ without the
+              sec 0 process in the same PR: a dated entry in docs/design-notes/contract-changes.md,
+              the old text struck through, a schema_version bump, and a sec 9 changelog row.
+            - null used as a guess or placeholder, or a null analytic field with no matching Gap;
+              [] returned where nothing was looked at (null means not looked, [] means looked and
+              found nothing).
+            - An `other` enum member without its detail string, or a detail string on a non-other value.
+            - A configuration VALUE reaching any tool reply, agent response, log, or test fixture
+              output. Keys only, at every layer.
+            - A tool error outside the four classes (transient, validation, business, permission),
+              `isError` and `ok` disagreeing, or a non-transient error marked retryable.
+            - A test that makes a network or API call without the `integration` marker, or any
+              code path that lets the offline suite reach the network.
+            - A tool server importing aioc.contracts (the MCP boundary is JSON Schema).
+            - chaos_knob_value or any chaos* signal reaching an agent's context.
+            - Anything that varies per request placed in a system prompt (it breaks prompt caching).
+            - An em dash character in any file.
+
+            Post each finding with mcp__github_inline_comment__create_inline_comment on the line
+            it is about: one sentence stating the defect, then the failure scenario.
+            Then post one top-level summary with `gh pr comment`: the number of findings, or
+            "No defects found." and one line on what you checked.

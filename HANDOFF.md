@@ -1,12 +1,14 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 20** of 30. `evaluations/baseline.md` exists: the eval set run three
-ways (realtime uncached, realtime cached, batch cached) on `claude-sonnet-5`, with the two cost
-levers measured at -29% and -61% on the same tokens and the scores the same within noise. It
-took two sittings and three harness fixes to make (§7 items 38-43), and every answer was paid
-for once.
+Written at the end of **Day 21** of 30. The four-agent run was re-made with caching, the
+roster, and the retry loop all live: **PASS, $0.74** against Day 15's ~$1.16, one refinement
+re-delegation instead of four. It found two harness defects (a conversation the API refuses,
+and the synthesis outside the retry loop), both fixed and pinned. The GitHub and deployment
+tool replies are trimmed by 34% on the run's own calls, and the repository has CI and a
+Claude Code PR-review workflow - the latter waiting on a secret and an app install only the
+owner can do (§7 item 45).
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 20.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 22.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -16,7 +18,7 @@ end of every working day.
 
 ## 1. Standing preferences (these are not negotiable defaults, they are the user's)
 
-- **Keep costs low.** The 1027-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 1056-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -48,19 +50,15 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**`origin/main` holds everything through Day 20's tooling (2026-09-29).** PRs #21, #22,
-and #23 are merged.
+**`origin/main` holds everything through Day 20 (2026-09-30).** PRs #21-#24 are merged, and
+`khanisic/main` was fast-forwarded to match the same day.
 
 - How Day 17 got there is worth knowing: PR #20 was merged 26 seconds after #19, before
   GitHub had retargeted it, and landed on `d16-schemas-hitl` instead of `main`. #21 carried
   its two commits to `main`. `origin/d16-schemas-hitl` still exists, holds nothing `main`
   lacks, and can be deleted. The trap is in §4.
-- `d20-baseline-measured` is the Day 20 baseline and what making it changed in the harness
-  (PR #24 was its first half, merged; the second half is the PR that carries
-  `evaluations/baseline.md`). Day 21 branches from `main` once it is merged.
-
-`khanisic/main` trails `origin/main` by eight merges (Days 13-20); the mirror push below
-is due.
+- `d21-trimming-pr-review` is Day 21, branched from `main` after #24 merged. Its PR is the
+  first one CI runs on.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -110,6 +108,11 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `run_evals.py --resume`, `check_day20_baseline.py --resume` | **Day 20, after the first live run.** Continue a stopped run, asking only for what it did not finish; refused for a directory of another set, model, or configuration. The checkpoint's form finds, for each configuration, the recorded run that got furthest. Items taken from a run that already recorded their cost are marked `reused_from`, and `cost_review.py` counts them once. `--rescore <run> --save` keeps a re-score beside the run as `eval.rescored.json`. |
 | `evals/scoring.py` `quoted` | **Day 20, after the first live run.** An evidence excerpt is `verbatim`, `stitched` (every part is in the context, joined by the model - counted on its own line, never as a hallucination), or ungrounded. Two of the first three live flags were stitched. |
 | `llm/batch.py` reattach | **Day 20, after the first live batch.** `MessageBatcher.wait` tolerates failed polls (`max_poll_failures`, 5) and waits up to a day; `run(on_submit=)` names the batch as soon as it exists; `DeferredClient.attach(batcher, batch_id)` keeps a batch's answers without having submitted it. A run writes each batch id to `batches.jsonl` before waiting (`store.py`), `read_run` returns them, and `run_batch(submitted=...)` reads them back before submitting anything. |
+| `.github/workflows/ci.yml` | **Day 21.** Lint, mypy, and the offline suite (`-m "not integration"`) on every push to `main` and every PR, no secrets. Rehearsed in a fresh clone with no `.env`: 1010 passed, the same as this machine without Docker. The first real run is the Day 21 PR. |
+| `.github/workflows/claude-review.yml` | **Day 21. Written, never run.** `anthropics/claude-code-action@v1` on every non-draft PR update, `claude-sonnet-5-5`, 30 turns, 20 minutes, a superseded run cancelled. Read-only tools plus inline comments and one sticky summary. The prompt lists this repository's defect classes and demands a failure scenario per finding; "No defects found." is a valid review. **Needs the `ANTHROPIC_API_KEY` repo secret and the Claude GitHub App installed** (§7 item 45). Billed per PR. |
+| `tools/github/` trimming | **Day 21.** A commit is its subject line (`commits.commit_headline`), `message_truncated`, and for a merge commit `pull_request_title` from the body. Patches share `PATCH_BUDGET_CHARS` (8,000) a reply, spent by `patch_priority` (config, code, tests, docs); a file the budget missed is `patch: null, patch_truncated: true`, and the new `patch_paths` input asks for it. `touched_paths` is `null` when not asked (was `[]`). `diff_release` commits are subject-only too, no shape change (`contract-changes.md`, 2026-09-30). `scripts/measure_tool_replies.py` (free, GitHub reads) is the before/after: -34% on the run's five calls. |
+| `llm/client.py` cut-off calls | **Day 21.** `run_tool_loop` answers a `tool_use` in a round that stopped for any reason but `tool_use` (in practice `max_tokens`) with an error `tool_result`, and never runs it. Before, the conversation went on with the call unanswered and the API refused the next request (war story #14). Every scripted fake client now checks the API's pairing rule on every request (`tests/wire.py`). |
+| `coordinator/synthesis.py` retries | **Day 21.** `ModelSynthesiser` runs inside `emit_with_retry` like every agent (`agent="synthesis"` in the `RetryLog`); a malformed payload and a confident uncited answer are `format`, an invented id `grounding` with synthesis-specific advice (`emit_with_retry(grounding_advice=)`), truncation and no call never retried. |
 | `evaluations/baseline.md`, `baseline.json`, `results/` | **Day 20. Made 2026-09-30.** Three runs of the 38-item set on `claude-sonnet-5`; the JSON is what `scripts/eval_baseline.py --against` compares Day 24's run with. The numbers are in §6 and `numbers.md`. |
 | `agents/incident.py` | `investigate` (prose) + `diagnose` (schema-validated), with a `usage` accumulator (the Day 7 cost seam). The schema-annotation helper it pioneered now lives in `agents/_annotate.py`, shared with the Docs agent. |
 | `agents/docs.py` | **Day 8.** `DocsAgent.answer`: retrieval first (injectable `CorpusRetriever` seam), documents rendered into the prompt, forced `emit_docs_report` tool, then grounding enforced in code - an unretrieved `document_id` or a paraphrased quote raises `DocsAgentError`. Coverage counters and the retrieval `ToolCallRef` are stamped by the runtime, never asked of the model. Registered in `default_runners()`. |
@@ -242,12 +245,13 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1027 passed
+uv run pytest -q                                                   # expect 1056 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1027 passed** with the stack up at the end of Day 20 (2026-09-30);
-without Docker Desktop the 17 `integration`-marked tests skip and it is 1010. Lint and mypy
+Costs nothing. Last run: **1056 passed** with the stack up at the end of Day 21 (2026-09-30);
+without Docker Desktop the 17 `integration`-marked tests skip and it is 1039. CI runs the
+latter on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
 most of it.
@@ -288,7 +292,36 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 21 - trimming + PR review
+## 6. Next work: Day 22 - ordering + false positives
+
+**From the plan:** A: position-aware input ordering - freshest signals and the query where
+attention is strongest. B: tune the review prompt for low false-positive feedback; add test
+generation.
+
+**B cannot start until the review has run.** Tuning for false positives needs reviews to
+count. First: the owner adds the `ANTHROPIC_API_KEY` repository secret and installs the
+Claude GitHub App (§7 item 45); the Day 21 PR's next push then gets the first review. Record
+every finding it makes as true or false positive in `numbers.md` before touching the prompt,
+so the tuning has a before. Test generation is a second prompt or a second job, not a
+rewrite of the review.
+
+**A has its inputs.** Every agent's prompt is built in one place per agent (`_prompt`) and
+the contexts are recorded verbatim (`context_passed`, and `contexts.json` in a live run's
+record), so the ordering can be read before it is changed. The Day 20 eval is the
+measurement for the Incident and Docs agents (`scripts/eval_baseline.py --against`); a
+reordering that moves the system prompt breaks the cache prefix (decision #35), so move
+only what comes after it.
+
+**The next live four-agent run** (`check_day15_integration.py --deploy --max-rounds 1`,
+**$0.74 measured on Day 21**, quote that) measures three things at once: the trimming on a
+run's bill (item 47), whether the round-1 Deployment call still hits `max_tokens` now that it
+is answered rather than refused (item 46), and the model synthesis inside the retry loop.
+
+<!-- superseded Day 21 notes follow, kept for the record -->
+**Day 21 as planned:** A: trim verbose tool outputs; structured fact extraction before content
+enters context. B: Claude Code in GitHub Actions - automated PR review on this repo. Done
+2026-09-30, the review workflow written and not yet run; see §3, §7 items 45-48, decisions
+#40-42, war story #14, and the Day 21 section of `numbers.md`.
 
 **From the plan:** A: trim verbose tool outputs; structured fact extraction *before* content
 enters context. B: Claude Code in GitHub Actions - automated PR review on this repo.
@@ -696,7 +729,9 @@ for github queries.
    themselves (`SAME_VERSION`, `UNKNOWN_RELEASE_VERSION`, `REGISTRY_UNAVAILABLE`,
    `REGISTRY_SCOPE_MISSING`, `UNKNOWN_SERVICE`, `VERSION_NOT_DEPLOYED`, `INVALID_LOOKBACK`,
    `PROMETHEUS_TIMEOUT`) are contract-named and need no paperwork.
-13. **`diff_release` input tokens are the next trimming target.** The Day 12 live run's diff
+13. ~~**`diff_release` input tokens are the next trimming target.**~~ **Done on Day 21 as a
+   subject-only commit message** (1,847 -> 837 characters on the Day 21 run's call); the
+   `include` default was left alone because it is a frozen input (`contract-changes.md`). The Day 12 live run's diff
    reply was ~7.4k tokens by `meta.token_estimate`, mostly commit messages (up to 1000
    chars each, 16 commits between the refs), and it was re-sent on every round: 62.7k input
    tokens for one question. Day 21 owns this; the honest fix is a first-line-only commit
@@ -718,7 +753,10 @@ for github queries.
    (`--model claude-haiku-4-5-20251001`, also the Day 23 question) and parts 1-3 written
    as loosely as part 4 (a second `v1` module in `VARIANTS`). Neither was run unasked;
    the standing rule says no model matrix without a request.
-16. **The sequential run costs ~264k input tokens, and it is not the handoff's fault.**
+16. ~~**The sequential run costs ~264k input tokens, and it is not the handoff's fault.**~~
+   **Trimmed on Day 21** (decision #40): subject-only commits, a patch budget spent on config
+   and code first, `patch_paths` for what it cut; -34% on the run's five replies. The
+   `max_patch_chars` input proposed below became the per-reply budget instead.
    PR #15 is 27 files and +4.6k lines; `get_pull_request` returned ~22k tokens that were
    re-sent on every GitHub round, and Deployment's ~7k-token diff reply on every
    Deployment round. The handoff itself was ~3k characters. Day 21 owns the trimming
@@ -777,7 +815,9 @@ for github queries.
    `ModelSynthesiser()` and prints the synthesis; re-running it (~4 calls) and re-rendering
    the GIF is a Day 15 nicety, not a blocker.
 
-22. **Out-of-scope gaps are the biggest cost lever found so far (Day 15).** Every agent
+22. ~~**Out-of-scope gaps are the biggest cost lever found so far (Day 15).**~~ **Measured
+   live on Day 21: one round-1 re-delegation instead of four, 6 open gaps instead of 14,
+   $0.74 instead of ~$1.16** (with caching on too, so the saving is both levers). Every agent
    receives the whole user query, so on a four-part question each one raised resolvable
    gaps for the parts that were not its own, pointing at the sibling that was already
    answering them ("no documentation describes PR #11" -> github). The loop did what it
@@ -795,8 +835,7 @@ for github queries.
    gap whose `suggested_agent` already answered this round) is a judgement call the loop
    was designed not to make (decision #22).
    **Built offline on Day 16, exactly as recommended** (`handoff.roster_block`, decision
-   #28), plus the same rule in every agent's `Gap.suggested_agent` guidance. **The live
-   re-run has not been made** - Docker Desktop was down, and it is the first thing in §6.
+   #28), plus the same rule in every agent's `Gap.suggested_agent` guidance.
 23. ~~**A third live-only agent refusal joined item 20's two.**~~ **Covered by the Day 17
    loop, live numbers pending.** The Docs agent's report was rejected for an extra field the
    model invented (`findings.coverage_answer_placeholder`, `extra_forbidden`) on a round-1
@@ -923,6 +962,32 @@ for github queries.
    801 s and 773 s against 703 s and 661 s measured on the original runs plus the nine items
    kept from the day before. Close enough to quote as "about 13 minutes a run"; not
    measured as one wall clock.
+45. **The Claude review workflow has never run.** `.github/workflows/claude-review.yml` needs
+   two things only the repository owner can do: an `ANTHROPIC_API_KEY` repository secret on
+   `m-misbahuddin/aioc` (Settings -> Secrets and variables -> Actions), and the Claude GitHub
+   App installed on the repository (https://github.com/apps/claude, or `/install-github-app`
+   from Claude Code). Until then the job passes with a warning that the review was skipped
+   (verified on PR #25); CI is unaffected. Once the key exists, the next push is the first
+   real review. Each review is billed (Sonnet 5.5, capped at 30 turns); watch the first few
+   in `cost_review.py`'s blind spot - Actions runs are not in `test-results/`, so the
+   Console is the only record of their cost.
+46. **Why the round-1 Deployment call hit `max_tokens` is not known.** 8,192 output tokens in
+   one tool-loop round is several reports' worth, and the run recorded no transcript of
+   the call (only the error). The harness now answers the cut-off call and goes on to the
+   forced emit, whose own truncation guard is the next line of defence. If it recurs, the
+   cause is worth one look before raising `AIOC_MAX_TOKENS`: a model writing its report as
+   prose before the tool call would be a prompt problem, not a budget one.
+47. **The trimming is measured on replies, not on a run's bill.** -34% on the Day 21 run's
+   five commit-bearing calls (`scripts/measure_tool_replies.py`). With caching on, a reply
+   costs mostly one cache write plus cheap reads, and output is now $0.41 of the run's
+   $0.74, so expect the bill to move less than the replies did. The next four-agent run
+   says how much.
+48. **The Incident agent raised a gap for logs it cannot read and sent it to Deployment.**
+   "No logs, traces, or spans from payments-api" went to the Deployment agent, which has no
+   log tool either; the round-1 call that failed was that re-delegation. No agent consumes
+   `search_container_logs` yet (item 15's servers are the routing study's subject only), so
+   the honest gap is `resolvable: false`. Worth a line in the Incident agent's gap guidance
+   when Day 22 touches its prompt for ordering.
 
 ## 8. Where things are written down
 
@@ -934,8 +999,8 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36, Day 20 #37-#39) |
-| Thirteen debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's, #12 Day 19's, #13 Day 20's) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36, Day 20 #37-#39, Day 21 #40-#42) |
+| Fourteen debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's, #12 Day 19's, #13 Day 20's, #14 Day 21's) |
 | The eval set, and the rule that a case selects and never authors | `evaluations/README.md` |
 | The Day 20 baseline, three runs side by side | `evaluations/baseline.md` (`baseline.json` for Day 24's comparison) |
 | The routing case study, before and after | `docs/case-study-tool-routing.md` |

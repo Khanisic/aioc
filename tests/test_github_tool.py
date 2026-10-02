@@ -150,7 +150,8 @@ def test_list_commits_is_bounded_and_reports_truncation_honestly():
     assert len(p["data"]["commits"]) == 3
     assert p["meta"]["returned"] == 3 and p["meta"]["truncated"] is True  # a 4th existed
     assert p["data"]["paths_included"] is False
-    assert p["data"]["commits"][0]["touched_paths"] == []  # "not asked", not "none"
+    # null is "not asked"; [] would claim the commit touched nothing.
+    assert p["data"]["commits"][0]["touched_paths"] is None
 
 
 def test_list_commits_include_paths_fetches_each_commit():
@@ -232,6 +233,145 @@ def test_patches_are_clipped_per_file_and_flagged():
         gs.call("get_pull_request", {"number": 12, "include_patch": True}, api=_api(handler))
     )
     assert p["data"]["files"][0]["patch_truncated"] is True and p["meta"]["truncated"] is True
+
+
+# ------------------------------------------------------------ trimming (Day 21)
+
+
+def _pr_with_files(files: list[dict[str, Any]]) -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/files"):
+            return httpx.Response(200, json=files)
+        if request.url.path.endswith("/commits"):
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json=_pr_json())
+
+    return _api(handler)
+
+
+def _file(name: str, size: int) -> dict[str, Any]:
+    return {
+        "filename": name,
+        "status": "modified",
+        "additions": 1,
+        "deletions": 0,
+        "patch": "+" + "a" * (size - 1),
+    }
+
+
+def test_a_commit_is_its_subject_line_and_says_a_body_was_dropped():
+    subject, cut, title = gs.commit_headline("Fix the pool (#12)\n\nLong explanation.\nMore.")
+    assert (subject, cut, title) == ("Fix the pool (#12)", True, None)
+    assert gs.commit_headline("One line") == ("One line", False, None)
+    assert gs.commit_headline("") == ("", False, None)
+
+
+def test_a_merge_commit_carries_the_pull_request_title_from_its_body():
+    message = "Merge pull request #24 from o/branch\n\nDay 20: the baseline\n\nMore text."
+    assert gs.commit_headline(message) == (
+        "Merge pull request #24 from o/branch",
+        True,
+        "Day 20: the baseline",
+    )
+    # A body line is only a title when the subject is GitHub's merge line.
+    assert gs.commit_headline("Refactor\n\nfirst body line")[2] is None
+
+
+def test_commit_entries_carry_the_headline_not_the_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = "Merge pull request #7 from o/x\n\nAdd the pool timeout\n\n" + "detail " * 200
+        return httpx.Response(200, json=[_commit_json("c" * 40, body)])
+
+    p = _payload(gs.call("list_commits", {"max_commits": 1}, api=_api(handler)))
+    (commit,) = p["data"]["commits"]
+    assert commit["message"] == "Merge pull request #7 from o/x"
+    assert commit["message_truncated"] is True
+    assert commit["pull_request_number"] == 7
+    assert commit["pull_request_title"] == "Add the pool timeout"
+    assert "detail" not in json.dumps(p)
+
+
+@pytest.mark.parametrize(
+    ("path", "priority"),
+    [
+        (".env.example", 0),
+        ("docker-compose.yml", 0),
+        ("infrastructure/k8s/deploy.yaml", 0),
+        ("demo-app/Dockerfile", 0),
+        ("src/aioc/observability/tracing.py", 1),
+        ("scripts/check_day9_trace.py", 1),
+        ("tests/test_tracing.py", 2),
+        ("pkg/thing_test.go", 2),
+        ("HANDOFF.md", 3),
+        ("docs/EXECUTION_PLAN.md", 3),
+    ],
+)
+def test_patch_priority_spends_the_budget_on_config_and_code_first(path: str, priority: int):
+    assert gs.patch_priority(path) == priority
+
+
+def test_the_patch_budget_is_spent_by_priority_and_what_it_misses_says_so():
+    chunk = gs.MAX_PATCH_CHARS
+    files = [
+        _file("HANDOFF.md", chunk),  # documentation, listed first
+        _file("tests/test_x.py", chunk),
+        _file("src/app.py", chunk),
+        _file(".env.example", 50),
+    ]
+    p = _payload(
+        gs.call(
+            "get_pull_request", {"number": 12, "include_patch": True}, api=_pr_with_files(files)
+        )
+    )
+    by_path = {f["path"]: f for f in p["data"]["files"]}
+    # GitHub's order is kept in the list; only the budget's spending order changes.
+    assert [f["path"] for f in p["data"]["files"]] == [f["filename"] for f in files]
+    assert by_path[".env.example"]["patch_truncated"] is False
+    assert by_path["src/app.py"]["patch_truncated"] is False
+    # The test file got what was left; the documentation file got nothing and says so.
+    assert by_path["tests/test_x.py"]["patch_truncated"] is True
+    assert by_path["HANDOFF.md"]["patch"] is None and by_path["HANDOFF.md"]["patch_truncated"]
+    total = sum(len(f["patch"] or "") for f in p["data"]["files"])
+    assert total <= gs.PATCH_BUDGET_CHARS
+    assert p["meta"]["truncated"] is True
+
+
+def test_patch_paths_asks_for_exactly_the_patches_a_first_reply_left_out():
+    files = [_file("src/app.py", gs.MAX_PATCH_CHARS), _file("HANDOFF.md", 300)]
+    p = _payload(
+        gs.call(
+            "diff_refs",
+            {"base": "v1", "head": "v2", "patch_paths": ["HANDOFF.md"]},
+            api=_api(
+                lambda r: httpx.Response(
+                    200,
+                    json={"status": "ahead", "total_commits": 0, "commits": [], "files": files},
+                )
+            ),
+        )
+    )
+    app, handoff = p["data"]["files"]
+    assert "patch" not in app  # not asked for
+    assert handoff["patch"] == files[1]["patch"] and handoff["patch_truncated"] is False
+
+
+def test_a_binary_file_stays_distinct_from_one_the_budget_missed():
+    p = _payload(
+        gs.call(
+            "get_pull_request",
+            {"number": 12, "include_patch": True},
+            api=_pr_with_files([{"filename": "logo.png", "status": "added"}]),
+        )
+    )
+    (entry,) = p["data"]["files"]
+    assert entry["patch"] is None and entry["patch_truncated"] is False
+
+
+@pytest.mark.parametrize("bad", ["HANDOFF.md", [""], [1], ["x"] * (gs.MAX_PATCH_PATHS + 1)])
+def test_patch_paths_is_validated_structurally(bad: Any):
+    p = _payload(gs.call("get_pull_request", {"number": 12, "patch_paths": bad}, api=_api(_happy)))
+    assert p["ok"] is False and p["error"]["class"] == "validation"
+    assert p["error"]["details"]["field"] == "patch_paths"
 
 
 # ---------------------------------------------------------------------- validation

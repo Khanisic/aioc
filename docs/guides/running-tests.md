@@ -16,7 +16,7 @@ Everything under "The live checks" bills.
 
 ```bash
 uv sync --all-groups          # once, or after a dependency change
-uv run pytest -q              # 1027 tests, no network, no API key; 17 skip without the Docker stack
+uv run pytest -q              # 1056 tests, no network, no API key; 17 skip without the Docker stack
 ```
 
 Selecting a subset:
@@ -42,6 +42,15 @@ Every recipe in the `Makefile` is a single pasteable command; install Make with 
 
 Note the mypy scope: `pyproject.toml` sets `packages = ["aioc"]`, so `demo-app/`, `scripts/`, `examples/`, and `tests/` are linted by ruff but **not** type-checked.
 A type error in `scripts/runlog.py` will not fail `mypy`.
+
+### In CI
+
+`.github/workflows/ci.yml` runs the same three steps on every push to `main` and every pull request: `ruff check` and `ruff format --check`, `mypy`, and `pytest -q -m "not integration"`.
+It needs no secrets, because the suite makes no network calls, and it deselects the 17 `integration` tests rather than letting them wait on a database that is not there.
+A test that passes here and fails there is most likely reading a file only this machine has; the workflow was rehearsed in a fresh clone with no `.env` before it was committed, and that is the way to reproduce a CI failure locally.
+
+Every scripted fake client that stands in for `messages.create` calls `tests.wire.check_conversation` on what it is sent, so a test fails where the real API would answer 400.
+A new fake should do the same.
 
 ### What each test file covers
 
@@ -160,11 +169,14 @@ PYTHONIOENCODING=utf-8 uv run python scripts/check_day12_deployment.py --deploy
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day13_sequential.py --deploy
 
 # All four agents on one query: Incident + Docs + GitHub in parallel, Deployment after GitHub,
-# the loop, the synthesis. ~12-20 calls, ~$1.10 measured. Needs the stack and the token.
+# the loop, the synthesis. ~12-20 calls, $0.74 measured with caching on (Day 21). Needs the stack and the token.
 PYTHONIOENCODING=utf-8 uv run python scripts/check_day15_integration.py --deploy --max-rounds 1
 
 # What every recorded live run has cost, by check and by day. Free.
 uv run python scripts/cost_review.py
+
+# How big each commit-bearing tool reply is on the four-agent run's own calls. Free: GitHub reads only.
+uv run python scripts/measure_tool_replies.py
 
 # Every recorded live recommendation through the HITL approval gate. Free. With --persist the
 # decisions are written to the append-only audit log on the stack's Postgres; audit_log.py reads it.

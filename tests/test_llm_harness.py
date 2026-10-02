@@ -21,6 +21,7 @@ from aioc.llm import (
     ToolResult,
     ToolSpec,
 )
+from tests.wire import check_conversation
 
 # --------------------------------------------------------------------------- fakes
 
@@ -61,6 +62,7 @@ class _FakeMessages:
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        check_conversation(kwargs["messages"])
         # Snapshot the messages list: the loop passes its live convo by reference and keeps
         # mutating it, so record a shallow copy to capture the call-time state.
         snapshot = dict(kwargs)
@@ -259,6 +261,31 @@ def test_no_tool_needed_returns_immediately():
     assert result.rounds == 1
     assert result.tool_calls == []
     assert result.text == "hello, I need no tools"
+
+
+def test_a_turn_cut_off_mid_call_is_answered_and_never_run():
+    handler_calls: list[dict[str, Any]] = []
+    client = _client(
+        [
+            _message(
+                "max_tokens",
+                [_text("Checking."), _tool_use("toolu_cut", "get_service_health", {})],
+            ),
+        ]
+    )
+
+    result = client.run_tool_loop(
+        messages=[{"role": "user", "content": "Is checkout-api healthy?"}],
+        tools=[_health_tool(handler_calls)],
+    )
+
+    assert result.stop_reason == "max_tokens"
+    # The partial input never reached the handler, and nothing ran to record.
+    assert handler_calls == [] and result.tool_calls == []
+    # The conversation handed back is one the API accepts as the start of a next request.
+    check_conversation(result.messages)
+    answer = result.messages[-1]["content"][0]  # type: ignore[index]
+    assert answer["tool_use_id"] == "toolu_cut" and answer["is_error"] is True
 
 
 def test_loop_limit_raises():

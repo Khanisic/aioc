@@ -534,6 +534,21 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 ### Day 21 — Trimming + PR review
 - **A:** Trim verbose tool outputs; structured fact extraction *before* content enters context.
 - **B:** Claude Code in GitHub Actions — automated PR review on this repo.
+- **Done (2026-09-30), the review workflow written and not yet run.** First, HANDOFF item 22's
+  live re-run with caching on: `check_day15_integration.py` **PASS, $0.74** (Day 15: ~$1.16),
+  one refinement re-delegation instead of four, 62% of input read from the cache, the retry
+  loop's first live recovery. It found two harness defects, both reproduced offline and fixed:
+  a tool-loop round cut off at `max_tokens` left a `tool_use` unanswered and the API refused
+  the next request (now answered and never run; every fake client enforces the rule,
+  `tests/wire.py`), and the model synthesis was the one forced emit outside the retry loop
+  (now inside it). A: the tool servers extract facts before content enters the context - a
+  commit is its subject line, `message_truncated`, and a merge commit's PR title; patches
+  share a budget a reply spent on config and code first, with `patch_paths` for what it cut;
+  `diff_release` commits are subject-only with no shape change (`contract-changes.md`).
+  -34% on the run's five replies (`scripts/measure_tool_replies.py`). B: `ci.yml` (lint,
+  mypy, the offline suite, no secrets) and `claude-review.yml` (`claude-code-action@v1`, a
+  prompt naming this repository's defect classes, read-only tools plus inline comments). The
+  review needs the `ANTHROPIC_API_KEY` secret and the Claude GitHub App (HANDOFF item 45).
 
 ### Day 22 — Ordering + false positives
 - **A:** Position-aware input ordering — freshest signals and the query where attention is strongest.

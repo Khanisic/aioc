@@ -163,7 +163,11 @@ _COMMITS = [
     {
         "sha": SHA_V2,
         "commit": {
-            "message": "Raise the pool ceiling and add a pool timeout",
+            # A body is where a value hides in prose: the tool must not return it.
+            "message": (
+                "Raise the pool ceiling and add a pool timeout\n\n"
+                "DB_POOL_MAX goes from 20 to 40 and DB_POOL_TIMEOUT_MS=2500 is new."
+            ),
             "author": {"date": "2026-09-08T10:00:00Z"},
         },
     }
@@ -297,6 +301,12 @@ def test_commits_between_the_releases_are_reported():
             "authored_at": "2026-09-08T10:00:00Z",
         }
     ]
+
+
+def test_a_commit_is_its_subject_line_so_a_value_in_its_body_never_leaves():
+    reply = json.dumps(_diff())
+    assert "Raise the pool ceiling" in reply
+    assert "2500" not in reply and "goes from 20 to 40" not in reply
 
 
 def test_a_service_named_in_no_manifest_still_gets_the_commits():

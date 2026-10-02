@@ -28,6 +28,7 @@ from aioc.agents import (
 from aioc.agents.github import _EMIT_SCHEMA, GitHubReport, _apply_guidance
 from aioc.contracts import AgentName, ErrorClass, GitHubAgentResponse, PullRequestState
 from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage, system_text
+from tests.wire import check_conversation
 
 # --------------------------------------------------------------------------- fakes
 
@@ -38,6 +39,7 @@ class _FakeMessages:
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        check_conversation(kwargs["messages"])
         self.calls.append(kwargs)
         if not self._responses:
             raise AssertionError("fake client ran out of scripted responses")

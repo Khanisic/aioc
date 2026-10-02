@@ -358,6 +358,30 @@ The five answers from the interrupted run and the four from the smoke test are t
 Ask what the two have in common, and test for that.
 And find out what your process holds in memory that somebody has already paid for.
 
+## 14. A thousand tests passed on a conversation the API refuses
+
+**Symptom.** Day 21's first four-agent run passed its checkpoint, and one line of its synthesis read: `Invocation inv_4bdd2f64 (deployment) failed with BadRequestError: messages.8: tool_use ids were found without tool_result blocks immediately after`.
+It was the round-1 re-delegation, 152 seconds of work, and every token of it paid for.
+
+**What it was.** The harness, not the model.
+`run_tool_loop` returns when a round stops for any reason other than `tool_use`.
+One reason is `max_tokens`, and a round can hit it part-way through writing a tool call.
+The loop handed back a conversation whose last assistant turn held a cut-off `tool_use` that nothing had answered, the agent appended its "now emit your report" turn to it, and the API refused the request as malformed.
+The truncation guard the agents already had was on the forced emit, one step later, and never got to run.
+
+**Why nothing caught it.** The suite has eleven scripted fake clients, and every one of them returned its next scripted reply whatever it was sent.
+A fake that accepts any conversation tests what the harness does with replies and nothing about what it sends.
+Over a thousand tests exercised the loop, and none of them could have failed on this.
+
+**Fix.** The fake first, then the code.
+`tests/wire.py` states the rule the 400 named - every `tool_use` answered in the next message, every `tool_result` answering the turn before - and every fake that stands in for `messages.create` checks it on each request.
+The reproduction then failed with the API's own sentence, and the other 25 Deployment tests passed under the stricter fake.
+The loop now answers a cut-off call with an error `tool_result` saying it was not run, and never runs it: its input is whatever was written before the cut.
+
+**Transferable lesson.** A test double encodes a belief about its counterparty.
+If it accepts everything, the belief is that the counterparty accepts everything, and that is never true of an API.
+When a live run fails on a rule, put the rule in the fake before you fix the code, so the whole suite starts checking it rather than one new test.
+
 ---
 
 ## How to tell these in an interview

@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from anthropic.types import TextBlock, ToolUseBlock
 
+from aioc.agents import RetryLog
 from aioc.contracts import AgentInvocation, Assessment, Gap, Intent
 from aioc.coordinator.synthesis import (
     _EMIT_SCHEMA,
@@ -29,6 +30,7 @@ from aioc.coordinator.synthesis import (
 )
 from aioc.llm import LLMClient, LLMSettings, Usage, system_text
 from tests.test_executor import _CONTEXT, _github_response, _incident_response
+from tests.wire import check_conversation
 
 # ------------------------------------------------------------------------------ fixtures
 
@@ -204,23 +206,31 @@ class _FakeMessages:
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        check_conversation(kwargs["messages"])
         self.calls.append(kwargs)
         if not self._responses:
             raise AssertionError("fake client ran out of scripted responses")
         return self._responses.pop(0)
 
 
-def _synthesiser(responses: list[Any]) -> tuple[ModelSynthesiser, _FakeMessages]:
+def _synthesiser(
+    responses: list[Any], *, retries: int = 0, log: RetryLog | None = None
+) -> tuple[ModelSynthesiser, _FakeMessages]:
     fake = SimpleNamespace(messages=_FakeMessages(responses))
     client = LLMClient(LLMSettings(model="claude-sonnet-5", max_tokens=2048), client=fake)  # type: ignore[arg-type]
-    return ModelSynthesiser(client), fake.messages
+    synthesiser = ModelSynthesiser(
+        client, max_validation_retries=retries, retry_log=log if log is not None else RetryLog()
+    )
+    return synthesiser, fake.messages
 
 
-def _tool_use(payload: dict[str, Any], *, stop_reason: str = "tool_use") -> SimpleNamespace:
+def _tool_use(
+    payload: dict[str, Any], *, stop_reason: str = "tool_use", call_id: str = "toolu_1"
+) -> SimpleNamespace:
     return SimpleNamespace(
         stop_reason=stop_reason,
         model="claude-sonnet-5",
-        content=[ToolUseBlock(type="tool_use", id="toolu_1", name=EMIT_TOOL_NAME, input=payload)],
+        content=[ToolUseBlock(type="tool_use", id=call_id, name=EMIT_TOOL_NAME, input=payload)],
         usage=SimpleNamespace(input_tokens=640, output_tokens=120),
     )
 
@@ -315,3 +325,84 @@ def test_a_nested_answer_object_is_rejected_not_silently_accepted():
     synthesiser, _ = _synthesiser([_tool_use(payload)])
     with pytest.raises(SynthesisError, match="failed validation"):
         synthesiser.synthesise(_request(), usage=Usage())
+
+
+# ------------------------------------------------------------ the validation-retry loop
+
+
+def test_a_synthesis_missing_its_answer_is_re_requested_and_recovered():
+    # The 2026-09-30 four-agent run: `answer` and `confidence` missing, and the whole
+    # model-written synthesis fell back to the deterministic form for want of one retry.
+    broken = {k: v for k, v in _payload(["ev_1"]).items() if k not in ("answer", "confidence")}
+    log = RetryLog()
+    synthesiser, messages = _synthesiser(
+        [_tool_use(broken), _tool_use(_payload(["ev_1"]), call_id="toolu_2")], retries=2, log=log
+    )
+    usage = Usage()
+    result = synthesiser.synthesise(_request(), usage=usage)
+
+    assert result.answer.value is not None and result.answer.evidence == ["ev_1"]
+    assert usage.input_tokens == 2 * 640  # the refused attempt still cost
+    retry = messages.calls[1]
+    assert retry["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    feedback = retry["messages"][-1]["content"][0]
+    assert feedback["tool_use_id"] == "toolu_1" and feedback["is_error"] is True
+    assert "answer: Field required" in feedback["content"]
+    (record,) = log.records
+    assert record.agent == "synthesis" and record.accepted and record.kinds == ("format",)
+
+
+def test_an_invented_evidence_id_is_retried_with_advice_that_fits_a_synthesis():
+    log = RetryLog()
+    synthesiser, messages = _synthesiser(
+        [_tool_use(_payload(["ev_ghost"])), _tool_use(_payload(["ev_1"]), call_id="toolu_2")],
+        retries=1,
+        log=log,
+    )
+    synthesiser.synthesise(_request(), usage=Usage())
+    feedback = messages.calls[1]["messages"][-1]["content"][0]["content"]
+    assert "ev_ghost" in feedback and "listed under `evidence`" in feedback
+    # The agents' advice asks for a gap, and the synthesis has none to record.
+    assert "blocks_field" not in feedback
+    assert log.records[0].kinds == ("grounding",)
+
+
+def test_a_confident_uncited_answer_is_a_format_rejection():
+    log = RetryLog()
+    synthesiser, _ = _synthesiser(
+        [_tool_use(_payload([])), _tool_use(_payload(["ev_1"]), call_id="toolu_2")],
+        retries=1,
+        log=log,
+    )
+    synthesiser.synthesise(_request(), usage=Usage())
+    assert log.records[0].kinds == ("format",)
+
+
+def test_a_synthesis_that_stays_refused_raises_for_the_executor_to_fall_back_on():
+    log = RetryLog()
+    synthesiser, messages = _synthesiser(
+        [_tool_use(_payload(["ev_ghost"])), _tool_use(_payload(["ev_ghost"]), call_id="toolu_2")],
+        retries=2,
+        log=log,
+    )
+    with pytest.raises(SynthesisError, match="ev_ghost") as info:
+        synthesiser.synthesise(_request(), usage=Usage())
+    assert len(messages.calls) == 2  # the identical second rejection stops the loop
+    assert "identical" in " ".join(info.value.__notes__)
+    assert log.records[0].stopped_by == "identical_rejection"
+
+
+def test_truncation_is_never_retried():
+    synthesiser, messages = _synthesiser(
+        [_tool_use(_payload(["ev_1"]), stop_reason="max_tokens")], retries=2
+    )
+    with pytest.raises(SynthesisError, match="max_tokens"):
+        synthesiser.synthesise(_request(), usage=Usage())
+    assert len(messages.calls) == 1
+
+
+def test_the_retry_cap_is_read_from_the_harness_settings_by_default():
+    fake = SimpleNamespace(messages=_FakeMessages([]))
+    settings = LLMSettings(model="claude-sonnet-5", max_validation_retries=3)
+    synthesiser = ModelSynthesiser(LLMClient(settings, client=fake), retry_log=RetryLog())  # type: ignore[arg-type]
+    assert synthesiser._max_retries == 3
