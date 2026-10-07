@@ -36,6 +36,10 @@ dependencies = [
     # Day 12 - the release diff parses compose files and Kubernetes manifests
     # structurally (keys and paths only; values never leave the parser).
     "pyyaml>=6.0",
+
+    # Day 24 - the deployable service: the orchestrator over HTTP (`aioc.api`).
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
 ]
 
 [dependency-groups]
@@ -45,6 +49,8 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
     "types-PyYAML>=6.0",
+    # Day 24 - Starlette's TestClient (`fastapi.testclient`) runs on httpx2.
+    "httpx2>=2.13.1",
 ]
 
 [build-system]

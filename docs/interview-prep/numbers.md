@@ -677,6 +677,20 @@ Four agents on one query (the Day 21 run, Sonnet 5 for both roles, $0.74 measure
 |---|---|
 | Offline suite | 1084 passed with the stack up (1067 without Docker) |
 
+## Day 24 - the deployable service, rehearsed locally ($0 so far); the eval re-run in the queue
+
+**The eval re-run is submitted and not yet scored.** Batch `msgbatch_01CuGsixLyyEL2nUfVLtZFEr`, all 38 items, Sonnet 5, batch cached (the Day 20 baseline's $0.71 configuration), submitted 2026-10-07 16:35 UTC with `--detach`; checked once, `in_progress`. How to finish it: `docs/guides/detached-batch-eval.md`. Its numbers go here when it ends.
+
+The service in a container on this machine (`docs/design-notes/deployment.md`), zero Claude calls:
+
+| | |
+|---|---|
+| Image | 535 MB, Python 3.12 slim, uid 10001, no `.env` inside |
+| A smoke request, submitted to finished | 2.4 s, two 1.5-second scripted agents run concurrently |
+| Its trace in Langfuse | five observations, every one with tokens in metadata (item 49 confirmed); readable after more than two minutes |
+| Schema on an empty database | 5 files applied: 18 incidents, 65 events, the audit table; a second run applied nothing |
+| Offline suite | 1140 passed with the stack up |
+
 ---
 
 ## What is not measured yet

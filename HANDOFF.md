@@ -1,19 +1,22 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 23** of 30. **The project spends $0 on the Anthropic API
-(§1)**; the one exception is a single deployed run at Day 25, and only with the owner's yes.
-Day 23 made model routing a configuration change (`AIOC_COORDINATOR_MODEL`,
-`AIOC_SUBAGENT_MODEL`, read through `LLMSettings.for_role`) and priced every route from
-recorded runs and 60 free token counts: the coordinator is 8% of a four-agent run's bill, an
-Opus 5 coordinator costs +12%, Haiku 4.5 subagents -57%; quality and latency per model are
-not projected (`docs/design-notes/model-routing.md`). One paid run measured Haiku 4.5 on the
-two eval-covered agents ($0.60, owner's yes): same accuracy, -56% paid, and both
-no-precedent probes lost (item 54). Reading a trace back found every
-Langfuse observation since Day 9 stored at zero tokens (war story #15, fixed). Both Claude
-PR jobs are still waiting on the owner (§7 item 45).
+Written during **Day 24** of 30 (2026-10-07). **The project spends $0 on the Anthropic API
+(§1)**, with two exceptions the owner approved: the Day 24 eval re-run (below) and, at Day 25,
+one deployed run that still needs a yes at the time.
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 24. **`docs/EXECUTION_PLAN.md`
-was not updated for Day 23** (§7 item 53).
+**The Day 24 eval re-run is in the Batch API queue, and nobody is waiting on it.** Batch
+`msgbatch_01CuGsixLyyEL2nUfVLtZFEr` (38 items, Sonnet 5, batch cached, ~$0.71) was submitted
+with the new `run_evals.py --mode batch --detach`; `docs/guides/detached-batch-eval.md` is the
+owner's step-by-step for checking on it and comparing it with the baseline. When the owner
+says it finished, the work is §6 item 1.
+
+Day 24B is done as **config only** (owner's choice: no host yet): the orchestrator is an HTTP
+service (`aioc.api`, requests as jobs, closed until `AIOC_API_TOKEN` is set, a free `smoke`
+mode), the schema is migrations with a ledger (`python -m aioc.db`), and the `Dockerfile` is
+proven in a container through the opt-in compose profile `api`. Why each is shaped that way:
+`docs/design-notes/deployment.md`, decisions #47-#49.
+
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 24-25.
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -131,6 +134,11 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `.github/workflows/claude-review.yml` (Day 22) + `.github/claude/review.md` | **Day 22. Label-triggered, subscription-billed, never run.** Workflow `claude`: the `claude-review` label runs a read-only review whose instructions are `.github/claude/review.md` (read at run time); the `claude-tests` label writes tests, runs the offline suite, and commits - a workflow step pushes only if every changed file is under `tests/` and the suite passes. Auth is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`); without it each job skips with a warning. Prompt tuning is local and recorded in `docs/design-notes/review-prompt-tuning.md`. |
 | Prompt ordering (Day 22) | One rule (decision #43): stable reference first, freshest and most specific last, query at the end. `build_incident_context` ends with the live observations; the Docs agent's documents precede its context; a refinement round is planner's block, digests, then the gaps to close. Each pinned by a test. Unmeasured for accuracy under the $0 rule. |
 | Per-role models (Day 23) | `LLMSettings.coordinator_model` / `subagent_model` (`AIOC_COORDINATOR_MODEL`, `AIOC_SUBAGENT_MODEL`), each falling back to `AIOC_MODEL`, applied by `LLMSettings.for_role`. Coordinator role: `Coordinator` and `ModelSynthesiser`; subagent role: the four agents, `run_evals.py`, `check_day20_baseline.py`. Fields, so `.env` works. Three defects closed: the planner read its override from the shell only, the subagent override was read by nothing, the synthesis ran the subagents' model. |
+| `run_evals.py --detach` | **Day 24.** With `--mode batch`: submit and exit 3; the same command with `--resume` polls once (free), reads an ended batch back, scores it, submits the retries as the next batch (exit 3 again) or writes the report (exit 0). `MessageBatcher.status` is one poll, `DeferredClient.submit` sends without waiting, `run_batch(detach=True)` raises `BatchDetached`. A resumed run lists the batches it was given (`carried_from`) as well as its own; `--resume` given an older run in a chain continues the newest (`continued_by`), so a retry batch is never paid for twice. `cost_review.py` counts a detached run as measured by the run that reads its batch back. |
+| `api/` (the service) | **Day 24.** `create_app` (FastAPI, `uvicorn --factory aioc.api.app:create_app`): `/`, `/healthz`, `/readyz` (database required; Anthropic key, Langfuse, Prometheus reported, never tested by spending), `POST /v1/requests` (202 + `Location`) and `GET /v1/requests/{id}`. Jobs in memory on a bounded pool (`jobs.py`: 1 at a time, 4 pending, then 429). Closed until `AIOC_API_TOKEN` is set (blank = unset); `live` also needs `AIOC_API_LIVE`; rounds capped by `AIOC_API_MAX_ROUNDS` (0), refused not trimmed (`settings.py`). `pipeline.py` runs `respond()` with the process tracer and `HitlGate(audit=...)` (`DenyAll`); `smoke.py` is the scripted plan and agents (moved from `check_day9_trace.py`, which imports them), zero Claude calls, one scripted restart for the gate to deny. |
+| `db/` (schema migrations) | **Day 24.** `python -m aioc.db status / migrate / baseline`. The init files are the migrations: `schema_migrations` records name and sha256; `migrate` applies what is missing in order, one transaction per file with its row, and refuses before applying anything when an applied file changed or vanished; `status` changes nothing; `baseline` records a database `init/` built (refused without its tables). **The local stack's database is baselined** (2026-10-07). |
+| `Dockerfile`, `.dockerignore`, compose profile `api` | **Day 24.** Python 3.12 slim, uv 0.11.29 pinned, `uv sync --frozen --no-dev`, non-root uid 10001, listens on `$PORT`, healthcheck on `/healthz`; `docker/postgres/init/` copied in for `python -m aioc.db`. `AIOC_API_TOKEN=<t> docker compose --profile api up -d --build --wait` runs it on the stack's network (database and Prometheus by service name) at `localhost:8080`. |
+| `infrastructure/k8s/` | **Day 24. Documented, never applied.** Namespace, ConfigMap (every spend switch off), migrate Job, one-replica Deployment (jobs are in memory), Service; `secret.example.yaml` is the key list with no values. `test_the_kubernetes_manifests_match_the_service` pins probes, the migrate command, and the setting names. `diff_release` reads manifests under `infrastructure/`, so release diffs now see these. |
 | `evals/routing.py` + `scripts/project_model_routing.py` | **Day 23. A projection, labelled as one.** Seven routes priced on two recorded workloads (the Day 21 four-agent run, the Day 20 eval realtime-cached run). `--count` made 60 free count_tokens calls (saved to `evaluations/routing/token-counts.json`); everything else is offline. The four-agent run's coordinator calls are rebuilt with `planner.plan_prompt` and `synthesis.render_prompt` and counted; the agents' share is the total less them; the route as run prices back to $0.741 against $0.74 billed. Results in `evaluations/routing/projection.md`, method in `docs/design-notes/model-routing.md`. |
 | `tools/github/` trimming | **Day 21.** A commit is its subject line (`commits.commit_headline`), `message_truncated`, and for a merge commit `pull_request_title` from the body. Patches share `PATCH_BUDGET_CHARS` (8,000) a reply, spent by `patch_priority` (config, code, tests, docs); a file the budget missed is `patch: null, patch_truncated: true`, and the new `patch_paths` input asks for it. `touched_paths` is `null` when not asked (was `[]`). `diff_release` commits are subject-only too, no shape change (`contract-changes.md`, 2026-09-30). `scripts/measure_tool_replies.py` (free, GitHub reads) is the before/after: -34% on the run's five calls. |
 | `llm/client.py` cut-off calls | **Day 21.** `run_tool_loop` answers a `tool_use` in a round that stopped for any reason but `tool_use` (in practice `max_tokens`) with an error `tool_result`, and never runs it. Before, the conversation went on with the call unanswered and the API refused the next request (war story #14). Every scripted fake client now checks the API's pairing rule on every request (`tests/wire.py`). |
@@ -267,12 +275,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1084 passed
+uv run pytest -q                                                   # expect 1140 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1084 passed** with the stack up at the end of Day 23 (2026-10-07);
-without Docker Desktop the 17 `integration`-marked tests skip and it is 1067. CI runs the
+Costs nothing. Last run: **1140 passed** with the stack up on Day 24 (2026-10-07);
+without Docker Desktop the 25 `integration`-marked tests skip and it is 1115. CI runs the
 latter on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
@@ -314,26 +322,39 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 24, at $0
+## 6. Next work: finish Day 24A, then Day 25
 
-**Read `docs/EXECUTION_PLAN.md` Day 24 first** - this session did not (§7 item 53). What the
-repository already says Day 24 is for:
+1. **When the owner says the batch finished** (or to check: the one command in
+   `docs/guides/detached-batch-eval.md` sec 3, free while it is still running). The finished
+   run is the `records:` line. Then, all free: `scripts/eval_baseline.py --against
+   evaluations/baseline.json <run> --heading "Day 24 re-run against the Day 20 baseline"
+   --write evaluations/day24-vs-baseline.md`; copy its `report.md` to
+   `evaluations/results/day24-batch-cached.md`; record the numbers in `numbers.md` (Day 24
+   section, replacing "submitted and not yet scored") and here; commit. **Read it knowing what
+   changed:** the 18 diagnoses sent requests byte-identical to Day 20, so they measure the
+   noise floor; the 20 recalls carry only the Day 22 reordering (documents before context);
+   the Day 21 trimming is not in this set. A token change near zero is the expected result.
+2. **Day 25 needs a host.** The owner chose "config only" on Day 24. Everything a host needs is
+   in `docs/design-notes/deployment.md` ("What a host has to provide"): a container runtime
+   with `$PORT`, Postgres 17 with `vector`, `python -m aioc.db migrate` as the pre-deploy step,
+   and the environment. Then, free: `/readyz`, then a `smoke` request, then read its trace back
+   (allow several minutes for Langfuse). The one paid run (`mode: live`, `AIOC_API_LIVE=true`,
+   rounds 0, deterministic synthesis, ~$0.55) needs the owner's yes at the time.
+3. If no host is chosen, Day 25's checkpoint can run against the local container
+   (`docker compose --profile api up`), which is the same image; say plainly that it is local.
 
-- **The token reduction as a number.** `scripts/eval_baseline.py --against
-  evaluations/baseline.json <run-dir>` compares a later eval run with the Day 20 baseline of
-  its own configuration. That needs a new eval run, which is paid (~$1.24 realtime cached or
-  ~$0.71 batch cached, measured on Day 20) - **the owner's yes under §1**, or say plainly
-  that the comparison waits. The free half: `scripts/measure_tool_replies.py` (GitHub reads
-  only) re-measures the Day 21 trimming on the replies.
-- **Hosted Postgres.** `docker/postgres/init/` never runs against a hosted database; each
-  file is written to be applied with `psql` standalone and the seed is idempotent.
+**Owner decisions waiting:**
 
-**Owner decisions waiting** (none blocks Day 24's free work):
-
+- The host for Day 25 (or local).
 - `CLAUDE_CODE_OAUTH_TOKEN` as a repo secret and the Claude GitHub App, for the first
   labelled review (item 45).
 - Whether Haiku's Docs abstention failure (item 54) is worth chasing, or the subagent
   model stays Sonnet 5.
+
+<!-- superseded Day 24 notes follow, kept for the record -->
+**Day 24 as planned:** A: re-run evals, record token reduction vs. the Day 20 baseline. B:
+deploy to Railway/Render; K8s manifests as documented artifacts. A is submitted (item 55);
+B is built and rehearsed locally with no host, by the owner's choice.
 
 <!-- superseded Day 23 notes follow, kept for the record -->
 **Day 23 as planned:** A: structured digests across handoffs. B: the model routing
@@ -1063,7 +1084,7 @@ for github queries.
    `search_container_logs` yet (item 15's servers are the routing study's subject only), so
    the honest gap is `resolvable: false`. Worth a line in the Incident agent's gap guidance
    when Day 22 touches its prompt for ordering.
-49. **No Langfuse trace before Day 23 carries tokens** (war story #15). Langfuse keeps
+49. ~~**No Langfuse trace before Day 23 carries tokens**~~ **Confirmed fixed 2026-10-07**: the Day 24 smoke trace (`f39f6f84...`) read back with `input_tokens` / `output_tokens` in every observation's metadata. (war story #15) Langfuse keeps
    `usage_details` on generation observations only, and the adapter creates spans, agents,
    and chains. Span tokens now also go in metadata, which the test pins, but no live trace
    has been read back since the fix: after the next traced run, read one observation back
@@ -1086,7 +1107,7 @@ for github queries.
    minutes. About $0.004 a request on Sonnet 5; it pays under steady traffic and costs a
    little in a demo. On Haiku 4.5 both prefixes fall under the 4,096-token minimum and are
    not cached at all.
-53. **`docs/EXECUTION_PLAN.md` was not updated for Day 23.** Reading it was refused by the
+53. ~~**`docs/EXECUTION_PLAN.md` was not updated for Day 23.**~~ **Done 2026-10-07** (the Day 23 done note, and the Day 24 status). Reading it was refused by the
    session's permission classifier (it named the reason "Remote Repoint", most likely the
    `khanisic` mirror push made just before), and the session did not try another route.
    Add the Day 23 done-when note there by hand, the way Day 22 added its own.
@@ -1105,6 +1126,24 @@ for github queries.
    Per-agent routing (Haiku for Incident, Sonnet for Docs) is what this run supports, and
    needs a per-agent model setting the role settings do not have.
 
+55. **The Day 24 eval batch is out.** `msgbatch_01CuGsixLyyEL2nUfVLtZFEr`, submitted
+   2026-10-07 16:35 UTC; run chain from
+   `test-results/runs/2026-10-07/20261007T163517Z__llm__evals-batch`. Do not change `src/`,
+   `evaluations/cases/`, or the corpus while it is out: a recall's request includes what
+   retrieval returned, and a request rebuilt differently is submitted again (and paid again).
+   A batch expires after 24 hours; expired requests are not billed and a check resubmits
+   only those. §6 item 1 is what to do when it ends.
+56. **Langfuse took more than two minutes to make a trace readable** (2026-10-07; two later
+   traces were still unreadable after 90 s). The export worked - the trace arrived - so a
+   check that reads a trace back must wait minutes, not seconds. `check_day9_trace.py` still
+   reports PASS without reading its trace back; worth a `--confirm` that polls for it.
+57. **The local audit log holds one scripted row.** The Day 24 container rehearsal's smoke
+   request denied its scripted restart (`SCRIPTED (smoke test): restart payments-api ...`)
+   into the stack's `hitl_audit_log`, which is append-only by design. Every smoke request on
+   a deployment does the same, deliberately: it is how the smoke test proves the audit path.
+58. **The `khanisic` mirror trails `origin/main` by the Day 23 merge** (`434030f` against
+   `fd55f3c` on 2026-10-07). `git push khanisic main:main` after the next merge brings it level.
+
 ## 8. Where things are written down
 
 | Need | File |
@@ -1115,7 +1154,9 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36, Day 20 #37-#39, Day 21 #40-#42, Day 22 #43-#44, Day 23 #45-#46) |
+| Checking on the Day 24 batch, and what to do with its result | `docs/guides/detached-batch-eval.md` |
+| The deployable service and the schema migrations, and why | `docs/design-notes/deployment.md` |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36, Day 20 #37-#39, Day 21 #40-#42, Day 22 #43-#44, Day 23 #45-#46, Day 24 #47-#49) |
 | Fifteen debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's, #12 Day 19's, #13 Day 20's, #14 Day 21's, #15 Day 23's) |
 | The eval set, and the rule that a case selects and never authors | `evaluations/README.md` |
 | The Day 20 baseline, three runs side by side | `evaluations/baseline.md` (`baseline.json` for Day 24's comparison) |

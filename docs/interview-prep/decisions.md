@@ -799,3 +799,44 @@ The test asserts both are sent.
 Nesting a generation per model call is the right shape and a larger change to the tracing seam; it is the next step if per-call cost in the trace is wanted.
 
 **What I would watch.** A stub client checks what the adapter sends, not what the backend keeps; the next live run's trace should be read back for its tokens once.
+
+## 47. A batch run nobody waits on
+
+**Context.** The Day 20 baseline's batch run needed three batches, and the queue held them for 2 h 40 min, 1 h 42 min, and 45 min; the process polling the first died after seventeen minutes.
+The Day 24 re-run was approved on the condition that nothing sits waiting for it.
+
+**Decision.** `run_evals.py --mode batch --detach` submits the batch, records where the run got to, and exits 3.
+The same command with `--resume` polls once, for free, and either says the batch is still running, or reads it back, scores what is finished, and submits the retries as the next batch, or finishes the report.
+A resumed run lists every batch it was given as well as its own, because replaying an item asks for its first call again and only the first batch holds that answer; and `--resume` given an older run in a chain continues the newest, because continuing an older one would submit the retry batch again and pay for it twice.
+Both were found by the chain's tests before the live batch went out.
+
+**What was rejected.** A background process that polls until done: it is the thing that died on Day 20, and it holds a terminal for hours.
+Refusing to resume an older run in a chain: safe, but it makes the person copy a new path after every check, which is how the wrong one gets resumed.
+
+**What I would watch.** Retrieval is part of a recall request, so a corpus or ranking change between submission and check makes the rebuilt request differ and a check would submit it again; the guide says to change nothing under `src/`, the case file, or the corpus while a batch is out.
+
+## 48. The deployed service is closed by default, runs requests as jobs, and has a free smoke mode
+
+**Context.** Day 24 asked for a deploy; the owner chose to build the deployable thing and pick the host later.
+Nothing served HTTP: the orchestrator was a function (`respond()`) and seven scripts.
+
+**Decision.** `aioc.api`: `POST /v1/requests` answers `202` with a job id and `GET` reads it back, because a live request takes minutes and a proxy may not wait.
+Nothing but the health checks answers until `AIOC_API_TOKEN` is set, a live request also needs `AIOC_API_LIVE`, one request runs at a time, four may wait, and refinement is capped at zero rounds; a request above a cap is refused, never trimmed.
+`mode: smoke` (the default) is the real `respond()` path - plan span, parallel executor, gate, audit log, tracer - over a scripted plan and two scripted agents, at zero Claude calls.
+The approver is `DenyAll`: a server has nobody to ask.
+
+**What was rejected.** A synchronous endpoint: simpler, and it loses the answer to a timeout the client did not cause.
+A durable job table: the request's durable records already exist (its trace, its audit rows); the job is a handle, and keeping it in memory costs a second replica, which a demo does not need.
+
+**What I would watch.** In-memory jobs vanish on a restart; a client polling a restarted service gets `404` for a job that may have finished. The trace and the audit log still hold what it did.
+
+## 49. The migration tool is a ledger over the numbered init files
+
+**Context.** `docker/postgres/init/` never runs on a hosted database, and `02-incidents.sql` fails on a second run by design, so applying the files again is not an upgrade path.
+The execution plan said Day 24 was the point to choose a migration tool.
+
+**Decision.** The files are the migrations. `python -m aioc.db migrate` records each applied file's name and sha256 in `schema_migrations`, applies only what is missing in filename order, one transaction per file with its ledger row, and refuses before applying anything when an applied file changed or disappeared. `baseline` records a database `init/` built, and refuses one without the tables.
+
+**What was rejected.** Alembic (SQLAlchemy, which nothing uses, and the schema re-expressed as Python), yoyo or sqitch (a new tool and a second copy of the schema), and down-migrations (the seeded corpus is the eval's answer key; a migration that can drop it is a footgun).
+
+**What I would watch.** The rule it asks of authors - never edit an applied file, add a later one - is enforced by refusal, which is loud but late: the refusal comes at deploy time. A test that compares the files with a recorded ledger would move it to CI if the schema starts changing often.
