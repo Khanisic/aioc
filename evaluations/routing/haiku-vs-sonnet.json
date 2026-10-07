@@ -1,0 +1,220 @@
+{
+  "configuration": "realtime, cached",
+  "baseline_run": "20260930T173419Z__llm__evals-realtime",
+  "run": "20261007T004504Z__llm__evals-realtime",
+  "models": {
+    "before": "claude-sonnet-5",
+    "after": "claude-haiku-4-5"
+  },
+  "retries": {
+    "before": {
+      "accepted_first_try": 31,
+      "recovered": 7,
+      "exhausted": 0,
+      "retry_calls": 8
+    },
+    "after": {
+      "accepted_first_try": 27,
+      "recovered": 9,
+      "exhausted": 2,
+      "retry_calls": 14
+    }
+  },
+  "seconds": {
+    "before": 773.0,
+    "after": 707.5
+  },
+  "rates": {
+    "answered": {
+      "before": {
+        "hits": 38,
+        "total": 38,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 36,
+        "total": 38,
+        "rate": 0.9473684210526315
+      },
+      "change": -0.052631578947368474
+    },
+    "failure_mode": {
+      "before": {
+        "hits": 16,
+        "total": 18,
+        "rate": 0.8888888888888888
+      },
+      "after": {
+        "hits": 16,
+        "total": 18,
+        "rate": 0.8888888888888888
+      },
+      "change": 0.0
+    },
+    "severity": {
+      "before": {
+        "hits": 10,
+        "total": 18,
+        "rate": 0.5555555555555556
+      },
+      "after": {
+        "hits": 9,
+        "total": 18,
+        "rate": 0.5
+      },
+      "change": -0.05555555555555558
+    },
+    "severity_within_one": {
+      "before": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "recall_cited": {
+      "before": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "recall_retrieved": {
+      "before": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "probes_abstained": {
+      "before": {
+        "hits": 2,
+        "total": 2,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 0,
+        "total": 0,
+        "rate": null
+      },
+      "change": null
+    },
+    "ungrounded": {
+      "before": {
+        "hits": 1,
+        "total": 271,
+        "rate": 0.0036900369003690036
+      },
+      "after": {
+        "hits": 5,
+        "total": 299,
+        "rate": 0.016722408026755852
+      },
+      "change": 0.013032371126386848
+    },
+    "stitched": {
+      "before": {
+        "hits": 6,
+        "total": 271,
+        "rate": 0.02214022140221402
+      },
+      "after": {
+        "hits": 1,
+        "total": 299,
+        "rate": 0.0033444816053511705
+      },
+      "change": -0.01879573979686285
+    },
+    "invented_precedents": {
+      "before": {
+        "hits": 0,
+        "total": 2,
+        "rate": 0.0
+      },
+      "after": {
+        "hits": 0,
+        "total": 0,
+        "rate": null
+      },
+      "change": null
+    },
+    "grounding_refusals": {
+      "before": {
+        "hits": 0,
+        "total": 38,
+        "rate": 0.0
+      },
+      "after": {
+        "hits": 1,
+        "total": 38,
+        "rate": 0.02631578947368421
+      },
+      "change": 0.02631578947368421
+    },
+    "tool_success": {
+      "before": {
+        "hits": 20,
+        "total": 20,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    }
+  },
+  "tokens": {
+    "in": {
+      "before": 378970,
+      "after": 340635,
+      "change": -0.10115576430852047
+    },
+    "out": {
+      "before": 97094,
+      "after": 84058,
+      "change": -0.13426164335592314
+    }
+  },
+  "usd": {
+    "before": 1.2358,
+    "after": 0.5401,
+    "change": -0.5629551707396019
+  },
+  "flipped": {
+    "case_06:diagnose": {
+      "before": false,
+      "after": true
+    },
+    "case_16:diagnose": {
+      "before": true,
+      "after": false
+    },
+    "case_19:recall": {
+      "before": true,
+      "after": null
+    },
+    "case_20:recall": {
+      "before": true,
+      "after": null
+    }
+  }
+}

@@ -78,8 +78,34 @@ Every emit in this project is forced (`agents/_retry.py`, `coordinator/planner.p
 Opus 5 accepts a forced tool, so it is the Opus the plan's routes use.
 Moving to the current generation means steering the emit with `tool_choice: auto`, an instruction naming the tool, and `strict: true` on its schema - and re-measuring the retry loop's rates, because "forced" is what the format-versus-grounding split currently leans on.
 
-## What would turn this into a measurement
+## Measured: Haiku 4.5 as the subagent model (2026-10-07)
 
-One eval run with `AIOC_SUBAGENT_MODEL=claude-haiku-4-5`, compared against `evaluations/baseline.json` with `scripts/eval_baseline.py --against`: about 38 calls, roughly $0.46 by this projection.
-It answers the quality half for two of the four agents and is a configuration change, nothing more.
-It is not run, because the project's spending is $0 until the owner says otherwise.
+The owner approved one eval run: the whole set, realtime with caching, `AIOC_SUBAGENT_MODEL=claude-haiku-4-5`, read against the Sonnet 5 baseline run of the same configuration with `scripts/eval_baseline.py --against evaluations/baseline.json <run> --across-models` (`evaluations/routing/haiku-vs-sonnet.md`).
+$0.60 in all: a 4-call smoke test ($0.06) and the run ($0.54).
+
+| | Sonnet 5 | Haiku 4.5 |
+|---|---|---|
+| Answered | 38/38 | 36/38 |
+| Failure mode correct | 16/18 | 16/18 |
+| Severity exact / within one | 10/18 / 18/18 | 9/18 / 18/18 |
+| Recall cites its post-mortem | 18/18 | 18/18 |
+| No-precedent probes declined | 2/2 | 0 answered: both failed |
+| Ungrounded statements | 1/271 | 5/299 |
+| Retry calls / retries exhausted | 8 / 0 | 14 / 2 |
+| Paid | $1.24 | $0.54 (-56%) |
+| Wall clock | 773 s | 708 s |
+
+**Haiku does the job where there is an answer and fails where there is none.**
+Diagnosis and recall hold: the same failure-mode accuracy, the same recall, one severity fewer exact.
+The two items it lost are the two no-precedent probes, the questions whose honest answer is that the corpus has nothing.
+Both times the Docs agent's report was refused by the contract, three attempts each with the error fed back: in one, two unanswered sub-questions with no gap reporting them; in the other, a null answer with no gap against it.
+That is the null-plus-gap rule, the behaviour this project exists to demonstrate, and the retry loop could not teach it to Haiku.
+In a coordinator run, a refused Docs report becomes a `resolvable: false` gap rather than a wrong answer, so the failure is honest - but the abstention it should have produced is lost.
+Ungrounded statements in diagnoses rose from 1 to 5 (2% of checkable statements).
+
+**The projection was 17% low.** $0.46 projected, $0.54 paid: Haiku made 14 retry calls to Sonnet's 8, and wrote 17% more output than the tokenizer ratio predicted (84k against 72k).
+The method's stated weakness - that verbosity per model is not measured - is the larger of the two errors, and retries are a cost a token ratio cannot see.
+
+**What it means for routing.** Haiku for every subagent is not a drop-in: it would save about half of the subagents' bill and lose the abstention path on the Docs agent.
+The Incident agent's results on Haiku are as good as Sonnet's on this set, so per-agent routing - Haiku for Incident, Sonnet for Docs - is the cheaper configuration this run supports; it needs a per-agent model setting, which the role settings do not provide.
+One run per model is a smoke test of quality, not a rate: two items is the whole difference, and Sonnet's own runs disagreed on three items across three configurations on Day 20.

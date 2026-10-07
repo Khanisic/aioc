@@ -781,8 +781,9 @@ Latency and quality are not estimated.
 
 **What it found.** The coordinator is 8% of a four-agent run's bill, so the plan's "Opus for the coordinator" costs 12% more and changes little; the subagent model is the whole decision, and Haiku 4.5 subagents would cut 57-63%.
 Opus 5.5 and Sonnet 5.5 refuse a forced `tool_choice`, which every emit here uses, so the current generation is priced and marked not runnable.
+The owner then paid for the one run that answers the quality half for two agents ($0.60): Haiku 4.5 matched Sonnet 5 on diagnosis and recall and failed both no-precedent probes, its Docs report refused three times each for a null without its gap. The projection was 17% low, from retries and output a token ratio cannot see.
 
-**What was rejected.** Running the model matrix: the measurement is worth having, but the quality half needs only one eval run on Haiku, and that is the owner's call to pay for.
+**What was rejected.** Running the model matrix: one eval run on Haiku answers the quality half for the two eval-covered agents, and the owner chose to pay for that one. Comparing it with `compare` meant lifting its same-model rule; `across_models=True` lifts that rule only, so a changed set or configuration is still refused.
 Sharing the request's cache counters between roles by input share: the coordinator's calls are single forced calls that only ever write their prefix, so the split is known, not apportioned.
 
 **What I would watch.** The output side assumes each model writes the same report in its own tokens; a terser or wordier model moves the output cost, which is more than half of the subagents' bill (56% on the four-agent run, 78% on the eval set).

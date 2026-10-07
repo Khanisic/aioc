@@ -6,7 +6,9 @@ Day 23 made model routing a configuration change (`AIOC_COORDINATOR_MODEL`,
 `AIOC_SUBAGENT_MODEL`, read through `LLMSettings.for_role`) and priced every route from
 recorded runs and 60 free token counts: the coordinator is 8% of a four-agent run's bill, an
 Opus 5 coordinator costs +12%, Haiku 4.5 subagents -57%; quality and latency per model are
-not projected (`docs/design-notes/model-routing.md`). Reading a trace back found every
+not projected (`docs/design-notes/model-routing.md`). One paid run measured Haiku 4.5 on the
+two eval-covered agents ($0.60, owner's yes): same accuracy, -56% paid, and both
+no-precedent probes lost (item 54). Reading a trace back found every
 Langfuse observation since Day 9 stored at zero tokens (war story #15, fixed). Both Claude
 PR jobs are still waiting on the owner (§7 item 45).
 
@@ -34,7 +36,7 @@ end of every working day.
 
   The user saw ~$4 go in one day and asked for this; quote it if a plan starts to need a
   paid call.
-- **Keep costs low.** The 1083-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 1084-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -265,12 +267,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1083 passed
+uv run pytest -q                                                   # expect 1084 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1083 passed** with the stack up at the end of Day 23 (2026-10-06);
-without Docker Desktop the 17 `integration`-marked tests skip and it is 1066. CI runs the
+Costs nothing. Last run: **1084 passed** with the stack up at the end of Day 23 (2026-10-07);
+without Docker Desktop the 17 `integration`-marked tests skip and it is 1067. CI runs the
 latter on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
@@ -330,9 +332,8 @@ repository already says Day 24 is for:
 
 - `CLAUDE_CODE_OAUTH_TOKEN` as a repo secret and the Claude GitHub App, for the first
   labelled review (item 45).
-- Whether to measure Haiku 4.5 as the subagent model: one eval run with
-  `AIOC_SUBAGENT_MODEL=claude-haiku-4-5`, 38 calls, ~$0.46 by the Day 23 projection,
-  compared with `--against evaluations/baseline.json` (item 51).
+- Whether Haiku's Docs abstention failure (item 54) is worth chasing, or the subagent
+  model stays Sonnet 5.
 
 <!-- superseded Day 23 notes follow, kept for the record -->
 **Day 23 as planned:** A: structured digests across handoffs. B: the model routing
@@ -1073,11 +1074,12 @@ for github queries.
    `coordinator/planner.py`). Moving to them is `tool_choice: auto`, an instruction naming
    the emit tool, and `strict: true` on its schema, then re-measuring the retry loop (a
    model that skips the tool is no longer impossible). Opus 5 and Sonnet 5 remain callable.
-51. **Haiku 4.5 as subagent is priced, not measured.** -57% on the four-agent run, -63% on
-   the eval set (`evaluations/routing/projection.md`). Day 4 saw Haiku break the timeline
-   ordering invariant on 2 of 3 attempts, before the retry loop existed. One eval run with
-   `AIOC_SUBAGENT_MODEL=claude-haiku-4-5` (38 calls, ~$0.46) answers it for two agents; the
-   owner's call under §1.
+51. **Haiku 4.5 as subagent: measured once, on two agents (2026-10-07, $0.60, owner's
+   yes).** `evaluations/routing/haiku-vs-sonnet.md`. Same failure-mode accuracy (16/18) and
+   recall (18/18) as Sonnet 5, -56% paid, ungrounded statements 1 -> 5 of ~280; both
+   no-precedent probes failed (item 54). The projection said -63% and $0.46; it was 17% low
+   (more retries, more output). The GitHub and Deployment agents and the coordinator have
+   never run on anything but Sonnet 5.
 52. **The coordinator's cache markers are a small surcharge.** The planner and the model
    synthesis are single forced calls; each writes its prefix (4,166 and 1,611 tokens on
    Sonnet 5) at 1.25x and reads it back only if another request arrives within five
@@ -1088,6 +1090,20 @@ for github queries.
    session's permission classifier (it named the reason "Remote Repoint", most likely the
    `khanisic` mirror push made just before), and the session did not try another route.
    Add the Day 23 done-when note there by hand, the way Day 22 added its own.
+54. **Haiku 4.5 cannot abstain through the Docs agent.** On both no-precedent probes
+   (`case_19:recall`, `case_20:recall`) its report was refused three times with the error
+   fed back: two unanswered sub-questions with no gap whose `blocks_field` is
+   `findings.coverage.unanswered`, and a null `findings.answer` with no gap against it.
+   Sonnet 5 declined both correctly. What Haiku emitted is not kept: the run
+   (`test-results/runs/2026-10-07/20261007T004504Z__llm__evals-realtime/`) records
+   `response: null` and the last rejection message (`eval.json`, `error_kind: agent`) and
+   no rejected payload. Seeing one needs a re-run of those two items (`run_evals.py
+   --cases case_19,case_20 --tasks recall`, 2 items, a few cents on Haiku) with the payload
+   captured - worth adding to the record first. Also: the eval report's "Probes
+   declined" row shows `n/a (0)` when both probes failed, because a failed item has no
+   answer to score; the "Answered" row and the changed-items table are where it shows.
+   Per-agent routing (Haiku for Incident, Sonnet for Docs) is what this run supports, and
+   needs a per-agent model setting the role settings do not have.
 
 ## 8. Where things are written down
 

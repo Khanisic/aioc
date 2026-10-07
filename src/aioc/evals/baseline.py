@@ -181,22 +181,34 @@ def build_baseline(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 # --------------------------------------------------------------- a later run, compared
 
 
-def compare(baseline: Mapping[str, Any], record: Mapping[str, Any]) -> dict[str, Any]:
+def compare(
+    baseline: Mapping[str, Any], record: Mapping[str, Any], *, across_models: bool = False
+) -> dict[str, Any]:
     """A later run against the baseline run of the same configuration.
 
     The point of a baseline: after the context is trimmed (Day 21) the same set is run
     again, and the token reduction is this function's ``tokens`` block. Refused unless the
     set and the model are the baseline's - a smaller prompt on a different question is
     not a reduction.
+
+    ``across_models`` (Day 23) is the one other comparison a baseline answers: the same set
+    and configuration on another model, which is what a model-routing decision needs. The
+    model rule is lifted and nothing else; the token and cost changes then carry the model's
+    tokenizer and prices as well as what it wrote, and the result names both models.
     """
     if record["set"]["sha256"] != baseline["set"]["sha256"]:
         raise BaselineError(
             f"the run is on eval set {record['set']['sha256'][:12]} and the baseline on "
             f"{baseline['set']['sha256'][:12]}; a changed set needs a new baseline"
         )
-    if record["run"]["model"] != baseline["model"]:
+    if record["run"]["model"] != baseline["model"] and not across_models:
         raise BaselineError(
-            f"the run used {record['run']['model']} and the baseline {baseline['model']}"
+            f"the run used {record['run']['model']} and the baseline {baseline['model']}; "
+            "comparing models is a different question (`across_models=True`)"
+        )
+    if across_models and record["run"]["model"] == baseline["model"]:
+        raise BaselineError(
+            f"both runs used {baseline['model']}; a comparison across models needs two"
         )
     wanted = label(record)
     base = next((run for run in baseline["runs"] if run["label"] == wanted), None)
@@ -234,6 +246,9 @@ def compare(baseline: Mapping[str, Any], record: Mapping[str, Any]) -> dict[str,
         "configuration": wanted,
         "baseline_run": base["run_id"],
         "run": now["run_id"],
+        "models": {"before": baseline["model"], "after": record["run"]["model"]},
+        "retries": {"before": base["retries"], "after": now["retries"]},
+        "seconds": {"before": base["seconds"], "after": now["seconds"]},
         "rates": rates,
         "tokens": tokens,
         "usd": {
@@ -377,12 +392,23 @@ def render_baseline(baseline: Mapping[str, Any], *, heading: str = "Eval baselin
 def render_comparison(
     comparison: Mapping[str, Any], *, heading: str = "Against the baseline"
 ) -> str:
+    models = comparison.get("models") or {}
+    across = models.get("before") != models.get("after")
     lines = [
         f"# {heading}",
         "",
         f"- Configuration: {comparison['configuration']}.",
-        f"- Baseline run: `{comparison['baseline_run'] or 'unrecorded'}`.",
-        f"- This run: `{comparison['run'] or 'unrecorded'}`.",
+        f"- Baseline run: `{comparison['baseline_run'] or 'unrecorded'}`"
+        + (f" on `{models['before']}`." if across else "."),
+        f"- This run: `{comparison['run'] or 'unrecorded'}`"
+        + (f" on `{models['after']}`." if across else "."),
+    ]
+    if across:
+        lines.append(
+            "- **Two models.** Token and cost changes carry each model's tokenizer and prices "
+            "as well as what it wrote; the scores are the comparison that matters."
+        )
+    lines += [
         "",
         "## Tokens and cost",
         "",
@@ -402,6 +428,22 @@ def render_comparison(
     lines.append(
         f"| Paid | {_usd(usd['before'])} | {_usd(usd['after'])} | {_signed(usd['change'])} |"
     )
+    seconds = comparison.get("seconds")
+    if seconds is not None:
+        lines.append(
+            f"| Wall clock | {seconds['before']:.0f}s | {seconds['after']:.0f}s "
+            f"| {_signed(_change(seconds['before'], seconds['after']))} |"
+        )
+    retries = comparison.get("retries")
+    if retries is not None:
+        for key, text in (
+            ("accepted_first_try", "Accepted first try"),
+            ("recovered", "Recovered by a retry"),
+            ("exhausted", "Retries exhausted"),
+            ("retry_calls", "Retry calls"),
+        ):
+            before, after = retries["before"].get(key), retries["after"].get(key)
+            lines.append(f"| {text} | {before} | {after} | |")
     lines.extend(["", "## Scores", "", "| | Baseline | This run | Change |", "|---|---|---|---|"])
     for name, _path, text in _RATES:
         entry = comparison["rates"][name]

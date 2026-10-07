@@ -473,6 +473,28 @@ def test_a_run_that_cannot_be_compared_is_refused(change: dict[str, Any], compla
         compare(baseline, _changed(_later(), **change))
 
 
+def test_a_run_on_another_model_is_compared_only_when_asked():
+    # Day 23: the model-routing question - the same set and configuration on another model.
+    baseline = build_baseline(_records())
+    haiku = _changed(_later(), run__model="claude-haiku-4-5")
+    comparison = compare(baseline, haiku, across_models=True)
+    assert comparison["models"] == {"before": baseline["model"], "after": "claude-haiku-4-5"}
+    assert comparison["configuration"] == "realtime, cached"
+    assert set(comparison["retries"]) == {"before", "after"}
+    report = render_comparison(comparison, heading="Haiku subagents")
+    assert f"on `{baseline['model']}`." in report and "on `claude-haiku-4-5`." in report
+    assert "**Two models.**" in report
+    assert "| Retry calls |" in report and "| Wall clock |" in report
+    # Lifting the model rule lifts nothing else...
+    with pytest.raises(BaselineError, match="a changed set needs a new baseline"):
+        compare(baseline, _changed(haiku, set__sha256="0" * 64), across_models=True)
+    # ...and a comparison across models on one model is a mistake, not a comparison.
+    with pytest.raises(BaselineError, match="needs two"):
+        compare(baseline, _later(), across_models=True)
+    # The same-model report is unchanged in what it says about models.
+    assert "Two models" not in render_comparison(compare(baseline, _later()))
+
+
 # ============================================================================= the scripts
 
 
