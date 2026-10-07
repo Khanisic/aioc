@@ -150,6 +150,34 @@ services:
       retries: 12
       start_period: 10s
 
+  # Day 24: the orchestrator as a service, built from the repository's Dockerfile - the
+  # image a host would run. Opt-in (`--profile api`), so `docker compose up` is unchanged.
+  #   AIOC_API_TOKEN=<choose one> docker compose --profile api up -d --build --wait
+  # It joins the stack's network: the database and Prometheus by service name, not by
+  # the host ports `.env` publishes them on.
+  api:
+    profiles: ["api"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aioc-api:day24
+    container_name: aioc-api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aioc}:${POSTGRES_PASSWORD:-aioc_dev_only}@postgres:5432/${POSTGRES_DB:-aioc}
+      PROMETHEUS_URL: http://prometheus:9090
+      AIOC_API_TOKEN: ${AIOC_API_TOKEN:-}
+      AIOC_API_LIVE: ${AIOC_API_LIVE:-false}
+      PORT: "8080"
+    ports:
+      - "${AIOC_API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 # Named volumes, not bind mounts or anonymous volumes. The Day 5 seed data
 # (15-20 synthetic incidents) is both the RAG corpus and the eval set - it must
 # survive `docker compose down`. It does NOT survive `down -v`, which is what

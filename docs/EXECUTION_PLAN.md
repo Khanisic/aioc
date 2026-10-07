@@ -1,4 +1,4 @@
-# AIOC — 30-Day Execution Plan
+# AIOC - 30-Day Execution Plan
 
 Companion to `BUILD_PLAN.md`. That document says **what** to build and why.
 This one says **what gets built on which day, and how you know it's done.**
@@ -22,14 +22,14 @@ both tracks, a numbered day is now closer to two sittings than one:
 | ~20 hrs/week | ~20 weeks |
 | ~12 hrs/week | ~30 weeks |
 
-Days are numbered, not dated. Don't re-plan when you slip — just move the pointer.
+Days are numbered, not dated. Don't re-plan when you slip - just move the pointer.
 The original two-engineer estimates (~6 weeks full-time) are gone, not merely optimistic.
 
 **Tracks.** Each numbered day still splits into two, and the split is load-bearing:
 
-- **A — Reasoning Layer.** Orchestrator, four subagents, context passing, output
+- **A - Reasoning Layer.** Orchestrator, four subagents, context passing, output
   schemas, evals. Domains 1, 4, and half of 5.
-- **B — Platform Layer.** MCP tools, Claude Code config, CI, demo environment,
+- **B - Platform Layer.** MCP tools, Claude Code config, CI, demo environment,
   deployment, observability. Domains 2, 3, and half of 5.
 
 Do A and B of a given day in separate sittings, and make each cross the contract only at
@@ -58,83 +58,83 @@ Everything else can churn. If those churn, you lose a week to integration pain.
 
 Already covered: Claude Max, Claude Code.
 
-- [ ] **Anthropic Console** — API key + prepaid credits. *Max does not cover programmatic
+- [ ] **Anthropic Console** - API key + prepaid credits. *Max does not cover programmatic
       API or CI usage.* Set a spend alert at $100.
-- [ ] **GitHub** — repo, Actions enabled, `ANTHROPIC_API_KEY` in repo Secrets, GHCR for images
-- [ ] **Neon** or **Supabase** — Postgres **+ pgvector** (this *is* your vector database;
+- [ ] **GitHub** - repo, Actions enabled, `ANTHROPIC_API_KEY` in repo Secrets, GHCR for images
+- [ ] **Neon** or **Supabase** - Postgres **+ pgvector** (this *is* your vector database;
       it covers both the episodic and semantic memory tiers in one service)
-- [ ] **Upstash** — Redis (working memory)
-- [ ] **Voyage AI** — embeddings key (Day 8; Anthropic has no embeddings endpoint).
+- [ ] **Upstash** - Redis (working memory)
+- [ ] **Voyage AI** - embeddings key (Day 8; Anthropic has no embeddings endpoint).
       Optional in the sense that retrieval degrades to lexical-only without it.
-- [ ] **Langfuse Cloud** — public/secret keys
-- [ ] **Railway** or **Render** — linked to the GitHub repo
+- [ ] **Langfuse Cloud** - public/secret keys
+- [ ] **Railway** or **Render** - linked to the GitHub repo
 
-**No signup needed — self-hosted in `docker-compose.yml`:** Prometheus, Grafana, the demo
+**No signup needed - self-hosted in `docker-compose.yml`:** Prometheus, Grafana, the demo
 app services. Running these locally is deliberate: the chaos scripts need metrics you
 control, and a hosted account adds an auth dance for no benefit.
 
 **Optional, worth considering:** a free **Notion** workspace (10–15 runbook pages + the
 Notion MCP server) gives the Docs agent a genuine external knowledge source instead of
 seeded local files, and gives you a second MCP server to compare tool descriptions
-against — which strengthens the Domain 2 case study. Roughly one day of work.
+against - which strengthens the Domain 2 case study. Roughly one day of work.
 - [ ] *(optional)* Slack free workspace, Grafana Cloud, Loom
 
 Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 ---
 
-# Sprint 1 — Foundations (Days 1–5)
+# Sprint 1 - Foundations (Days 1–5)
 
 *Goal: repo, config layer, demo environment, and one agent that returns valid JSON.*
 
-### Day 1 — Integration: contracts and scaffold
-- **Both tracks (first sitting):** Kickoff. Write `docs/CONTRACTS.md` — the four agent output schemas
+### Day 1 - Integration: contracts and scaffold
+- **Both tracks (first sitting):** Kickoff. Write `docs/CONTRACTS.md` - the four agent output schemas
   (field names, types, nullable fields, enums) and the tool interface signature. **Freeze it.**
 - **A (second sitting):** Draft Pydantic models for all four agent outputs.
 - **B (second sitting):** Repo scaffold per `BUILD_PLAN.md` structure, `docker-compose.yml`
   with Postgres + Redis, `.env.example`.
 - **Done when:** `docker compose up` runs clean and `CONTRACTS.md` is merged.
 
-### Day 2 — Harness and Claude Code config
-- **A:** Claude API harness — messages, streaming, and a working `tool_use` loop.
+### Day 2 - Harness and Claude Code config
+- **A:** Claude API harness - messages, streaming, and a working `tool_use` loop.
 - **B:** Domain 3 config layer: `CLAUDE.md` hierarchy (project + directory scopes),
   `.claude/rules/` with globs (`agents/**`, `tools/**`, `**/*.test.*`), two custom
   slash commands.
 - **Done when:** A can round-trip a tool call; B's rules demonstrably fire in a session.
 
-### Day 3 — First agent, first services
-- **A:** Incident agent skeleton — system prompt (expert SRE, cite evidence, estimate
+### Day 3 - First agent, first services
+- **A:** Incident agent skeleton - system prompt (expert SRE, cite evidence, estimate
   confidence), single-turn, no tools yet.
-- **B:** Demo app — 2–3 containerized services with Prometheus scraping them.
+- **B:** Demo app - 2–3 containerized services with Prometheus scraping them.
 - **Done when:** Incident agent returns prose; demo app exposes metrics.
 
-### Day 4 — Structured output, chaos
+### Day 4 - Structured output, chaos
 - **A:** Incident agent returns schema-validated output via `tool_use` + `tool_choice`.
-- **B:** Chaos scripts — four injectable failure modes: memory leak, bad config deploy,
+- **B:** Chaos scripts - four injectable failure modes: memory leak, bad config deploy,
   slow downstream dependency, 500-spike tied to a specific commit.
 - **Done when:** `make chaos-<mode>` reliably breaks the demo app.
 
-### Day 5 — Integration day: wiring + seed data ✅
+### Day 5 - Integration day: wiring + seed data ✅
 - **Both tracks:** Wire agent to real Prometheus data. Seed 15–20 synthetic historical incidents
   into Postgres (these become the RAG corpus *and* the eval set later).
 - **Checkpoint:** Break the app → Incident agent produces valid JSON about it.
 - **Done:** `aioc.observability.prometheus` renders live metrics as the agent's context block;
   18 incidents + 65 timeline events seeded. Checkpoint verified live by
-  `scripts/check_day5_checkpoint.py` — injected `downstream_latency`, diagnosed
+  `scripts/check_day5_checkpoint.py` - injected `downstream_latency`, diagnosed
   `downstream_latency` @ 0.55 naming both affected services, contract-valid.
   `chaos_knob_value` is excluded from agent context by an enforced guard, so the comparison
   is a diagnosis rather than a transcription of the answer key.
 
 ---
 
-# Sprint 2 — Orchestrator + two agents (Days 6–10)
+# Sprint 2 - Orchestrator + two agents (Days 6–10)
 
 *Goal: coordinator delegating to Incident and Docs in parallel.*
 
-### Day 6 — Coordinator, first custom tool ✅
-- **A:** Coordinator skeleton — intent classification, **dynamic agent selection**
+### Day 6 - Coordinator, first custom tool ✅
+- **A:** Coordinator skeleton - intent classification, **dynamic agent selection**
   (invoke only what the query needs), `allowedTools` includes `Task`.
-- **B:** First custom MCP tool `get_incident_timeline` — description carries inputs,
+- **B:** First custom MCP tool `get_incident_timeline` - description carries inputs,
   example queries, edge cases, when-to-use-vs-alternative.
 - **Done when:** Coordinator picks agents correctly on 5 sample queries.
 - **Done:** `aioc.coordinator.Coordinator.plan` returns a validated `SelectionPlan`; the graded
@@ -150,9 +150,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **Carried to Day 7:** `allowedTools`/`Task` wiring lands with delegation - the plan is
   built but not executed.
 
-### Day 7 — Delegation and error taxonomy ✅
+### Day 7 - Delegation and error taxonomy ✅
 - **A:** Task delegation with **explicit context passing** in each subagent prompt.
-  No implicit inheritance — this is the most-tested orchestration fact.
+  No implicit inheritance - this is the most-tested orchestration fact.
 - **B:** `correlate_events` tool + structured `isError` responses across all four classes
   (transient / validation / business / permission).
 - **Done when:** Subagent receives context it never inherited; all four error classes return distinctly.
@@ -184,9 +184,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   Day 4 precedent where `IncidentReport` excludes the caller's plumbing. War story #7.
 - **Carried to Day 14:** model-written synthesis, alongside the refinement loop that needs it.
 
-### Day 8 — Docs agent and retrieval ✅
-- **A:** Docs agent — prompt constrained to retrieved documents only, cites every claim.
-- **B:** pgvector ingestion pipeline — chunking, embeddings, metadata, hybrid search.
+### Day 8 - Docs agent and retrieval ✅
+- **A:** Docs agent - prompt constrained to retrieved documents only, cites every claim.
+- **B:** pgvector ingestion pipeline - chunking, embeddings, metadata, hybrid search.
 - **Done when:** Docs agent answers from the seeded corpus with citations.
 - **Done:** `DocsAgent.answer` retrieves first (injectable `CorpusRetriever` seam), renders the
   documents into the prompt, and enforces grounding in code - an uncited-in-retrieval
@@ -200,9 +200,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **Carried:** the Day 8 done-when was proven offline plus real-corpus integration tests;
   the 1-call live proof is `scripts/check_day8_docs.py`, still unspent.
 
-### Day 9 — Parallelism and tracing ✅
-- **A:** **Parallel Task calls** — Incident + Docs invoked in a single response.
-- **B:** Langfuse instrumentation — traces for every agent call, tool call, token count, cost.
+### Day 9 - Parallelism and tracing ✅
+- **A:** **Parallel Task calls** - Incident + Docs invoked in a single response.
+- **B:** Langfuse instrumentation - traces for every agent call, tool call, token count, cost.
 - **Done when:** One trace shows two agents running concurrently.
 - **Done:** the executor's parallel group now runs on a thread pool (the agents block on the
   Anthropic SDK, so threads buy real overlap without an async rewrite); the sequential chain
@@ -227,9 +227,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **Carried:** the ~3-call no-flag form (a real planned request, traced) is unspent; Day 10's
   demo exercises the same path.
 
-### Day 10 — Integration: first real demo ✅
+### Day 10 - Integration: first real demo ✅
 - **Both tracks:** End-to-end query: *"Why did latency spike after the last deploy?"*
-- **Checkpoint:** Record a GIF. This is your first LinkedIn asset — capture it now.
+- **Checkpoint:** Record a GIF. This is your first LinkedIn asset - capture it now.
 - **Done:** `scripts/demo_day10.py` runs the whole story live - inject `downstream_latency`,
   render live Prometheus metrics as the situation block, then `respond()` end to end with
   tracing. Two runs, both diagnosing the injected truth (measured numbers in
@@ -247,12 +247,12 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 ---
 
-# Sprint 3 — Agents 3 & 4 + tool depth (Days 11–15)
+# Sprint 3 - Agents 3 & 4 + tool depth (Days 11–15)
 
 *Goal: all four agents live, plus the routing case study.*
 
-### Day 11 — GitHub agent ✅
-- **A:** GitHub agent — read repos, analyze PRs, explain diffs.
+### Day 11 - GitHub agent ✅
+- **A:** GitHub agent - read repos, analyze PRs, explain diffs.
 - **B:** GitHub MCP server wired in, scoped credentials, repo access verified.
 - **Done (2026-08-23):** `src/aioc/tools/github/` is a custom stdio MCP server (`get_pull_request`,
   `list_commits`, `diff_refs`) over the GitHub REST API - four-class errors, `GITHUB_SCOPE_MISSING`
@@ -267,8 +267,8 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   Seven attempts to get there, each failure a harness or prompt defect now pinned by a test (the
   table is in `docs/interview-prep/numbers.md`).
 
-### Day 12 — Deployment agent
-- **A:** Deployment agent — compare releases, check rollout health.
+### Day 12 - Deployment agent
+- **A:** Deployment agent - compare releases, check rollout health.
 - **B:** `diff_release` and `check_rollout_health` custom tools.
 - **Done (2026-09-09):** `src/aioc/tools/deployment/` is the `aioc-deployment` stdio server for the two
   contract-named tools. `diff_release` reads compose, `.env`-style, and Kubernetes manifests at both
@@ -288,7 +288,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   @ 0.90 (the redeploy's own restart and failed scrape, correctly attributed), `hold_and_monitor`
   @ 0.60, eight grounded excerpts, one honest gap. Numbers in `docs/interview-prep/numbers.md`.
 
-### Day 13 — Sequential paths + routing experiment (part 1)
+### Day 13 - Sequential paths + routing experiment (part 1)
 - **A:** **Sequential dependency path**: GitHub reads the PR → Deployment diffs the release.
   Note in code comments why this one *can't* be parallel.
 - **B:** Build two deliberately overlapping tools (e.g. `analyze_logs` vs `analyze_events`).
@@ -325,8 +325,8 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   honest "before"; the Day 14 write-up owns what that means. Numbers in
   `docs/interview-prep/numbers.md`.
 
-### Day 14 — Refinement loop + routing experiment (part 2)
-- **A:** Coordinator **refinement loop** — detect gaps in synthesis, re-delegate targeted queries.
+### Day 14 - Refinement loop + routing experiment (part 2)
+- **A:** Coordinator **refinement loop** - detect gaps in synthesis, re-delegate targeted queries.
 - **B:** Split/rename the overlapping tools, re-run the same 20 queries, record the new rate.
   Draft `docs/case-study-tool-routing.md` with before/after numbers.
 - **Done (2026-09-17):** the executor runs the **refinement loop** after the plan: every open `Gap` that
@@ -361,9 +361,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   the `1.1.0` tools (125.9k input tokens). Numbers in `docs/interview-prep/numbers.md`, the case study
   in `docs/case-study-tool-routing.md`, the story in war story #10.
 
-### Day 15 — Integration: four agents live
+### Day 15 - Integration: four agents live
 - **Checkpoint:** A multi-agent query exercising parallel *and* sequential paths.
-- **Both tracks:** Cost review — check Console spend against the $100 alert.
+- **Both tracks:** Cost review - check Console spend against the $100 alert.
 - **Done (2026-09-18):** `scripts/check_day15_integration.py` is the checkpoint: a real fault injected,
   the situation block built from live Prometheus metrics plus what the on-call knows about releases, and
   one query that needs all four agents. It asserts all four are planned and answer, that a parallel
@@ -397,12 +397,12 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 ---
 
-# Sprint 4 — Hardening + reliability (Days 16–20)
+# Sprint 4 - Hardening + reliability (Days 16–20)
 
 *Goal: every output schema-validated; evals running.*
 
-### Day 16 — Schemas everywhere + HITL
-- **A:** All four agents on validated schemas — **nullable fields** (absent data returns
+### Day 16 - Schemas everywhere + HITL
+- **A:** All four agents on validated schemas - **nullable fields** (absent data returns
   `null`, never a fabricated value), enums using the `"other"` + detail-string pattern.
 - **B:** Human-in-the-loop approval gate for critical actions (rollback, restart, merge).
 - **Done (2026-09-25):** A: the `contract-audit` skill ran against all four agents' schemas and the
@@ -423,8 +423,8 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   responses: 15 recommendations, 7 needing a human, and three classifier misreadings found and pinned.
   The live four-agent re-run that measures item 22 is not yet made.
 
-### Day 17 — Retry loop + audit
-- **A:** **Validation-retry loop** — on schema failure, re-request with the specific error
+### Day 17 - Retry loop + audit
+- **A:** **Validation-retry loop** - on schema failure, re-request with the specific error
   attached. Track retry-resolvable (format) vs. not (info genuinely absent).
 - **B:** Audit log for every approved/denied action.
 - **Done (2026-09-28):** A: `src/aioc/agents/_retry.py` - every agent's forced emit runs inside
@@ -444,7 +444,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   `respond(gate=...)` is the opt-in entry point; `scripts/gate_recorded_run.py --persist` wrote the
   15 recorded decisions and `scripts/audit_log.py` reads them back. 707 offline tests.
 
-### Day 18 — Confidence + provenance shore-up
+### Day 18 - Confidence + provenance shore-up
 - **A:** Field-level confidence scores on all agent outputs.
 - **B:** Docs agent **claim → source mapping** and **coverage-gap reporting**
   (the cheap Domain 5 shore-up from `BUILD_PLAN.md`).
@@ -465,7 +465,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   answered with every unanswered one gapped, 23/23 supported claims traced to an evidence entry.
   The Docs emit guidance now tells the model an unsupported claim's confidence belongs below 0.25.
 
-### Day 19 — Evals + cost levers
+### Day 19 - Evals + cost levers
 - **A:** Eval set of 15–20 cases from the seeded incidents + a scoring harness
   (accuracy, hallucination rate, tool success rate).
 - **B:** Prompt caching on shared system prompts; run the eval suite through the Batch API.
@@ -490,9 +490,9 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   the first live run was refused with `401 API key is invalid` before spending anything, which
   is also how the harness learned to abort on a refused credential rather than score it.
 
-### Day 20 — Integration: baseline
+### Day 20 - Integration: baseline
 - **Checkpoint:** Full eval run, results committed to `evaluations/baseline.md`.
-  Record cached vs. uncached and batch vs. realtime cost deltas — these are portfolio numbers.
+  Record cached vs. uncached and batch vs. realtime cost deltas - these are portfolio numbers.
 - **Not done (2026-09-29): the checkpoint is built and tested, the run has not been made.** The
   API key is revoked, so no eval has ever run live and `evaluations/baseline.md` does not exist.
   What exists is the checkpoint as one command, `scripts/check_day20_baseline.py`: a four-call
@@ -527,13 +527,13 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 ---
 
-# Sprint 5 — Context engineering + CI + deploy (Days 21–25)
+# Sprint 5 - Context engineering + CI + deploy (Days 21–25)
 
 *Goal: lean context, Claude Code in CI, live URL.*
 
-### Day 21 — Trimming + PR review
+### Day 21 - Trimming + PR review
 - **A:** Trim verbose tool outputs; structured fact extraction *before* content enters context.
-- **B:** Claude Code in GitHub Actions — automated PR review on this repo.
+- **B:** Claude Code in GitHub Actions - automated PR review on this repo.
 - **Done (2026-09-30), the review workflow written and not yet run.** First, HANDOFF item 22's
   live re-run with caching on: `check_day15_integration.py` **PASS, $0.74** (Day 15: ~$1.16),
   one refinement re-delegation instead of four, 62% of input read from the cache, the retry
@@ -550,8 +550,8 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   prompt naming this repository's defect classes, read-only tools plus inline comments). The
   review needs the `ANTHROPIC_API_KEY` secret and the Claude GitHub App (HANDOFF item 45).
 
-### Day 22 — Ordering + false positives
-- **A:** Position-aware input ordering — freshest signals and the query where attention is strongest.
+### Day 22 - Ordering + false positives
+- **A:** Position-aware input ordering - freshest signals and the query where attention is strongest.
 - **B:** Tune the review prompt for **low false-positive** feedback; add test generation.
 - **Done (2026-10-01), at $0 of API spend** (the rule from this day on, HANDOFF sec 1). A: one
   ordering rule for every prompt - stable reference first, freshest and most specific last,
@@ -564,15 +564,33 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   both planted defects. Both Claude jobs are label-triggered on a subscription token; test
   generation commits, and a workflow step pushes only a tests-only commit that passes.
 
-### Day 23 — Handoffs + model routing
-- **A:** Structured digests across handoffs — Incident passes a digest to Deployment, not a raw dump.
-- **B:** Model routing experiment — Haiku/Sonnet for subagents, Opus for the coordinator.
+### Day 23 - Handoffs + model routing
+- **A:** Structured digests across handoffs - Incident passes a digest to Deployment, not a raw dump.
+- **B:** Model routing experiment - Haiku/Sonnet for subagents, Opus for the coordinator.
   Measure cost and latency per configuration.
+- **Done (2026-10-06/07), at $0 plus one approved $0.60 run.** A: the executor already hands any
+  direct dependency's digest to its dependent; the Incident -> Deployment edge now has its own
+  test, every digest line quotable through the Deployment agent's grounding. B: per-role
+  models (`AIOC_COORDINATOR_MODEL`, `AIOC_SUBAGENT_MODEL`) and a projection of seven routes
+  from recorded runs and 60 free token counts (`evaluations/routing/projection.md`): the
+  coordinator is 8% of a four-agent bill, an Opus 5 coordinator +12%, Haiku 4.5 subagents
+  -57%. Latency was not projected. One paid run measured Haiku 4.5 on the two eval-covered
+  agents: the same accuracy at -56%, and both no-precedent probes lost
+  (`evaluations/routing/haiku-vs-sonnet.md`).
 
-### Day 24 — Measure + deploy
+### Day 24 - Measure + deploy
 - **A:** Re-run evals. Record token reduction vs. the Day 20 baseline.
 - **B:** Deploy to Railway/Render. Keep K8s manifests in `infrastructure/` as documented artifacts.
-- **B — schema and corpus on hosted Postgres.** `docker/postgres/init/` runs *only* on
+- **A, in progress (2026-10-07).** The re-run is the batch-cached configuration (owner's yes,
+  about $0.71), submitted with `run_evals.py --mode batch --detach` and left running; nobody
+  waits on the queue. How to check on it and compare it with the baseline is
+  `docs/guides/detached-batch-eval.md`. The 18 diagnoses send requests byte-identical to Day
+  20 and the recalls carry only the Day 22 reordering, so the token change is expected near
+  zero: the Day 21 trimming acts on tool replies, which this set does not exercise.
+- **B, decided (2026-10-07): config only, no host yet.** The service, its image, and the
+  hosted-Postgres apply path are built and proven locally in a container; the host is chosen
+  later.
+- **B - schema and corpus on hosted Postgres.** `docker/postgres/init/` runs *only* on
   first initialisation of an empty local volume, so the hosted database starts with no
   extensions, no tables, and no incident corpus. Apply them explicitly, in order, before
   the app points at it:
@@ -581,42 +599,42 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
   ```
   The seed is idempotent (`ON CONFLICT DO NOTHING`), so re-running is safe; the schema
   files are not, and will fail loudly if the tables already exist. Neon and Supabase both
-  need `vector` enabled on the instance — `01-extensions.sql` raises a clear exception if
+  need `vector` enabled on the instance - `01-extensions.sql` raises a clear exception if
   it is missing rather than failing later inside retrieval.
   **This is also the point to decide on a migration tool.** `init/` cannot express a change
   to an already-populated database, so any post-deploy schema edit needs either a
   destructive reseed or a real migration path. See `docs/guides/incidents-table.md` for the
   tradeoff.
 
-### Day 25 — Integration: production smoke test
+### Day 25 - Integration: production smoke test
 - **Checkpoint:** Live URL, chaos injected against the deployed stack, traces landing in Langfuse.
 
 ---
 
-# Sprint 6 — Evidence + launch (Days 26–30)
+# Sprint 6 - Evidence + launch (Days 26–30)
 
 *Goal: a reviewer can verify all five domains in ten minutes.*
 
-### Day 26 — Evidence packaging
+### Day 26 - Evidence packaging
 - **A:** README section per CCA-F domain: *domain → implementing module → design note.*
 - **B:** Architecture diagrams, Langfuse screenshots, eval result tables.
 
-### Day 27 — Design notes
-- **A:** `docs/design-notes/` — the workflow-vs-agent tradeoff, why parallel here and
+### Day 27 - Design notes
+- **A:** `docs/design-notes/` - the workflow-vs-agent tradeoff, why parallel here and
   sequential there, what the retry-loop error taxonomy revealed.
-- **B:** Polish the tool-routing case study. Secrets audit — scan history for leaked keys.
+- **B:** Polish the tool-routing case study. Secrets audit - scan history for leaked keys.
 
-### Day 28 — Integration: demo video
+### Day 28 - Integration: demo video
 - **Both tracks:** Script and record 2–3 minutes. Structure: break production (0:00–0:30) →
   agents diagnose (0:30–1:30) → trace and cost view (1:30–2:15) → architecture (2:15–end).
   Lead with the break, never the diagram.
 
-### Day 29 — Integration: polish
+### Day 29 - Integration: polish
 - **Both tracks:** Edit video, final README pass, fresh-clone test (`git clone` → running in
   under 10 minutes on a machine that isn't yours). With one maintainer this test is the
   only thing standing between `HANDOFF.md` and a repo nobody else can start.
 
-### Day 30 — Launch
+### Day 30 - Launch
 - LinkedIn post in your own words. Repo public.
   (Originally two cross-linked posts, one per engineer. One post now - do not manufacture
   a second voice for a project with one author.)
@@ -655,7 +673,7 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 
 ---
 
-## Appendix — Services deliberately excluded, and why
+## Appendix - Services deliberately excluded, and why
 
 The original AIOC architecture named a much larger set of integrations. Most are absent
 from this plan by decision, not oversight. Documented here so the scope reads as
@@ -666,7 +684,7 @@ engineering judgment rather than gaps.
 | Service | How it's handled |
 |---|---|
 | **Vector database** (Pinecone / Weaviate) | **pgvector** on Neon/Supabase. One service, one connection string, no separate SDK. Vector-store selection and hosting are not graded on the CCA-F blueprint, and pgvector handles a 20-document corpus comfortably. Swapping to Pinecone later is ~half a day. |
-| **Prometheus** | Self-hosted container. Required by the plan (Sprint 1, Day 3) — just not a signup. |
+| **Prometheus** | Self-hosted container. Required by the plan (Sprint 1, Day 3) - just not a signup. |
 | **Grafana** | Self-hosted container. Grafana Cloud remains optional and is only for a hosted dashboard. |
 
 ### Removed by the four-agent decision
@@ -677,7 +695,7 @@ Choosing Incident + Docs + GitHub + Deployment retired the agents these belonged
 |---|---|
 | **Jira**, **Slack** | Communication Agent |
 | **Trivy**, **Snyk**, **AWS IAM**, **GitHub Security** | Security Agent |
-| **Datadog**, **CloudWatch**, **ElasticSearch** | Incident Agent's alternative data sources — Prometheus covers this need at zero cost |
+| **Datadog**, **CloudWatch**, **ElasticSearch** | Incident Agent's alternative data sources - Prometheus covers this need at zero cost |
 
 Jira's free tier covers up to 10 users and a Jira MCP server exists, so the Communication
 Agent is a clean v2 bolt-on. It earns nothing on the blueprint now, because third-party
@@ -697,7 +715,7 @@ MCP consumption is already proven via the GitHub MCP server.
 
 The Docs agent was originally specified to read **Confluence and Notion**; in this plan
 its corpus is seeded markdown plus Postgres. This is the one exclusion that costs a
-little narrative strength — "retrieves organizational knowledge from a real wiki" reads
+little narrative strength - "retrieves organizational knowledge from a real wiki" reads
 better than "reads files in the repo." The optional Notion workspace in the accounts
 checklist closes it for about a day of work.
 
@@ -706,7 +724,7 @@ checklist closes it for about a day of work.
 When the stack ships (Day 24), the Prometheus/Grafana/demo-app containers need a home
 too. Two acceptable options: deploy the full compose stack to Railway (multi-service
 projects are supported), or keep the demo environment local and record the video against
-localhost. Local is cheaper and entirely honest — the live URL demonstrates the
+localhost. Local is cheaper and entirely honest - the live URL demonstrates the
 orchestrator; the local stack demonstrates the incident flow.
 
 ---

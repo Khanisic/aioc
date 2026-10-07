@@ -52,6 +52,7 @@ from aioc.contracts import AgentResponse
 from aioc.llm import (
     BatchError,
     BatchRun,
+    BatchStatus,
     DeferredClient,
     LLMClient,
     LLMSettings,
@@ -82,6 +83,28 @@ class EvalAborted(RuntimeError):  # noqa: N818 - names what happened to the run
     def __init__(self, message: str, *, completed: int, results: Sequence[ItemResult] = ()) -> None:
         super().__init__(message)
         self.completed = completed
+        self.results = list(results)
+
+
+class BatchDetached(Exception):  # noqa: N818 - a stopping point, not a failure
+    """A batch run stopped on purpose without waiting for a batch (``detach``). Nothing
+    went wrong: ``batch_id`` is running on the server and the run is continued, later, by
+    resuming it. ``status`` is the batch's last poll, ``None`` for one just submitted;
+    ``results`` is what was scored before stopping, kept like an abort's."""
+
+    def __init__(
+        self,
+        batch_id: str,
+        *,
+        status: BatchStatus | None,
+        submitted: bool,
+        results: Sequence[ItemResult] = (),
+    ) -> None:
+        said = status.render() if status is not None else f"batch {batch_id} submitted"
+        super().__init__(f"{said}; not waiting for it")
+        self.batch_id = batch_id
+        self.status = status
+        self.submitted = submitted
         self.results = list(results)
 
 
@@ -365,16 +388,32 @@ def run_batch(
     on_result: Callable[[ItemResult], None] | None = None,
     submitted: Sequence[str] = (),
     on_submit: Callable[[str, int], None] | None = None,
+    detach: bool = False,
 ) -> EvalRun:
     """``submitted`` names batches an earlier run of these items sent and never read
     back; their answers are fetched before anything is submitted, so a run that died
-    waiting on a batch pays for it once. ``on_submit`` is told each new batch's id."""
+    waiting on a batch pays for it once. ``on_submit`` is told each new batch's id.
+
+    ``detach`` never waits on a batch: an earlier batch that has not ended, or a batch
+    this run has just submitted, raises `BatchDetached` with the items scored so far.
+    Resuming with the same ``submitted`` ids picks the run up where it stopped; a run
+    with retries to make stops once a pass until the last pass has nothing to send."""
     run = _new_run("batch", client.settings)
     recording = None if retriever is None else RecordingRetriever(retriever)
     tally = _Tally(done, progress, on_result)
     started = time.monotonic()
     waiting = [item for item in items if not tally.has(item)]
     for batch_id in submitted:
+        if detach:
+            try:
+                status = batcher.status(batch_id)
+            except anthropic.APIError as exc:
+                why = stops_the_run(exc) or "an earlier batch could not be polled"
+                raise _aborted(exc, why, at=f"batch {batch_id}", results=tally.ordered()) from exc
+            if not status.ended:
+                raise BatchDetached(
+                    batch_id, status=status, submitted=False, results=tally.ordered()
+                )
         if progress is not None:
             progress(f"  reading batch {batch_id}, submitted by an earlier run")
         try:
@@ -410,6 +449,10 @@ def run_batch(
         if progress is not None:
             progress(f"  pass {number}: {len(client.pending)} request(s) submitted as one batch")
         try:
+            if detach:
+                sent = client.submit(batcher, on_submit=on_submit)
+                if sent is not None:
+                    raise BatchDetached(sent, status=None, submitted=True, results=tally.ordered())
             batch = client.flush(batcher, on_submit=on_submit)
         except (anthropic.APIError, BatchError) as exc:
             # The batch is how every waiting item is asked: if it cannot be sent or

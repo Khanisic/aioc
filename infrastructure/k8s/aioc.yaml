@@ -1,0 +1,111 @@
+# AIOC on Kubernetes - a documented artifact, never applied (Day 24).
+#
+# The project deliberately runs no cluster (docs/BUILD_PLAN.md, "Out of scope"). These
+# manifests show what the deployed service needs, in the form a platform team would
+# review: one stateless Deployment running the repository's Dockerfile, a migration Job
+# that runs before it, a Service, and the configuration split into what is secret and
+# what is not. Postgres (with pgvector), Langfuse, and Prometheus are external here.
+#
+#   kubectl apply -f infrastructure/k8s/aioc.yaml        # after creating aioc-secrets
+#
+# The image is the one `docker build -t <registry>/aioc-api:<sha> .` produces.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aioc
+---
+# Not secret: what the service may do. Every switch that spends money is off.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aioc-config
+  namespace: aioc
+data:
+  AIOC_API_LIVE: "false"
+  AIOC_API_MAX_CONCURRENT: "1"
+  AIOC_API_MAX_PENDING: "4"
+  AIOC_API_MAX_ROUNDS: "0"
+  AIOC_ENV: "production"
+  PROMETHEUS_URL: "http://prometheus.monitoring.svc:9090"
+  LANGFUSE_HOST: "https://us.cloud.langfuse.com"
+---
+# Created out of band, never committed with values (see secret.example.yaml):
+#   kubectl -n aioc create secret generic aioc-secrets --from-env-file=<file>
+# Keys: DATABASE_URL, AIOC_API_TOKEN, ANTHROPIC_API_KEY, VOYAGE_API_KEY,
+#       LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, GITHUB_TOKEN, GITHUB_REPO
+---
+# The schema, applied before the service changes: `python -m aioc.db migrate` applies
+# only what the ledger lacks and refuses a changed file, so re-running it is safe.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aioc-migrate
+  namespace: aioc
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: migrate
+          image: registry.example.com/aioc-api:REPLACE_WITH_GIT_SHA
+          command: ["python", "-m", "aioc.db", "migrate"]
+          envFrom:
+            - secretRef:
+                name: aioc-secrets
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aioc-api
+  namespace: aioc
+spec:
+  # One replica: jobs live in the process's memory (`aioc.api.jobs`), so a second replica
+  # would answer GET for jobs it never ran. Scaling out means a shared job store first.
+  replicas: 1
+  selector:
+    matchLabels: {app: aioc-api}
+  template:
+    metadata:
+      labels: {app: aioc-api}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          image: registry.example.com/aioc-api:REPLACE_WITH_GIT_SHA
+          ports:
+            - containerPort: 8080
+          env:
+            - {name: PORT, value: "8080"}
+          envFrom:
+            - configMapRef: {name: aioc-config}
+            - secretRef: {name: aioc-secrets}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8080}
+            periodSeconds: 15
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aioc-api
+  namespace: aioc
+spec:
+  selector: {app: aioc-api}
+  ports:
+    - port: 80
+      targetPort: 8080

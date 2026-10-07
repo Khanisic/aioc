@@ -89,7 +89,17 @@ class _FakeBatches:
     def retrieve(self, batch_id: str) -> SimpleNamespace:
         self.retrieved += 1
         status = self._statuses.pop(0) if len(self._statuses) > 1 else self._statuses[0]
-        return SimpleNamespace(id=batch_id, processing_status=status)
+        number = int(batch_id.removeprefix("msgbatch_")) if batch_id[-1:].isdigit() else 0
+        size = len(self.created[number - 1]) if 0 < number <= len(self.created) else 0
+        ended = status == "ended"
+        counts = SimpleNamespace(
+            processing=0 if ended else size,
+            succeeded=size if ended else 0,
+            errored=0,
+            canceled=0,
+            expired=0,
+        )
+        return SimpleNamespace(id=batch_id, processing_status=status, request_counts=counts)
 
     def results(self, batch_id: str) -> list[Any]:
         number = int(batch_id.removeprefix("msgbatch_"))

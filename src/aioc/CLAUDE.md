@@ -99,6 +99,15 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   `hitl_audit_log` table (`docker/postgres/init/05-hitl-audit.sql`), append-only at the database.
   `MemoryAuditLog` is the default, so the offline suite never touches Postgres; `respond(gate=...)`
   is the opt-in entry point.
+- `api/` - the deployable service (Day 24, Platform Layer): the orchestrator over HTTP, requests as
+  jobs on a bounded in-memory pool. Every setting that can spend money defaults to the answer that
+  spends none (`settings.py`): no `AIOC_API_TOKEN` means every request is refused, `live` needs
+  `AIOC_API_LIVE`, and a request above a cap is refused, never trimmed. `smoke` runs the real
+  `respond()` path over scripted agents (`smoke.py`) at zero Claude calls; keep it on the same path
+  as `live`, or it stops proving anything. The gate's approver is `DenyAll` - a server has nobody to ask.
+- `db/` - the schema as migrations (Day 24): the files in `docker/postgres/init/` are applied once
+  each through the `schema_migrations` ledger (`python -m aioc.db`). Never edit an applied file; add a
+  later-numbered one. A changed applied file is refused before anything is applied.
 - `memory/`, `observability/` - Redis/Postgres/pgvector memory tiers (later phases) and Langfuse tracing.
 
 Agents and the coordinator import from `aioc.contracts` and build on `aioc.llm`. Tool servers do neither.

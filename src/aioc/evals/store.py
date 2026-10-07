@@ -192,10 +192,20 @@ class ProgressFile:
             handle.write(json.dumps(entry(result)) + "\n")
             handle.flush()
 
-    def batch(self, batch_id: str, requests: int) -> None:
-        """A batch was submitted: written before the wait, in `batches.jsonl` beside."""
+    def batch(
+        self, batch_id: str, requests: int | None, *, carried_from: str | None = None
+    ) -> None:
+        """A batch was submitted: written before the wait, in `batches.jsonl` beside.
+
+        ``carried_from`` names the earlier run that submitted it. A continued run lists
+        every batch it was given as well as its own, because replaying an item asks for
+        each of its calls again and the earlier batches hold the answers to the first
+        ones: a run continued from this one needs them all."""
+        line: dict[str, Any] = {"batch_id": batch_id, "requests": requests}
+        if carried_from is not None:
+            line["carried_from"] = carried_from
         with (self.path.parent / BATCHES).open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"batch_id": batch_id, "requests": requests}) + "\n")
+            handle.write(json.dumps(line) + "\n")
             handle.flush()
 
 
