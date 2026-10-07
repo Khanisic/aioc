@@ -1,0 +1,373 @@
+{
+  "counted_at": "2026-10-06T22:02:24Z",
+  "source_model": "claude-sonnet-5",
+  "ratios": {
+    "claude-opus-5": {
+      "input": 0.9906080591139809,
+      "output": 1.0
+    },
+    "claude-haiku-4-5": {
+      "input": 0.7807050861503401,
+      "output": 0.7402869097429767
+    },
+    "claude-opus-5-5": {
+      "input": 0.9909188218638859,
+      "output": 1.0005977286312013
+    },
+    "claude-sonnet-5-5": {
+      "input": 0.9909188218638859,
+      "output": 1.0005977286312013
+    }
+  },
+  "workloads": [
+    {
+      "workload": "Four agents on one query (20260930, Day 21)",
+      "source_model": "claude-sonnet-5",
+      "measured": {
+        "coordinator": {
+          "invocations": 2,
+          "input_tokens": 12273,
+          "output_tokens": 3063,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 5777
+        },
+        "subagent": {
+          "invocations": 5,
+          "input_tokens": 299584,
+          "output_tokens": 38293,
+          "cache_read_tokens": 192988,
+          "cache_write_tokens": 96636
+        }
+      },
+      "prefixes": {
+        "coordinator": {
+          "planner": 4166,
+          "synthesis": 1611
+        },
+        "subagent": {
+          "incident": 7347,
+          "docs": 6024,
+          "github": 10561,
+          "deployment": 10512
+        }
+      },
+      "wall_seconds": 402.6,
+      "routes": [
+        {
+          "name": "as run: Sonnet 5 for both",
+          "coordinator": "claude-sonnet-5",
+          "subagent": "claude-sonnet-5",
+          "usd": 0.741102,
+          "usd_without_cache": 1.037274,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-sonnet-5",
+              "input_tokens": 12273,
+              "output_tokens": 3063,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5777,
+              "usd": 0.058064,
+              "uncached_prefixes": []
+            },
+            {
+              "role": "subagent",
+              "model": "claude-sonnet-5",
+              "input_tokens": 299584,
+              "output_tokens": 38293,
+              "cache_read_tokens": 192988,
+              "cache_write_tokens": 96636,
+              "usd": 0.683038,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": []
+        },
+        {
+          "name": "plan: Opus coordinator, Sonnet subagents",
+          "coordinator": "claude-opus-5",
+          "subagent": "claude-sonnet-5",
+          "usd": 0.827556,
+          "usd_without_cache": 1.119463,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-opus-5",
+              "input_tokens": 12158,
+              "output_tokens": 3063,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5723,
+              "usd": 0.144519,
+              "uncached_prefixes": []
+            },
+            {
+              "role": "subagent",
+              "model": "claude-sonnet-5",
+              "input_tokens": 299584,
+              "output_tokens": 38293,
+              "cache_read_tokens": 192988,
+              "cache_write_tokens": 96636,
+              "usd": 0.683038,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": []
+        },
+        {
+          "name": "plan: Opus coordinator, Haiku subagents",
+          "coordinator": "claude-opus-5",
+          "subagent": "claude-haiku-4-5",
+          "usd": 0.403406,
+          "usd_without_cache": 0.512992,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-opus-5",
+              "input_tokens": 12158,
+              "output_tokens": 3063,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5723,
+              "usd": 0.144519,
+              "uncached_prefixes": []
+            },
+            {
+              "role": "subagent",
+              "model": "claude-haiku-4-5",
+              "input_tokens": 233887,
+              "output_tokens": 28348,
+              "cache_read_tokens": 150667,
+              "cache_write_tokens": 75444,
+              "usd": 0.258888,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": []
+        },
+        {
+          "name": "Sonnet coordinator, Haiku subagents",
+          "coordinator": "claude-sonnet-5",
+          "subagent": "claude-haiku-4-5",
+          "usd": 0.316952,
+          "usd_without_cache": 0.430803,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-sonnet-5",
+              "input_tokens": 12273,
+              "output_tokens": 3063,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5777,
+              "usd": 0.058064,
+              "uncached_prefixes": []
+            },
+            {
+              "role": "subagent",
+              "model": "claude-haiku-4-5",
+              "input_tokens": 233887,
+              "output_tokens": 28348,
+              "cache_read_tokens": 150667,
+              "cache_write_tokens": 75444,
+              "usd": 0.258888,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": []
+        },
+        {
+          "name": "Haiku for both",
+          "coordinator": "claude-haiku-4-5",
+          "subagent": "claude-haiku-4-5",
+          "usd": 0.280932,
+          "usd_without_cache": 0.396544,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-haiku-4-5",
+              "input_tokens": 9582,
+              "output_tokens": 2267,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 4510,
+              "usd": 0.022045,
+              "uncached_prefixes": [
+                "planner",
+                "synthesis"
+              ]
+            },
+            {
+              "role": "subagent",
+              "model": "claude-haiku-4-5",
+              "input_tokens": 233887,
+              "output_tokens": 28348,
+              "cache_read_tokens": 150667,
+              "cache_write_tokens": 75444,
+              "usd": 0.258888,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": [
+            "coordinator on claude-haiku-4-5: planner, synthesis below the 4096-token cache minimum - the projection keeps the measured cache share; the ceiling does not"
+          ]
+        },
+        {
+          "name": "Opus 5.5 coordinator, Sonnet 5 subagents",
+          "coordinator": "claude-opus-5-5",
+          "subagent": "claude-sonnet-5",
+          "usd": 0.798711,
+          "usd_without_cache": 1.092046,
+          "runnable": false,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-opus-5-5",
+              "input_tokens": 12162,
+              "output_tokens": 3065,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5725,
+              "usd": 0.115673,
+              "uncached_prefixes": []
+            },
+            {
+              "role": "subagent",
+              "model": "claude-sonnet-5",
+              "input_tokens": 299584,
+              "output_tokens": 38293,
+              "cache_read_tokens": 192988,
+              "cache_write_tokens": 96636,
+              "usd": 0.683038,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": [
+            "claude-opus-5-5 refuses a forced tool_choice: a route using it is not runnable until the emit calls steer with auto"
+          ]
+        },
+        {
+          "name": "current generation: Opus 5.5 and Sonnet 5.5",
+          "coordinator": "claude-opus-5-5",
+          "subagent": "claude-sonnet-5-5",
+          "usd": 0.796215,
+          "usd_without_cache": 1.086834,
+          "runnable": false,
+          "roles": [
+            {
+              "role": "coordinator",
+              "model": "claude-opus-5-5",
+              "input_tokens": 12162,
+              "output_tokens": 3065,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5725,
+              "usd": 0.115673,
+              "uncached_prefixes": []
+            },
+            {
+              "role": "subagent",
+              "model": "claude-sonnet-5-5",
+              "input_tokens": 296863,
+              "output_tokens": 38316,
+              "cache_read_tokens": 191235,
+              "cache_write_tokens": 95758,
+              "usd": 0.680542,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": [
+            "claude-opus-5-5 refuses a forced tool_choice: a route using it is not runnable until the emit calls steer with auto",
+            "claude-sonnet-5-5 refuses a forced tool_choice: a route using it is not runnable until the emit calls steer with auto"
+          ]
+        }
+      ]
+    },
+    {
+      "workload": "The eval set, realtime, cached (Day 20)",
+      "source_model": "claude-sonnet-5",
+      "measured": {
+        "subagent": {
+          "invocations": 38,
+          "input_tokens": 378970,
+          "output_tokens": 97094,
+          "cache_read_tokens": 279621,
+          "cache_write_tokens": 20493
+        }
+      },
+      "prefixes": {
+        "subagent": {
+          "incident": 7347,
+          "docs": 6024
+        }
+      },
+      "wall_seconds": 773.0,
+      "routes": [
+        {
+          "name": "as run: Sonnet 5 for both",
+          "coordinator": "claude-sonnet-5",
+          "subagent": "claude-sonnet-5",
+          "usd": 1.235809,
+          "usd_without_cache": 1.72888,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "subagent",
+              "model": "claude-sonnet-5",
+              "input_tokens": 378970,
+              "output_tokens": 97094,
+              "cache_read_tokens": 279621,
+              "cache_write_tokens": 20493,
+              "usd": 1.235809,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": []
+        },
+        {
+          "name": "plan: Opus coordinator, Haiku subagents",
+          "coordinator": "claude-opus-5",
+          "subagent": "claude-haiku-4-5",
+          "usd": 0.462777,
+          "usd_without_cache": 0.655249,
+          "runnable": true,
+          "roles": [
+            {
+              "role": "subagent",
+              "model": "claude-haiku-4-5",
+              "input_tokens": 295864,
+              "output_tokens": 71877,
+              "cache_read_tokens": 218302,
+              "cache_write_tokens": 15999,
+              "usd": 0.462777,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": []
+        },
+        {
+          "name": "current generation: Opus 5.5 and Sonnet 5.5",
+          "coordinator": "claude-opus-5-5",
+          "subagent": "claude-sonnet-5-5",
+          "usd": 1.233984,
+          "usd_without_cache": 1.722578,
+          "runnable": false,
+          "roles": [
+            {
+              "role": "subagent",
+              "model": "claude-sonnet-5-5",
+              "input_tokens": 375529,
+              "output_tokens": 97152,
+              "cache_read_tokens": 277082,
+              "cache_write_tokens": 20307,
+              "usd": 1.233984,
+              "uncached_prefixes": []
+            }
+          ],
+          "notes": [
+            "claude-sonnet-5-5 refuses a forced tool_choice: a route using it is not runnable until the emit calls steer with auto"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -769,3 +769,32 @@ A workflow step pushes the commit, and only when every file it changes is under 
 False positives were never the problem; recall was. v1 missed a planted bug of a kind it does not list - a budget the change declares and never spends - and v2's one added paragraph ("check the change against its own words") caught it, then found a real bug of the same shape in Day 21's own code.
 
 **What I would watch.** A push made with the workflow's own token does not trigger CI on the new commit, so generated tests are checked by the step that pushes them and not by `ci.yml` until the next human push.
+
+## 45. Model routing is a per-role setting, and its cost is projected from counted tokens rather than run
+
+**Context.** Day 23's plan was a routing experiment: Haiku or Sonnet for the subagents, Opus for the coordinator, cost and latency measured per configuration.
+The project spends nothing on the API from Day 22, and the seam the experiment would have used did not work: the coordinator's override was read from the shell only, though `.env.example` said to put it in `.env`; the subagents' override was read by nothing; and the model-written synthesis, which is coordinator work, ran the subagents' model.
+
+**Decision.** Two harness settings, `AIOC_COORDINATOR_MODEL` and `AIOC_SUBAGENT_MODEL`, each falling back to `AIOC_MODEL`, chosen in one place (`LLMSettings.for_role`) that every component's default client goes through.
+Cost per route is projected, and labelled as one, from two runs already paid for: measured tokens, rescaled per model by tokenizer ratios counted on the free endpoint, priced with the run's own cache behaviour, the coordinator's share rebuilt with the shipped prompt builders and checked by pricing the run back to its bill.
+Latency and quality are not estimated.
+
+**What it found.** The coordinator is 8% of a four-agent run's bill, so the plan's "Opus for the coordinator" costs 12% more and changes little; the subagent model is the whole decision, and Haiku 4.5 subagents would cut 57-63%.
+Opus 5.5 and Sonnet 5.5 refuse a forced `tool_choice`, which every emit here uses, so the current generation is priced and marked not runnable.
+
+**What was rejected.** Running the model matrix: the measurement is worth having, but the quality half needs only one eval run on Haiku, and that is the owner's call to pay for.
+Sharing the request's cache counters between roles by input share: the coordinator's calls are single forced calls that only ever write their prefix, so the split is known, not apportioned.
+
+**What I would watch.** The output side assumes each model writes the same report in its own tokens; a terser or wordier model moves the output cost, which is more than half of the subagents' bill (56% on the four-agent run, 78% on the eval set).
+
+## 46. A tracing backend's numbers are read back before anything relies on them
+
+**Context.** Langfuse stores token usage on generation observations only; this project's spans, agents, and chains sent `usage_details` from Day 9 and every one was stored as zero (war story #15).
+
+**Decision.** The tokens ride in observation metadata as well, a key per attribute, which every observation type keeps; `usage_details` stays for the day the agent calls become generations.
+The test asserts both are sent.
+
+**What was rejected.** Making each agent span a generation: an agent span covers several model calls and tool calls, and a generation is one model call - the trace would claim a shape the run did not have.
+Nesting a generation per model call is the right shape and a larger change to the tracing seam; it is the next step if per-call cost in the trace is wanted.
+
+**What I would watch.** A stub client checks what the adapter sends, not what the backend keeps; the next live run's trace should be read back for its tokens once.

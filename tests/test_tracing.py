@@ -176,12 +176,16 @@ def test_langfuse_adapter_builds_the_observation_tree():
 
     (agent_update,) = agent.updates
     assert agent_update["usage_details"] == {"input": 120, "output": 240}
+    # Day 23: Langfuse drops usage_details on non-generation observations (read back as
+    # 0 / 0 from the four-agent run's trace), so the tokens ride in metadata too.
+    assert agent_update["metadata"] == {"input_tokens": 120, "output_tokens": 240}
     assert agent_update["level"] == "DEFAULT"
     assert agent.ended == 1
 
     (root_update,) = root.updates
     assert root_update["output"] == "the answer"
     assert root_update["usage_details"] == {"input": 420, "output": 420}
+    assert root_update["metadata"] == {"input_tokens": 420, "output_tokens": 420}
     assert root.trace_io == [{"output": "the answer"}]
     assert root.ended == 1
     assert client.flushes == 1

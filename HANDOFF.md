@@ -1,14 +1,17 @@
 # Handoff - point a new session here
 
-Written at the end of **Day 22** of 30. **From now on the project spends $0 on the
-Anthropic API (§1)**; the one exception is a single deployed run at Day 25, and only with the
-owner's yes. Day 22 gave every prompt one ordering rule, moved the review prompt into
-`.github/claude/review.md`, and tuned it on five scored local reviews: no false positives,
-and one added paragraph that took recall on planted defects from 1 of 2 to 2 of 2 and found a
-real Day 21 bug. Both Claude jobs are label-triggered on a subscription token and have never
-run (§7 item 45).
+Written at the end of **Day 23** of 30. **The project spends $0 on the Anthropic API
+(§1)**; the one exception is a single deployed run at Day 25, and only with the owner's yes.
+Day 23 made model routing a configuration change (`AIOC_COORDINATOR_MODEL`,
+`AIOC_SUBAGENT_MODEL`, read through `LLMSettings.for_role`) and priced every route from
+recorded runs and 60 free token counts: the coordinator is 8% of a four-agent run's bill, an
+Opus 5 coordinator costs +12%, Haiku 4.5 subagents -57%; quality and latency per model are
+not projected (`docs/design-notes/model-routing.md`). Reading a trace back found every
+Langfuse observation since Day 9 stored at zero tokens (war story #15, fixed). Both Claude
+PR jobs are still waiting on the owner (§7 item 45).
 
-Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 23.
+Read this, then §6 below, then `docs/EXECUTION_PLAN.md` Day 24. **`docs/EXECUTION_PLAN.md`
+was not updated for Day 23** (§7 item 53).
 
 **This file is the only handover that exists.** The second engineer left after Day 6, so
 anything true but unwritten is one forgotten detail away from being lost. Update it at the
@@ -31,7 +34,7 @@ end of every working day.
 
   The user saw ~$4 go in one day and asked for this; quote it if a plan starts to need a
   paid call.
-- **Keep costs low.** The 1058-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 1083-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -63,15 +66,15 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**`origin/main` holds everything through Day 20 (2026-09-30).** PRs #21-#24 are merged, and
-`khanisic/main` was fast-forwarded to match the same day.
+**`origin/main` holds everything through Day 22 (merged 2026-10-02, PR #26).** `khanisic/main`
+was fast-forwarded to match on 2026-10-06. Day 23 is the branch `d23-handoffs-routing`,
+branched from that `main`.
 
 - How Day 17 got there is worth knowing: PR #20 was merged 26 seconds after #19, before
   GitHub had retargeted it, and landed on `d16-schemas-hitl` instead of `main`. #21 carried
   its two commits to `main`. `origin/d16-schemas-hitl` still exists, holds nothing `main`
   lacks, and can be deleted. The trap is in §4.
-- `d21-trimming-pr-review` is Day 21, branched from `main` after #24 merged. Its PR is the
-  first one CI runs on.
+- `d21-trimming-pr-review` (Day 21, PR #25) was the first PR CI ran on; Day 22 was PR #26.
 
 | Remote | Repo | Role |
 |---|---|---|
@@ -125,6 +128,8 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `.github/workflows/claude-review.yml` | **Superseded on Day 22 (next row).** Day 21: written, never run. `anthropics/claude-code-action@v1` on every non-draft PR update, `claude-sonnet-5-5`, 30 turns, 20 minutes, a superseded run cancelled. Read-only tools plus inline comments and one sticky summary. The prompt lists this repository's defect classes and demands a failure scenario per finding; "No defects found." is a valid review. **Needs the `ANTHROPIC_API_KEY` repo secret and the Claude GitHub App installed** (§7 item 45). Billed per PR. |
 | `.github/workflows/claude-review.yml` (Day 22) + `.github/claude/review.md` | **Day 22. Label-triggered, subscription-billed, never run.** Workflow `claude`: the `claude-review` label runs a read-only review whose instructions are `.github/claude/review.md` (read at run time); the `claude-tests` label writes tests, runs the offline suite, and commits - a workflow step pushes only if every changed file is under `tests/` and the suite passes. Auth is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`); without it each job skips with a warning. Prompt tuning is local and recorded in `docs/design-notes/review-prompt-tuning.md`. |
 | Prompt ordering (Day 22) | One rule (decision #43): stable reference first, freshest and most specific last, query at the end. `build_incident_context` ends with the live observations; the Docs agent's documents precede its context; a refinement round is planner's block, digests, then the gaps to close. Each pinned by a test. Unmeasured for accuracy under the $0 rule. |
+| Per-role models (Day 23) | `LLMSettings.coordinator_model` / `subagent_model` (`AIOC_COORDINATOR_MODEL`, `AIOC_SUBAGENT_MODEL`), each falling back to `AIOC_MODEL`, applied by `LLMSettings.for_role`. Coordinator role: `Coordinator` and `ModelSynthesiser`; subagent role: the four agents, `run_evals.py`, `check_day20_baseline.py`. Fields, so `.env` works. Three defects closed: the planner read its override from the shell only, the subagent override was read by nothing, the synthesis ran the subagents' model. |
+| `evals/routing.py` + `scripts/project_model_routing.py` | **Day 23. A projection, labelled as one.** Seven routes priced on two recorded workloads (the Day 21 four-agent run, the Day 20 eval realtime-cached run). `--count` made 60 free count_tokens calls (saved to `evaluations/routing/token-counts.json`); everything else is offline. The four-agent run's coordinator calls are rebuilt with `planner.plan_prompt` and `synthesis.render_prompt` and counted; the agents' share is the total less them; the route as run prices back to $0.741 against $0.74 billed. Results in `evaluations/routing/projection.md`, method in `docs/design-notes/model-routing.md`. |
 | `tools/github/` trimming | **Day 21.** A commit is its subject line (`commits.commit_headline`), `message_truncated`, and for a merge commit `pull_request_title` from the body. Patches share `PATCH_BUDGET_CHARS` (8,000) a reply, spent by `patch_priority` (config, code, tests, docs); a file the budget missed is `patch: null, patch_truncated: true`, and the new `patch_paths` input asks for it. `touched_paths` is `null` when not asked (was `[]`). `diff_release` commits are subject-only too, no shape change (`contract-changes.md`, 2026-09-30). `scripts/measure_tool_replies.py` (free, GitHub reads) is the before/after: -34% on the run's five calls. |
 | `llm/client.py` cut-off calls | **Day 21.** `run_tool_loop` answers a `tool_use` in a round that stopped for any reason but `tool_use` (in practice `max_tokens`) with an error `tool_result`, and never runs it. Before, the conversation went on with the call unanswered and the API refused the next request (war story #14). Every scripted fake client now checks the API's pairing rule on every request (`tests/wire.py`). |
 | `coordinator/synthesis.py` retries | **Day 21.** `ModelSynthesiser` runs inside `emit_with_retry` like every agent (`agent="synthesis"` in the `RetryLog`); a malformed payload and a confident uncited answer are `format`, an invented id `grounding` with synthesis-specific advice (`emit_with_retry(grounding_advice=)`), truncation and no call never retried. |
@@ -139,7 +144,7 @@ merged directly on khanisic. If a PR is merged there, the fork returns.
 | `agents/_status.py` | **Day 13.** `settle_status`: `complete` over a null findings judgement becomes `partial` in every agent's runtime, that direction only. The first live sequential run was refused for exactly this. |
 | `tools/incident/analyze_server.py` (+ `logs.py`, `patterns.py`) | **Day 13.** The `aioc-analyze` stdio server for the case study's two deliberately overlapping tools, now the **`1.0.0` baseline, kept runnable**. `analyze_logs` reads what a container printed through `docker compose logs`; `analyze_events` reads the seeded timeline. **Part 4 is the contract's v1.0.0 sentence verbatim and is pinned by `test_v1_part_four_is_the_contract_sentence_and_names_no_alternative`** - never sharpen it; `check_tool_routing.py --variant v1` must keep measuring the "before". |
 | `tools/incident/search_server.py` | **Day 14.** The `aioc-search` server the `1.1.0` split produced: `search_container_logs` / `search_recorded_events`, the v1 implementation and input schemas imported under the new names, parts 1-3 composed from the v1 text verbatim (pinned by a test), part 4 naming the alternative and stating the discriminator both ways. `check_tool_routing.py --variant v1_1` lists it. No agent consumes either server yet. |
-| `observability/tracing.py` | **Day 9.** The `Tracer`/`RequestTrace`/`AgentSpan` seam. `NullTracer` is the default everywhere; `default_tracer()` returns the `LangfuseTracer` adapter only when both keys are set (SDK client built lazily, injectable stub in tests). One trace per request; `agent:<name>` spans open/close in the worker thread that runs them, so a parallel plan shows overlapping spans; `ToolCallRef`s ride as child events carrying their measured timing; `CoordinatorResponse.trace_id` comes from the trace. Tracing activates **only** when an entry point passes a tracer - keys in `.env` alone cannot make tests emit spans. |
+| `observability/tracing.py` | **Day 9.** The `Tracer`/`RequestTrace`/`AgentSpan` seam. `NullTracer` is the default everywhere; `default_tracer()` returns the `LangfuseTracer` adapter only when both keys are set (SDK client built lazily, injectable stub in tests). One trace per request; `agent:<name>` spans open/close in the worker thread that runs them, so a parallel plan shows overlapping spans; `ToolCallRef`s ride as child events carrying their measured timing; `CoordinatorResponse.trace_id` comes from the trace. Tracing activates **only** when an entry point passes a tracer - keys in `.env` alone cannot make tests emit spans. **Day 23:** Langfuse keeps `usage_details` on generations only, so every span/agent/chain observation before Day 23 shows 0 tokens (war story #15); span tokens now also go in metadata (`input_tokens`, `output_tokens`). Unverified against a live trace yet (item 49). |
 | `tools/envelope.py` + `tools/policy.py` | The contract wire envelope (sec 6) + the chaos ground-truth permission gate shared by all servers. |
 | `tools/incident/timeline_server.py` | Day 6. `get_incident_timeline` stdio MCP server. Now also enforces the chaos gate. |
 | `tools/incident/correlate_server.py` | **Day 7.** `correlate_events` stdio MCP server over the corpus (impulse Pearson over 60s event bins). All four error classes return distinctly - there is a named test producing each from real code paths. |
@@ -260,12 +265,12 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1058 passed
+uv run pytest -q                                                   # expect 1083 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1058 passed** with the stack up at the end of Day 22 (2026-10-01);
-without Docker Desktop the 17 `integration`-marked tests skip and it is 1041. CI runs the
+Costs nothing. Last run: **1083 passed** with the stack up at the end of Day 23 (2026-10-06);
+without Docker Desktop the 17 `integration`-marked tests skip and it is 1066. CI runs the
 latter on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
@@ -307,7 +312,33 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: Day 23 - handoffs + model routing, at $0
+## 6. Next work: Day 24, at $0
+
+**Read `docs/EXECUTION_PLAN.md` Day 24 first** - this session did not (§7 item 53). What the
+repository already says Day 24 is for:
+
+- **The token reduction as a number.** `scripts/eval_baseline.py --against
+  evaluations/baseline.json <run-dir>` compares a later eval run with the Day 20 baseline of
+  its own configuration. That needs a new eval run, which is paid (~$1.24 realtime cached or
+  ~$0.71 batch cached, measured on Day 20) - **the owner's yes under §1**, or say plainly
+  that the comparison waits. The free half: `scripts/measure_tool_replies.py` (GitHub reads
+  only) re-measures the Day 21 trimming on the replies.
+- **Hosted Postgres.** `docker/postgres/init/` never runs against a hosted database; each
+  file is written to be applied with `psql` standalone and the seed is idempotent.
+
+**Owner decisions waiting** (none blocks Day 24's free work):
+
+- `CLAUDE_CODE_OAUTH_TOKEN` as a repo secret and the Claude GitHub App, for the first
+  labelled review (item 45).
+- Whether to measure Haiku 4.5 as the subagent model: one eval run with
+  `AIOC_SUBAGENT_MODEL=claude-haiku-4-5`, 38 calls, ~$0.46 by the Day 23 projection,
+  compared with `--against evaluations/baseline.json` (item 51).
+
+<!-- superseded Day 23 notes follow, kept for the record -->
+**Day 23 as planned:** A: structured digests across handoffs. B: the model routing
+experiment. Done 2026-10-06 at $0: A is `test_incident_hands_deployment_a_digest_not_a_raw_dump`
+in `tests/test_executor.py`; B is the per-role settings and the projection (§3, decisions
+#45-#46, war story #15, the Day 23 table in `numbers.md`).
 
 **From the plan:** A: structured digests across handoffs - Incident passes a digest to
 Deployment, not a raw dump. B: model routing experiment - Haiku/Sonnet for subagents, Opus
@@ -1031,6 +1062,32 @@ for github queries.
    `search_container_logs` yet (item 15's servers are the routing study's subject only), so
    the honest gap is `resolvable: false`. Worth a line in the Incident agent's gap guidance
    when Day 22 touches its prompt for ordering.
+49. **No Langfuse trace before Day 23 carries tokens** (war story #15). Langfuse keeps
+   `usage_details` on generation observations only, and the adapter creates spans, agents,
+   and chains. Span tokens now also go in metadata, which the test pins, but no live trace
+   has been read back since the fix: after the next traced run, read one observation back
+   (`client.api.trace.get(trace_id)`) and check `metadata.input_tokens` is there. Nesting a
+   generation per model call is the right shape if per-call cost in the trace is wanted.
+50. **Opus 5.5 and Sonnet 5.5 cannot run on this harness.** Both answer a forced
+   `tool_choice` with a 400, and every emit is forced (`agents/_retry.py`,
+   `coordinator/planner.py`). Moving to them is `tool_choice: auto`, an instruction naming
+   the emit tool, and `strict: true` on its schema, then re-measuring the retry loop (a
+   model that skips the tool is no longer impossible). Opus 5 and Sonnet 5 remain callable.
+51. **Haiku 4.5 as subagent is priced, not measured.** -57% on the four-agent run, -63% on
+   the eval set (`evaluations/routing/projection.md`). Day 4 saw Haiku break the timeline
+   ordering invariant on 2 of 3 attempts, before the retry loop existed. One eval run with
+   `AIOC_SUBAGENT_MODEL=claude-haiku-4-5` (38 calls, ~$0.46) answers it for two agents; the
+   owner's call under §1.
+52. **The coordinator's cache markers are a small surcharge.** The planner and the model
+   synthesis are single forced calls; each writes its prefix (4,166 and 1,611 tokens on
+   Sonnet 5) at 1.25x and reads it back only if another request arrives within five
+   minutes. About $0.004 a request on Sonnet 5; it pays under steady traffic and costs a
+   little in a demo. On Haiku 4.5 both prefixes fall under the 4,096-token minimum and are
+   not cached at all.
+53. **`docs/EXECUTION_PLAN.md` was not updated for Day 23.** Reading it was refused by the
+   session's permission classifier (it named the reason "Remote Repoint", most likely the
+   `khanisic` mirror push made just before), and the session did not try another route.
+   Add the Day 23 done-when note there by hand, the way Day 22 added its own.
 
 ## 8. Where things are written down
 
@@ -1042,11 +1099,12 @@ for github queries.
 | Day-by-day plan and done-whens | `docs/EXECUTION_PLAN.md` |
 | Running and reading tests | `docs/guides/running-tests.md` |
 | The corpus schema and how to extend it | `docs/guides/incidents-table.md` |
-| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36, Day 20 #37-#39, Day 21 #40-#42) |
-| Fourteen debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's, #12 Day 19's, #13 Day 20's, #14 Day 21's) |
+| Why things are shaped this way | `docs/interview-prep/decisions.md` (Day 14 added #22-#24, Day 15 #25-#27, Day 16 #28-#29, Day 17 #30-#31, Day 18 #32-#33, Day 19 #34-#36, Day 20 #37-#39, Day 21 #40-#42, Day 22 #43-#44, Day 23 #45-#46) |
+| Fifteen debugging narratives worth not repeating | `docs/interview-prep/war-stories.md` (#10 is Day 14's, #11 Day 15's, #12 Day 19's, #13 Day 20's, #14 Day 21's, #15 Day 23's) |
 | The eval set, and the rule that a case selects and never authors | `evaluations/README.md` |
 | The Day 20 baseline, three runs side by side | `evaluations/baseline.md` (`baseline.json` for Day 24's comparison) |
 | The routing case study, before and after | `docs/case-study-tool-routing.md` |
+| What each coordinator/subagent model split would cost (projected) | `evaluations/routing/projection.md`; method in `docs/design-notes/model-routing.md` |
 | Every measured number, with provenance | `docs/interview-prep/numbers.md` |
 | The user's own resume notes | `PROGRESS.local.md` (gitignored) |
 

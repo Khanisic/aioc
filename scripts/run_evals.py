@@ -127,7 +127,7 @@ def _select(cases: EvalSet, args: argparse.Namespace) -> list[EvalItem]:
 
 
 def _settings(args: argparse.Namespace) -> LLMSettings:
-    settings = LLMSettings()
+    settings = LLMSettings().for_role("subagent")  # the eval set scores two subagents
     updates: dict[str, Any] = {}
     if args.no_cache:
         updates["prompt_caching"] = False

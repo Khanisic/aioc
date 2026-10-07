@@ -43,7 +43,7 @@ from aioc.contracts import (
     StrictModel,
 )
 from aioc.hitl.policy import classify
-from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
+from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage
 
 from ._annotate import ROOT, apply_guidance
 from ._retry import ReportRejected, RetryLog, default_retry_log, emit_with_retry
@@ -335,7 +335,7 @@ class IncidentAgent:
         max_validation_retries: int | None = None,
         retry_log: RetryLog | None = None,
     ) -> None:
-        self._client = client or LLMClient()
+        self._client = client or LLMClient(LLMSettings().for_role("subagent"))
         # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
         self._max_retries = (
             max_validation_retries

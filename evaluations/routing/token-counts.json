@@ -1,0 +1,89 @@
+{
+  "counted_at": "2026-10-06T22:02:24Z",
+  "source_model": "claude-sonnet-5",
+  "four_agent_run": {
+    "run_id": "20260930T184259Z__llm__day15-integration",
+    "agent_invocations": 5,
+    "usage": {
+      "input_tokens": 311857,
+      "output_tokens": 41356,
+      "cache_read_tokens": 192988,
+      "cache_write_tokens": 102413,
+      "usd": null
+    },
+    "wall_seconds": 402.6,
+    "synthesis_source": "deterministic_fallback"
+  },
+  "counts": {
+    "claude-sonnet-5": {
+      "prefix:planner": 4166,
+      "prefix:synthesis": 1611,
+      "prefix:incident": 7347,
+      "prefix:docs": 6024,
+      "prefix:github": 10561,
+      "prefix:deployment": 10512,
+      "input:plan": 4818,
+      "input:synthesis": 7455,
+      "output:plan": 1493,
+      "output:synthesis": 1570,
+      "input:contexts": 5428,
+      "output:reports": 6975
+    },
+    "claude-opus-5": {
+      "prefix:planner": 4098,
+      "prefix:synthesis": 1543,
+      "prefix:incident": 7279,
+      "prefix:docs": 5956,
+      "prefix:github": 10493,
+      "prefix:deployment": 10444,
+      "input:plan": 4750,
+      "input:synthesis": 7387,
+      "output:plan": 1493,
+      "output:synthesis": 1570,
+      "input:contexts": 5428,
+      "output:reports": 6975
+    },
+    "claude-haiku-4-5": {
+      "prefix:planner": 3330,
+      "prefix:synthesis": 1419,
+      "prefix:incident": 5693,
+      "prefix:docs": 4682,
+      "prefix:github": 8167,
+      "prefix:deployment": 8051,
+      "input:plan": 3836,
+      "input:synthesis": 5906,
+      "output:plan": 1099,
+      "output:synthesis": 1165,
+      "input:contexts": 4136,
+      "output:reports": 5167
+    },
+    "claude-opus-5-5": {
+      "prefix:planner": 4100,
+      "prefix:synthesis": 1545,
+      "prefix:incident": 7281,
+      "prefix:docs": 5958,
+      "prefix:github": 10495,
+      "prefix:deployment": 10446,
+      "input:plan": 4752,
+      "input:synthesis": 7389,
+      "output:plan": 1495,
+      "output:synthesis": 1572,
+      "input:contexts": 5430,
+      "output:reports": 6977
+    },
+    "claude-sonnet-5-5": {
+      "prefix:planner": 4100,
+      "prefix:synthesis": 1545,
+      "prefix:incident": 7281,
+      "prefix:docs": 5958,
+      "prefix:github": 10495,
+      "prefix:deployment": 10446,
+      "input:plan": 4752,
+      "input:synthesis": 7389,
+      "output:plan": 1495,
+      "output:synthesis": 1572,
+      "input:contexts": 5430,
+      "output:reports": 6977
+    }
+  }
+}

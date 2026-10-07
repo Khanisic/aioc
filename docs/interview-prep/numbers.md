@@ -636,6 +636,31 @@ Five blind reviews by a fresh Sonnet 5 subagent with `.github/claude/review.md` 
 |---|---|
 | Offline suite | 1058 passed with the stack up (1056 after Day 21) |
 
+## Day 23 - model routing, projected ($0 of API spend)
+
+**A projection, not a measurement.** Recorded tokens, rescaled per model by tokenizer ratios from the free token-counting endpoint (60 counts), priced by `llm/pricing.py` with each run's measured cache behaviour (`evaluations/routing/projection.md`, method in `docs/design-notes/model-routing.md`). Latency and quality per model are not projected.
+
+Four agents on one query (the Day 21 run, Sonnet 5 for both roles, $0.74 measured; the projection prices it back at $0.741):
+
+| Coordinator | Subagents | Projected | vs as run | Runnable today |
+|---|---|---:|---:|---|
+| Sonnet 5 | Sonnet 5 | $0.74 | 0% | yes |
+| Opus 5 | Sonnet 5 | $0.83 | +12% | yes |
+| Opus 5 | Haiku 4.5 | $0.40 | -46% | yes |
+| Sonnet 5 | Haiku 4.5 | $0.32 | -57% | yes |
+| Haiku 4.5 | Haiku 4.5 | $0.28 | -62% | yes |
+| Opus 5.5 | Sonnet 5 | $0.80 | +8% | no - refuses forced `tool_choice` |
+| Opus 5.5 | Sonnet 5.5 | $0.80 | +7% | no |
+
+- **The coordinator is 8% of the bill** ($0.058 of $0.74): 2 calls, 12.3k in / 3.1k out, against the agents' 5 invocations, 300k in / 38k out.
+- **Haiku 4.5 counts 0.78 of Sonnet 5's prompt tokens and 0.74 of its output**; the 5-series models count plain text identically (within 2 tokens).
+- **The eval set with Haiku 4.5 subagents: $0.46 against $1.24 (-63%)**, quality unknown. Every Haiku subagent prefix still clears its 4,096-token cache minimum (smallest 4,682).
+- **What would measure it:** one eval run with `AIOC_SUBAGENT_MODEL=claude-haiku-4-5` (38 calls, ~$0.46 by this projection) against `evaluations/baseline.json`. Not run: $0 rule.
+
+| | |
+|---|---|
+| Offline suite | 1083 passed with the stack up (1066 without Docker) |
+
 ---
 
 ## What is not measured yet
@@ -644,7 +669,8 @@ Say this plainly rather than letting it be discovered:
 
 - **The eval baseline is one model, two agents, and one run per configuration.** `evaluations/baseline.md` (Day 20) scores the Incident and Docs agents on the seeded set with Sonnet 5; the GitHub and Deployment agents, the planner, and the synthesis have no eval, and a single run per configuration cannot separate the model's variance from a change. Day 24 re-runs it against the same file.
 - **Token reduction is measured on the replies, not yet on a run.** Day 21 cut the five commit-bearing replies by 34% (`scripts/measure_tool_replies.py`); what that does to a four-agent run's bill is the next `check_day15_integration.py` run, and Day 24's eval re-run covers the two forced-emit agents.
-- **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency.
+- **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency. No trace before Day 23 carries tokens per span (war story #15).
+- **Model routing is a projection.** Day 23 prices every route from counted tokens; no route other than Sonnet 5 for both has run, so latency and quality per model are unmeasured.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
 - **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
 - **Prompt caching in the tool loop is one run's measurement.** The Day 21 four-agent run read 62% of its input from the cache; HANDOFF item 33's claim that the forced emit after a tool loop re-reads its conversation at full price is still reasoned from the documentation, not isolated in a measurement.

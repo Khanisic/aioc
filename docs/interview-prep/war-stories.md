@@ -384,6 +384,25 @@ When a live run fails on a rule, put the rule in the fake before you fix the cod
 
 ---
 
+## 15. Every trace since Day 9 said each agent used zero tokens
+
+**Symptom.** Day 23 needed the four-agent run's cost split between the coordinator and the agents.
+The run had recorded only the request's total, but it was traced, and the tracer sets every span's input and output tokens when it ends, so the split looked like one free read away.
+The read came back with all sixteen observations at 0 in and 0 out.
+
+**Diagnosis.** The adapter was not at fault in any way a test could see: it sent `usage_details` on every span, and the stubbed Langfuse client in the tests recorded exactly that.
+Reading one observation back in full showed `usage: {input: 0, output: 0}` on the plan span, the agent spans, and the request itself.
+Langfuse keeps token usage on generation observations only; the adapter creates spans, agents, and chains, and the backend dropped what it was sent without an error.
+Nobody had read a trace back by its numbers - the traces were looked at for their shape (which agents, overlapping or not), and the shape was right.
+
+**Fix.** The tokens now ride in the observation's metadata as well (`input_tokens`, `output_tokens`), which Langfuse stores a key per attribute and keeps on every observation type, with the test pinning it.
+The four-agent run's split was rebuilt instead: its two coordinator calls reconstructed with the shipped prompt builders and counted on the free endpoint, the agents' share the total less theirs - which prices back to the run's bill to the cent.
+
+**Transferable lesson.** A stub verifies what you send, never what the other side keeps.
+For any write to a system you will later read numbers from, read one back end to end before relying on it; a write the backend silently ignores fails no test and loses data for as long as nobody looks.
+
+---
+
 ## How to tell these in an interview
 
 Lead with the symptom, not the answer.

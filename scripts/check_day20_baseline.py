@@ -247,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("the selection is empty")
     whole_set = len(items) == len(cases.items)
 
-    settings = LLMSettings()
+    settings = LLMSettings().for_role("subagent")  # the eval set scores two subagents
     if args.model:
         settings = settings.model_copy(update={"model": args.model})
 
