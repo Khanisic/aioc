@@ -56,7 +56,7 @@ from aioc.contracts import (
     RolloutStatus,
     StrictModel,
 )
-from aioc.llm import LLMClient, ToolCallRecord, ToolResult, ToolSpec, Usage
+from aioc.llm import LLMClient, LLMSettings, ToolCallRecord, ToolResult, ToolSpec, Usage
 from aioc.llm.mcp import McpStdioToolset
 
 from ._annotate import ROOT, apply_guidance
@@ -475,7 +475,7 @@ class DeploymentAgent:
         max_validation_retries: int | None = None,
         retry_log: RetryLog | None = None,
     ) -> None:
-        self._client = client or LLMClient()
+        self._client = client or LLMClient(LLMSettings().for_role("subagent"))
         self._toolset = toolset or default_toolset
         self._max_rounds = max_tool_rounds
         # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.

@@ -56,7 +56,7 @@ from aioc.contracts import (
     StrictModel,
     walk_assessments,
 )
-from aioc.llm import LLMClient, ToolResult, ToolSpec, Usage
+from aioc.llm import LLMClient, LLMSettings, ToolResult, ToolSpec, Usage
 
 from .handoff import digest
 
@@ -295,7 +295,7 @@ class ModelSynthesiser:
         max_validation_retries: int | None = None,
         retry_log: RetryLog | None = None,
     ) -> None:
-        self._client = client or LLMClient()
+        self._client = client or LLMClient(LLMSettings().for_role("coordinator"))
         # None means the harness setting (AIOC_MAX_VALIDATION_RETRIES); 0 disables the loop.
         self._max_retries = (
             max_validation_retries

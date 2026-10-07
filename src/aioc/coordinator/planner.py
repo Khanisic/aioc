@@ -22,15 +22,16 @@ that usually works is not evidence:
 - **Honest intent confidence.** `intent` is an `Assessment`, so a query the coordinator cannot
   classify gets `value: null` and a `Gap`, not a guess at `other`.
 
-Model choice: the coordinator reads `AIOC_COORDINATOR_MODEL` and falls back to the harness
-default. Classification plus a short plan is a far smaller job than a full incident diagnosis,
-so this is the natural place for a cheaper model - the Day 23 routing experiment measures
-exactly that, and this seam is what makes it a config change rather than a rewrite.
+Model choice: the coordinator runs the coordinator role's model (`LLMSettings.for_role`:
+`AIOC_COORDINATOR_MODEL`, else the harness default), and so does the model-written synthesis.
+Classification plus a short plan is a far smaller job than a full incident diagnosis, so the
+coordinator's share of a request is small; the Day 23 projection
+(`docs/design-notes/model-routing.md`) prices moving it, and this seam is what makes that a
+config change rather than a rewrite.
 """
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -359,21 +360,24 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:8]}"
 
 
-def _coordinator_settings() -> LLMSettings:
-    """`AIOC_COORDINATOR_MODEL` overrides the harness default for the coordinator only.
-
-    The seam the Day 23 routing experiment measures: coordinator and subagents can run
-    different models without either half of the code knowing about it.
-    """
-    override = os.environ.get("AIOC_COORDINATOR_MODEL")
-    return LLMSettings(model=override) if override else LLMSettings()
+def plan_prompt(query: str, situation: str | None = None) -> str:
+    """The planning call's user turn: the situation block, when there is one, then the query.
+    One function so a recorded run's planning request can be rebuilt exactly (Day 23)."""
+    if not query.strip():
+        raise ValueError("query must be non-empty")
+    prompt = f"Operational query: {query.strip()}"
+    if situation and situation.strip():
+        prompt = f"<situation>\n{situation.strip()}\n</situation>\n\n{prompt}"
+    return prompt
 
 
 class Coordinator:
     """Plans which agents a query needs. Executing the plan lands on Day 7."""
 
     def __init__(self, client: LLMClient | None = None) -> None:
-        self._client = client or LLMClient(_coordinator_settings())
+        # The coordinator role (`AIOC_COORDINATOR_MODEL`, else `AIOC_MODEL`): the seam the
+        # Day 23 routing experiment measures, shared with the model-written synthesis.
+        self._client = client or LLMClient(LLMSettings().for_role("coordinator"))
 
     def plan(
         self,
@@ -399,15 +403,8 @@ class Coordinator:
         `round_number` is stamped onto every invocation rather than asked of the model; the
         Day 14 refinement loop passes 1, 2, ... when it re-delegates.
         """
-        if not query.strip():
-            raise ValueError("query must be non-empty")
-
-        prompt = f"Operational query: {query.strip()}"
-        if situation and situation.strip():
-            prompt = f"<situation>\n{situation.strip()}\n</situation>\n\n{prompt}"
-
         resp = self._client.complete(
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": plan_prompt(query, situation)}],
             system=SELECTION_SYSTEM_PROMPT,
             tools=[_SELECT_TOOL],
             tool_choice={"type": "tool", "name": SELECT_TOOL_NAME},

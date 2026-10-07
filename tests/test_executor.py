@@ -730,6 +730,62 @@ def test_a_two_hop_chain_hands_each_link_its_direct_dependency_only():
     assert dep_call["context"].count(HANDOFF_HEADER) == 1
 
 
+def test_incident_hands_deployment_a_digest_not_a_raw_dump():
+    """Day 23, BUILD_PLAN Phase 4 in its own words: "pass Incident's digest to Deployment,
+    not the raw dump". The edge no earlier test showed: Deployment `depends_on` Incident
+    directly. Deployment is told the window, the services, and the judgements with their
+    confidence and evidence ids; the envelope stays behind; and every line it was handed is
+    quotable as evidence through the Deployment agent's own context grounding."""
+    from aioc.agents._toolset import ToolLedger
+
+    order: list[str] = []
+    deployment = _RecordingRunner(order_log=order)
+    dep_context = (
+        "Check whether the payments-api release live in production during the incident "
+        "window incident reports is the cause; report rollout health and changed keys."
+    )
+    plan = _plan(
+        [
+            _invocation("incident"),
+            _invocation(
+                "deployment",
+                invocation_id="inv_dep",
+                mode="sequential",
+                depends_on=["inv_incident"],
+                context_passed=dep_context,
+            ),
+        ]
+    )
+    resp = Executor(
+        {AgentName.INCIDENT: _RecordingRunner(order_log=order), AgentName.DEPLOYMENT: deployment}
+    ).execute(plan, "Did the payments-api rollout cause the checkout errors?")
+
+    assert order == ["inv_incident", "inv_dep"]
+    (call,) = deployment.calls
+    ctx = call["context"]
+    assert ctx.startswith(dep_context)
+    assert ctx.index(ROSTER_HEADER) < ctx.index(HANDOFF_HEADER) < ctx.index("<handoff")
+    handoff = ctx[ctx.index("<handoff") :]
+    # What a Deployment agent acts on: when, where, and what Incident concluded, with how sure.
+    assert '<handoff from="incident" invocation_id="inv_incident" status="complete"' in handoff
+    assert "incident_window: 2026-08-08T14:00:00Z -> ongoing" in handoff
+    assert "affected_services: checkout-api, payments-api" in handoff
+    assert "failure_mode: downstream_latency @0.70 [ev_1]" in handoff
+    assert "root_cause: payments-api latency breaching checkout-api's timeout @0.55" in handoff
+    assert "ev_1" in handoff.splitlines()[-2]  # the evidence list, kept out of any cut
+    # Not the raw dump: no envelope plumbing, and a fraction of the serialised response.
+    incident_report = resp.agent_responses[0]
+    assert '"schema_version"' not in handoff and "generated_at" not in handoff
+    assert '"impact"' not in handoff and "error_rate_before" not in handoff
+    assert len(handoff) < len(incident_report.model_dump_json()) / 2
+    # Recorded verbatim, and quotable line by line by the agent that received it.
+    dep_inv = next(i for i in resp.selected_agents if i.invocation_id == "inv_dep")
+    assert dep_inv.context_passed == ctx and dep_inv.depends_on == ["inv_incident"]
+    ledger = ToolLedger([], "aioc-deployment", context=ctx)
+    for line in handoff.splitlines():
+        assert ledger.in_context(line.strip())
+
+
 def test_the_dependent_span_carries_the_composed_context():
     # What the trace shows as the agent's input must be what the agent actually saw.
     tracer = _FakeTracer()

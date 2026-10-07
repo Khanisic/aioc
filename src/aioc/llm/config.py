@@ -5,9 +5,11 @@ the ``DAY 2 - Claude API`` block in ``.env.example``:
 
   - ``ANTHROPIC_API_KEY`` - the console key. The SDK reads this on its own too; modelling
     it here lets the demo and tests fail with a clear message instead of an SDK stack trace.
-  - ``AIOC_MODEL`` - the harness default model. The Day 23 routing experiment (Haiku/Sonnet
-    for subagents, Opus for the coordinator) is a Reasoning-Layer concern layered on top of
-    this; the harness itself just needs one default.
+  - ``AIOC_MODEL`` - the harness default model.
+  - ``AIOC_COORDINATOR_MODEL`` / ``AIOC_SUBAGENT_MODEL`` - per-role overrides (Day 23), read
+    through `LLMSettings.for_role`: the coordinator's calls (planning and the model-written
+    synthesis) and the four subagents' calls can run different models, each falling back to
+    ``AIOC_MODEL``. Model routing is therefore a configuration change, not a code change.
 
 Nothing here is frozen - model selection and retrieval parameters churn freely (CLAUDE.md).
 """
@@ -18,6 +20,8 @@ from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+Role = Literal["coordinator", "subagent"]
 
 
 class LLMSettings(BaseSettings):
@@ -37,9 +41,16 @@ class LLMSettings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     # Sonnet rather than Opus: measured by scripts/check_structured_output.py, it is the cheapest
     # model that returns a contract-valid IncidentAgentResponse on the first try (Haiku still
-    # breaks the timeline ordering invariant). Opus stays the coordinator's model - that split is
-    # the Day 23 routing experiment, and this default is the subagent half of it.
+    # breaks the timeline ordering invariant). Both roles run it unless overridden below; the
+    # Day 23 projection (`docs/design-notes/model-routing.md`) is what a split would cost.
     model: str = Field(default="claude-sonnet-5", validation_alias="AIOC_MODEL")
+
+    # Per-role overrides (Day 23). Unset means the role runs `model`. They are fields, not
+    # os.environ reads, so a value in `.env` takes effect - before Day 23 the coordinator's
+    # override was read from the process environment only, and `.env.example` told people
+    # to put it in `.env`, where it did nothing.
+    coordinator_model: str | None = Field(default=None, validation_alias="AIOC_COORDINATOR_MODEL")
+    subagent_model: str | None = Field(default=None, validation_alias="AIOC_SUBAGENT_MODEL")
 
     # 8192, not 4096: a full structured incident report does not fit in 4096 output tokens. Opus
     # hit exactly 4096 and was truncated mid-JSON, which surfaces as a bogus "field required"
@@ -77,3 +88,11 @@ class LLMSettings(BaseSettings):
     prompt_cache_ttl: Literal["5m", "1h"] = Field(
         default="5m", validation_alias="AIOC_PROMPT_CACHE_TTL"
     )
+
+    def for_role(self, role: Role) -> LLMSettings:
+        """These settings with `model` set to the role's override, or unchanged without one.
+
+        The coordinator role is the planner and the model-written synthesis; the subagent
+        role is the four agents. Everything but the model is shared."""
+        override = self.coordinator_model if role == "coordinator" else self.subagent_model
+        return self if override is None else self.model_copy(update={"model": override})

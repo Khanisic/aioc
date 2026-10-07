@@ -176,6 +176,19 @@ class NullTracer:
 # -------------------------------------------------------------------- the langfuse adapter
 
 
+def _token_metadata(input_tokens: int, output_tokens: int) -> dict[str, int]:
+    """The span's tokens as metadata, where Langfuse keeps them.
+
+    Langfuse stores ``usage_details`` on generation observations only; on the span, agent,
+    and chain observations this adapter creates, the backend records 0 / 0 whatever was
+    sent. Found on Day 23 by reading the four-agent run's trace back: every observation of
+    every traced run since Day 9 shows zero tokens. Metadata is stored a key per attribute,
+    so this adds to the span's metadata rather than replacing it. ``usage_details`` stays,
+    for the day the observations become generations.
+    """
+    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+
+
 class _LangfuseSpan:
     def __init__(self, observation: LangfuseObservationWrapper) -> None:
         self._observation = observation
@@ -210,6 +223,7 @@ class _LangfuseSpan:
             level="ERROR" if error is not None else "DEFAULT",
             status_message=error if error is not None else status,
             usage_details={"input": input_tokens, "output": output_tokens},
+            metadata=_token_metadata(input_tokens, output_tokens),
         )
         self._observation.end()
 
@@ -247,6 +261,7 @@ class _LangfuseTrace:
             level="ERROR" if error is not None else "DEFAULT",
             status_message=error if error is not None else status,
             usage_details={"input": input_tokens, "output": output_tokens},
+            metadata=_token_metadata(input_tokens, output_tokens),
         )
         self._root.set_trace_io(output=output)
         self._root.end()

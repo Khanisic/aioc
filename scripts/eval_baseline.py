@@ -110,6 +110,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("runs", nargs="*", type=Path, help="eval run directories")
     parser.add_argument("--latest", action="store_true", help="the newest run of each kind")
     parser.add_argument("--against", type=Path, default=None, help="a baseline.json to compare")
+    parser.add_argument(
+        "--across-models",
+        action="store_true",
+        help="with --against: the run is on another model (Day 23 routing)",
+    )
     parser.add_argument("--write", type=Path, default=None, help="write PATH.md and PATH.json")
     parser.add_argument("--heading", default=None, help="the report's title")
     parser.add_argument("--set", type=Path, default=None, help="a case file (default: seeded)")
@@ -121,7 +126,9 @@ def main(argv: list[str] | None = None) -> int:
             if len(args.runs) != 1:
                 raise SystemExit("--against compares exactly one run directory")
             baseline = json.loads(args.against.read_text(encoding="utf-8"))
-            comparison = compare(baseline, read_record(args.runs[0]))
+            comparison = compare(
+                baseline, read_record(args.runs[0]), across_models=args.across_models
+            )
             report = render_comparison(comparison, heading=args.heading or "Against the baseline")
             print(report)
             if args.write is not None:

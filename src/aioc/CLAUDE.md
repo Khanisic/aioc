@@ -16,6 +16,10 @@ This package holds both layers from `docs/CONTRACTS.md`. They meet at a JSON wir
   once caching is on. Nothing that varies by request may go in a system prompt: it fails no test
   and makes every call a cache write. `batch.py` runs code written for `complete` through the
   Batch API unchanged (`DeferredClient`); `pricing.py` is the one price table.
+  Day 23: a component picks its model with `LLMSettings().for_role("coordinator" | "subagent")`,
+  never `LLMSettings()` alone - the planner and the model synthesis are the coordinator role, the
+  agents and the eval scripts the subagent role. Opus 5.5 and Sonnet 5.5 refuse a forced
+  `tool_choice`, which every emit here uses; `evals/routing.py` prices a route before anyone runs it.
 - `agents/` - the four subagents (Incident, Docs, GitHub, Deployment). Phase 1. Each returns a
   schema-validated `aioc.contracts.AgentResponse`. Incident is live (Days 3-4): `investigate`
   returns prose, `diagnose` returns a validated `IncidentAgentResponse` by forcing a single

@@ -56,7 +56,7 @@ from aioc.contracts import (
     StrictModel,
     SuspectChange,
 )
-from aioc.llm import LLMClient, ToolCallRecord, ToolResult, ToolSpec, Usage
+from aioc.llm import LLMClient, LLMSettings, ToolCallRecord, ToolResult, ToolSpec, Usage
 from aioc.llm.mcp import McpStdioToolset
 from aioc.tools.github.api import GitHubSettings
 
@@ -453,7 +453,7 @@ class GitHubAgent:
         max_validation_retries: int | None = None,
         retry_log: RetryLog | None = None,
     ) -> None:
-        self._client = client or LLMClient()
+        self._client = client or LLMClient(LLMSettings().for_role("subagent"))
         self._toolset = toolset or default_toolset
         self._repository = repository
         self._max_rounds = max_tool_rounds
