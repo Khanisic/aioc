@@ -129,6 +129,11 @@ def tally_run(run_dir: Path) -> Tally:
                 continue
             event = json.loads(line)
             data = event.get("data") or {}
+            if event.get("name") == "batch-detached":
+                # `run_evals.py --detach` stopped without waiting: the batch's tokens are
+                # measured, and counted, by the run that reads it back.
+                measured = True
+                continue
             if data.get("reused_from"):
                 # A continued eval run lists the items it took from the run before it.
                 # That run recorded their tokens; counting them here would be twice.

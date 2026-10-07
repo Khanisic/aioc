@@ -568,10 +568,28 @@ Store everything in `.env.example` (committed, no values) + `.env` (gitignored).
 - **A:** Structured digests across handoffs — Incident passes a digest to Deployment, not a raw dump.
 - **B:** Model routing experiment — Haiku/Sonnet for subagents, Opus for the coordinator.
   Measure cost and latency per configuration.
+- **Done (2026-10-06/07), at $0 plus one approved $0.60 run.** A: the executor already hands any
+  direct dependency's digest to its dependent; the Incident -> Deployment edge now has its own
+  test, every digest line quotable through the Deployment agent's grounding. B: per-role
+  models (`AIOC_COORDINATOR_MODEL`, `AIOC_SUBAGENT_MODEL`) and a projection of seven routes
+  from recorded runs and 60 free token counts (`evaluations/routing/projection.md`): the
+  coordinator is 8% of a four-agent bill, an Opus 5 coordinator +12%, Haiku 4.5 subagents
+  -57%. Latency was not projected. One paid run measured Haiku 4.5 on the two eval-covered
+  agents: the same accuracy at -56%, and both no-precedent probes lost
+  (`evaluations/routing/haiku-vs-sonnet.md`).
 
 ### Day 24 — Measure + deploy
 - **A:** Re-run evals. Record token reduction vs. the Day 20 baseline.
 - **B:** Deploy to Railway/Render. Keep K8s manifests in `infrastructure/` as documented artifacts.
+- **A, in progress (2026-10-07).** The re-run is the batch-cached configuration (owner's yes,
+  about $0.71), submitted with `run_evals.py --mode batch --detach` and left running; nobody
+  waits on the queue. How to check on it and compare it with the baseline is
+  `docs/guides/detached-batch-eval.md`. The 18 diagnoses send requests byte-identical to Day
+  20 and the recalls carry only the Day 22 reordering, so the token change is expected near
+  zero: the Day 21 trimming acts on tool replies, which this set does not exercise.
+- **B, decided (2026-10-07): config only, no host yet.** The service, its image, and the
+  hosted-Postgres apply path are built and proven locally in a container; the host is chosen
+  later.
 - **B — schema and corpus on hosted Postgres.** `docker/postgres/init/` runs *only* on
   first initialisation of an empty local volume, so the hosted database starts with no
   extensions, no tables, and no incident corpus. Apply them explicitly, in order, before

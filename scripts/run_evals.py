@@ -9,6 +9,7 @@
     uv run python scripts/run_evals.py --tasks diagnose --limit 4
     uv run python scripts/run_evals.py --smoke                  # LIVE, 4 calls: is it wired?
     uv run python scripts/run_evals.py --resume test-results/runs/<date>/<run>   # LIVE, the rest
+    uv run python scripts/run_evals.py --mode batch --detach    # LIVE, submit and exit
     uv run python scripts/run_evals.py --rescore test-results/runs/<date>/<run>   # free
     uv run python scripts/run_evals.py --recorded-tools         # free - tool success, recorded
 
@@ -44,6 +45,15 @@ a directory from a different set, model, or configuration. A run stops itself, a
 how to resume, when the key or the account is refused or three items in a row fail on the
 API.
 
+**Nobody has to wait on a batch (`--detach`, Day 24).** With `--mode batch --detach` the
+run submits its batch, records where it got to, prints the run directory, and exits with
+code 3. The same command with `--resume <that directory>` added checks the batch: still
+running, it says so and exits 3 again without spending anything; ended, it reads the
+answers, scores what is finished, and submits the retries a refused report needs as the
+next batch (exit 3 again) - or, with nothing left to ask, writes the report and exits 0.
+Each resume makes a new run directory, and `--resume` given any run in such a chain
+continues the newest one, so the first command printed keeps working.
+
 Every run is recorded under `test-results/` (`report.md`, `eval.json`, `responses.json`)
 and priced by `scripts/cost_review.py`; `--write` also puts the report where it can be
 committed. `scripts/eval_baseline.py` puts several runs side by side.
@@ -67,6 +77,7 @@ from runlog import RESULTS_ROOT, RunRecorder  # noqa: E402 - needs the sys.path 
 from aioc.agents import RetryLog  # noqa: E402
 from aioc.contracts import AgentResponse, CoordinatorResponse  # noqa: E402
 from aioc.evals import (  # noqa: E402
+    BatchDetached,
     EvalAborted,
     EvalItem,
     EvalRun,
@@ -366,6 +377,25 @@ class Executed:
     run_id: str
 
 
+def continued_by(run_dir: Path) -> Path | None:
+    """The run that continued ``run_dir``, followed to the end of the chain, or ``None``.
+    Read from each run's `run.json` (`metadata.resumed_from`), under the same results root."""
+    runs = run_dir.parent.parent
+    successors: dict[str, Path] = {}
+    for summary in runs.glob("*/*/run.json"):
+        try:
+            source = json.loads(summary.read_text(encoding="utf-8"))["metadata"]["resumed_from"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if isinstance(source, str):
+            successors.setdefault(source, summary.parent)
+    later, name = None, run_dir.name
+    while name in successors:
+        later = successors[name]
+        name = later.name
+    return later
+
+
 def _resumed(
     resume_from: Path, cases: EvalSet, config: RunConfig, items: list[EvalItem]
 ) -> tuple[dict[str, ItemResult], set[str], list[str]]:
@@ -441,6 +471,7 @@ def execute(
     command: str | None = None,
     resume_from: Path | None = None,
     say: Callable[[str], None] = print,
+    detach: bool = False,
 ) -> Executed:
     """Run the items, record the run, return what was recorded. Spends money.
 
@@ -448,6 +479,10 @@ def execute(
     that directory already finished are taken from it and not asked again. Raises
     `EvalAborted` when the environment stops the run; what it had finished is recorded,
     and the exception's note says how to continue.
+
+    With ``detach`` (batch only) the run never waits on a batch: it raises `RunDetached`
+    once a batch is submitted or found still running, with what it scored recorded and
+    the run directory to resume from.
     """
     config = RunConfig(
         set_sha256=cases.sha256,
@@ -460,6 +495,12 @@ def execute(
     counted: set[str] = set()
     submitted: list[str] = []
     if resume_from is not None:
+        newest = continued_by(resume_from)
+        if newest is not None:
+            # Continuing an older run again would ask again for everything the later runs
+            # asked for - a detached run's retry batch included - and pay for it twice.
+            say(f"  {resume_from.name} was continued by {newest.name}; continuing that one")
+            resume_from = newest
         done, counted, submitted = _resumed(resume_from, cases, config, items)
 
     needs_corpus = any(item.task is Task.RECALL for item in items if item.key not in done)
@@ -496,6 +537,9 @@ def execute(
         progress = ProgressFile(recorder.dir, config)
         for kept in done.values():
             progress.write(kept)
+        for batch_id in submitted:
+            progress.batch(batch_id, None, carried_from=reused_from)
+        detached: BatchDetached | None = None
         try:
             if mode == "batch":
                 batcher = MessageBatcher.from_settings(
@@ -515,6 +559,7 @@ def execute(
                     on_result=progress.write,
                     submitted=submitted,
                     on_submit=progress.batch,
+                    detach=detach,
                 )
             else:
                 run = run_realtime(
@@ -538,23 +583,79 @@ def execute(
             exc.add_note(f"to continue it: run_evals.py --resume {recorder.dir}")
             exc.add_note(str(recorder.dir))
             raise
+        except BatchDetached as exc:
+            # Stopped on purpose, nothing failed: the batch is the server's now.
+            _record_items(
+                recorder,
+                exc.results,
+                settings,
+                batch=True,
+                reused_from=reused_from,
+                counted=counted,
+            )
+            recorder.event(
+                "batch-detached",
+                outcome="skipped",
+                type="batch",
+                message=str(exc),
+                data={"batch_id": exc.batch_id, "submitted": exc.submitted},
+            )
+            recorder.set_outcome("skipped")
+            detached = exc
 
-        _record_items(
-            recorder,
-            run.results,
-            settings,
-            batch=run.mode == "batch",
-            reused_from=reused_from,
-            counted=counted,
-        )
-        report = render_markdown(run, cases, heading=f"Eval run: {recorder.run_id}")
-        record = to_record(run, cases, run_id=recorder.run_id)
-        recorder.artifact("report.md", report)
-        recorder.artifact("eval.json", json.dumps(record, indent=2))
-        recorder.artifact("responses.json", json.dumps(_responses(run), indent=2))
-        # The run completed; its scores are measurements, not the run's verdict.
-        recorder.set_outcome("passed" if any(s.answered for s in run.scores) else "error")
+        if detached is None:
+            _record_items(
+                recorder,
+                run.results,
+                settings,
+                batch=run.mode == "batch",
+                reused_from=reused_from,
+                counted=counted,
+            )
+            report = render_markdown(run, cases, heading=f"Eval run: {recorder.run_id}")
+            record = to_record(run, cases, run_id=recorder.run_id)
+            recorder.artifact("report.md", report)
+            recorder.artifact("eval.json", json.dumps(record, indent=2))
+            recorder.artifact("responses.json", json.dumps(_responses(run), indent=2))
+            # The run completed; its scores are measurements, not the run's verdict.
+            recorder.set_outcome("passed" if any(s.answered for s in run.scores) else "error")
+    if detached is not None:
+        raise RunDetached(detached, recorder.dir)
     return Executed(run, record, report, recorder.dir, recorder.run_id)
+
+
+class RunDetached(Exception):  # noqa: N818 - a stopping point, not a failure
+    """`execute` stopped without waiting on a batch. ``dir`` is the run to resume."""
+
+    def __init__(self, cause: BatchDetached, run_dir: Path) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.dir = run_dir
+
+
+# `--detach` stopped on purpose: a batch is running and the run is to be resumed. Not 0,
+# so a script cannot mistake it for a finished run, and not 1 or 2, which mean it failed.
+DETACHED = 3
+
+
+def _detached(stop: RunDetached, args: argparse.Namespace) -> None:
+    cause = stop.cause
+    flags = ["--mode batch", "--detach"]
+    for name in ("tasks", "cases", "limit", "model", "cache_ttl"):
+        value = getattr(args, name)
+        if value:
+            flags.append(f"--{name.replace('_', '-')} {value}")
+    if args.no_cache:
+        flags.append("--no-cache")
+    print()
+    if cause.submitted:
+        print(f"SUBMITTED: batch {cause.batch_id}. Not waiting for it.")
+    else:
+        assert cause.status is not None
+        print(f"STILL RUNNING: {cause.status.render()}")
+    print(f"  {len(cause.results)} item(s) scored so far, recorded in {stop.dir}")
+    print("  check on it, and carry on when it has ended (free while it is still running):")
+    print(f"    uv run python scripts/run_evals.py {' '.join(flags)} --resume {stop.dir}")
 
 
 def smoke_complaints(run: EvalRun) -> list[str]:
@@ -583,6 +684,7 @@ def _live(items: list[EvalItem], cases: EvalSet, args: argparse.Namespace) -> in
         mode=args.mode,
         poll_seconds=args.poll_seconds,
         resume_from=args.resume,
+        detach=args.detach,
     )
     print()
     print(done.report)
@@ -621,6 +723,14 @@ def main(argv: list[str] | None = None) -> int:
         help="live: continue this stopped run, asking only for what it did not finish",
     )
     parser.add_argument(
+        "--detach",
+        action="store_true",
+        help=(
+            "with --mode batch: submit the batch (or check the one a --resume run is "
+            "waiting on) and exit instead of waiting; resume the printed run directory later"
+        ),
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="live, 4 calls: the first four diagnoses, with a pass or fail verdict",
@@ -656,8 +766,13 @@ def main(argv: list[str] | None = None) -> int:
         return _show(list(cases.items), args.show)
     if args.dry_run:
         return _dry_run(items, _settings(args), args.mode)
+    if args.detach and args.mode != "batch":
+        raise SystemExit("--detach needs --mode batch: only a batch can be left running")
     try:
         return _live(items, cases, args)
+    except RunDetached as stop:
+        _detached(stop, args)
+        return DETACHED
     except EvalAborted as exc:
         # Recorded by the run's own recorder on the way out; said here for the terminal.
         print(f"\nABORTED: {exc}", file=sys.stderr)

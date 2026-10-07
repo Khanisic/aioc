@@ -32,6 +32,11 @@ is the API's own maximum of a day, and a `DeferredClient` can `attach` to a batc
 not submit in this process, so a run resumed after a crash reads what was paid for
 instead of paying again. Whoever submits a batch is told its id at once (`on_submit`) so
 it can be written down before anything else can go wrong.
+
+**Nobody has to wait on a batch at all (Day 24).** `DeferredClient.submit` sends the queue
+and returns the id without polling, and `MessageBatcher.status` is one poll: whether the
+batch has ended and how its requests stand. A caller can submit, exit, and come back with
+the id - which is how the eval script's ``--detach`` works.
 """
 
 from __future__ import annotations
@@ -100,6 +105,30 @@ class BatchRun:
     seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class BatchStatus:
+    """One poll of a batch: its processing status and how its requests stand."""
+
+    batch_id: str
+    processing_status: str  # in_progress, canceling, ended
+    processing: int
+    succeeded: int
+    errored: int
+    canceled: int
+    expired: int
+
+    @property
+    def ended(self) -> bool:
+        return self.processing_status == "ended"
+
+    def render(self) -> str:
+        counts = (
+            f"{self.processing} processing, {self.succeeded} succeeded, "
+            f"{self.errored} errored, {self.canceled} canceled, {self.expired} expired"
+        )
+        return f"batch {self.batch_id}: {self.processing_status} ({counts})"
+
+
 class MessageBatcher:
     """Submit, wait, read. The ``anthropic`` client is injected, like `LLMClient`'s, so
     the offline suite drives this against a scripted fake."""
@@ -144,6 +173,20 @@ class MessageBatcher:
             )
         )
         return batch.id
+
+    def status(self, batch_id: str) -> BatchStatus:
+        """One poll, no waiting. Free: reading a batch is not billed."""
+        batch = self._client.messages.batches.retrieve(batch_id)
+        counts = batch.request_counts
+        return BatchStatus(
+            batch_id=batch_id,
+            processing_status=batch.processing_status,
+            processing=counts.processing,
+            succeeded=counts.succeeded,
+            errored=counts.errored,
+            canceled=counts.canceled,
+            expired=counts.expired,
+        )
 
     def wait(self, batch_id: str) -> Any:
         """Poll until the batch has ended. `BatchError` when it has not inside the timeout,
@@ -290,6 +333,20 @@ class DeferredClient(LLMClient):
         run, results = batcher.run(queued, on_submit=on_submit)
         self._keep(run, results)
         return run
+
+    def submit(
+        self, batcher: MessageBatcher, *, on_submit: Callable[[str, int], None] | None = None
+    ) -> str | None:
+        """Send everything queued as one batch and return its id without waiting for it.
+        ``None`` when the queue is empty. The answers are read later with `attach`, by
+        this process or another one: a request's ``custom_id`` is its key either way."""
+        if not self.pending:
+            return None
+        queued, self.pending = self.pending, {}
+        batch_id = batcher.submit(queued)
+        if on_submit is not None:
+            on_submit(batch_id, len(queued))
+        return batch_id
 
     def attach(self, batcher: MessageBatcher, batch_id: str) -> BatchRun:
         """Keep the answers of a batch submitted earlier - by a process that has since

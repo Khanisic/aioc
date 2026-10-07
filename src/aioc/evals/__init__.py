@@ -38,6 +38,7 @@ from .cases import (
 from .report import CacheHealth, CostView, cache_health, cost_view, render_markdown, to_record
 from .runner import (
     MAX_ENVIRONMENT_FAILURES,
+    BatchDetached,
     EvalAborted,
     EvalRun,
     ItemResult,
@@ -93,6 +94,7 @@ __all__ = [
     "CacheHealth",
     "CaseError",
     "CostView",
+    "BatchDetached",
     "EvalAborted",
     "EvalItem",
     "EvalRun",
