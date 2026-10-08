@@ -95,6 +95,26 @@ class RetrievalResult:
     degraded: str | None  # why the vector half was unavailable, when it was
 
 
+class CorpusUnavailable(RuntimeError):
+    """The corpus database could not be reached. A fact about the environment, never about
+    the question or the agent asking it: every later search would fail the same way."""
+
+
+# Seconds to wait for the corpus database to answer a connection. Without a bound, libpq
+# waits as long as the operating system does - minutes on Windows - for each search.
+CONNECT_TIMEOUT_SECONDS = 10
+
+
+def _connect() -> psycopg.Connection[Any]:
+    try:
+        return psycopg.connect(dsn(), connect_timeout=CONNECT_TIMEOUT_SECONDS)
+    except psycopg.OperationalError as exc:
+        raise CorpusUnavailable(
+            f"the corpus database could not be reached ({' '.join(str(exc).split())}); "
+            "is the stack up (make up)?"
+        ) from exc
+
+
 @dataclass(slots=True, frozen=True)
 class IngestReport:
     model: str
@@ -233,7 +253,7 @@ class CorpusSearcher:
             raise EmbeddingError("ingest requires an embedder (set VOYAGE_API_KEY)")
         if conn is not None:
             return self._ingest(conn, self._embedder)
-        with psycopg.connect(dsn()) as owned:
+        with _connect() as owned:
             report = self._ingest(owned, self._embedder)
             owned.commit()
             return report
@@ -295,7 +315,7 @@ class CorpusSearcher:
             raise ValueError("query must be non-empty")
         if conn is not None:
             return self._search(conn, query, k)
-        with psycopg.connect(dsn()) as owned:
+        with _connect() as owned:
             return self._search(owned, query, k)
 
     def _search(self, conn: psycopg.Connection[Any], query: str, k: int) -> RetrievalResult:

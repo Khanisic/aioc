@@ -33,6 +33,9 @@ docker compose up -d --wait
 
 If Docker Desktop is not running, start it from the Start menu (or `Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"`), wait about 30 seconds, then run `docker compose up -d --wait`.
 
+If you forget, the check stops at the first recall with `ABORTED: ... the corpus database could not be reached` (exit code 2), waiting at most 10 seconds, and nothing is lost: start the stack and run the same command again.
+Before 2026-10-08 it did not stop: each recall waited minutes for the database and was then recorded as the Docs agent's failure, which a resumed run would have kept.
+
 Run every command below from the repository root (`D:\AI_Projects\AIOC\aioc`).
 In PowerShell, set this once per terminal so model output prints without crashing the console:
 
@@ -56,7 +59,7 @@ What it prints, and what to do next:
 | `STILL RUNNING: batch msgbatch_... in_progress (N processing, ...)` | 3 | The batch has not ended. Nothing was spent. | Check again later. |
 | `SUBMITTED: batch msgbatch_<new id>. Not waiting for it.` | 3 | The first batch ended and its answers were scored. Some reports were refused by the contract or the grounding check, and their retries went out as a second, much smaller batch. | Check again later with the same command. The retry batch is usually faster, and it costs a few cents. |
 | A report (`# Eval run: ...`, then `records: test-results\runs\...`) | 0 | Done. Every item is scored. | Go to section 4. |
-| `ABORTED: ...` | 2 | Something outside the run failed (a refused key, an empty account, the API unreachable). What had been scored is kept. | Read the message, fix the cause, and run the same command again. |
+| `ABORTED: ...` | 2 | Something outside the run failed (a refused key, an empty account, the API unreachable, the corpus database not running). What had been scored is kept. | Read the message, fix the cause, and run the same command again. |
 
 To see the exit code in PowerShell, run `$LASTEXITCODE` right after the command.
 

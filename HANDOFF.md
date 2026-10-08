@@ -1,14 +1,29 @@
 # Handoff - point a new session here
 
-Written during **Day 24** of 30 (2026-10-07). **The project spends $0 on the Anthropic API
+Written during **Day 24** of 30 (2026-10-07; updated 2026-10-08). **The project spends $0 on the Anthropic API
 (§1)**, with two exceptions the owner approved: the Day 24 eval re-run (below) and, at Day 25,
 one deployed run that still needs a yes at the time.
 
-**The Day 24 eval re-run is in the Batch API queue, and nobody is waiting on it.** Batch
-`msgbatch_01CuGsixLyyEL2nUfVLtZFEr` (38 items, Sonnet 5, batch cached, ~$0.71) was submitted
-with the new `run_evals.py --mode batch --detach`; `docs/guides/detached-batch-eval.md` is the
-owner's step-by-step for checking on it and comparing it with the baseline. When the owner
-says it finished, the work is §6 item 1.
+**The Day 24 eval re-run is on its second pass, in the Batch API queue.** The first batch
+(`msgbatch_01CuGsixLyyEL2nUfVLtZFEr`, 38 items, Sonnet 5, batch cached) ended and was read
+back on 2026-10-08: 27 items scored (26 correct, `case_18:diagnose` wrong), and the 11 reports
+the contract or the grounding check refused went out as the retry batch
+`msgbatch_01TFPchc2MJNwdL16iJuVrEf`. Day 20's batch run needed 8 retry calls over two passes,
+so 11 in one pass is worth reading in the finished record (each item's `retry.rejections`).
+To continue (free while it runs; may submit one more small retry batch):
+
+```
+uv run python scripts/run_evals.py --mode batch --detach --resume test-results/runs/2026-10-08/20261008T165816Z__llm__evals-batch
+```
+
+**Start the stack first** (`docker compose up -d --wait`): the first read-back on 2026-10-08
+ran with Docker Desktop stopped, and the harness recorded each recall's database timeout as
+the Docs agent's failure, which a resume would have kept. Fixed the same day:
+`CorpusSearcher` raises `CorpusUnavailable` after a 10 s connect timeout, and the eval runner
+treats it as the environment's and stops the run at once (`tests/test_eval_resume.py`,
+`tests/test_retrieval.py`). The mis-scored run directory made no paid call and was moved out
+of the chain. `docs/guides/detached-batch-eval.md` is the owner's step-by-step; when the run
+finishes, the work is §6 item 1.
 
 Day 24B is done as **config only** (owner's choice: no host yet): the orchestrator is an HTTP
 service (`aioc.api`, requests as jobs, closed until `AIOC_API_TOKEN` is set, a free `smoke`

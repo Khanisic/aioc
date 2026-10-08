@@ -20,10 +20,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import psycopg
 import pytest
 
 from aioc.retrieval import (
     CorpusSearcher,
+    CorpusUnavailable,
     EmbeddingError,
     EmbeddingSettings,
     VoyageEmbedder,
@@ -277,6 +279,24 @@ def test_empty_input_embeds_to_empty_without_a_network_call():
 def test_search_rejects_an_empty_query():
     with pytest.raises(ValueError, match="query must be non-empty"):
         CorpusSearcher().search("   ")
+
+
+def test_an_unreachable_corpus_says_so_and_waits_a_bounded_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Day 24 batch re-run was scored with the stack down: each recall waited out the
+    # operating system's connect timeout and then blamed the agent for a stopped database.
+    seen: dict[str, Any] = {}
+
+    def refuse(conninfo: str, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise psycopg.OperationalError("connection timeout expired")
+
+    monkeypatch.setattr(psycopg, "connect", refuse)
+    with pytest.raises(CorpusUnavailable, match="corpus database could not be reached") as caught:
+        CorpusSearcher().search("pool exhaustion")
+    assert isinstance(caught.value.__cause__, psycopg.OperationalError)
+    assert 0 < seen["connect_timeout"] <= 10
 
 
 # ------------------------------------------------------------------------- integration

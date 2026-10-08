@@ -48,6 +48,7 @@ import anthropic
 from aioc.contracts import AgentResponse, DocsAgentResponse, IncidentAgentResponse, SourceType
 from aioc.coordinator.confidence import BANDS, Band, band
 from aioc.llm import BatchError, Usage
+from aioc.retrieval import CorpusUnavailable
 
 from .cases import EvalItem, Task
 from .seed import IMPACT_COLUMNS, SeedIncident
@@ -393,9 +394,10 @@ def score_item(
 
 
 def is_environment_error(error: BaseException) -> bool:
-    """The call itself failed: the API refused it, the network dropped it, or the batch
-    lost it. Not the agent's doing, and not evidence about the agent."""
-    return isinstance(error, (anthropic.APIError, BatchError))
+    """The call itself failed: the API refused it, the network dropped it, the batch lost
+    it, or the corpus a recall retrieves from was unreachable. Not the agent's doing, and not
+    evidence about the agent."""
+    return isinstance(error, (anthropic.APIError, BatchError, CorpusUnavailable))
 
 
 def score_failure(item: EvalItem, error: BaseException) -> ItemScore:

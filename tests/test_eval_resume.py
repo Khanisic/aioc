@@ -55,6 +55,7 @@ from aioc.evals import (
     to_record,
 )
 from aioc.llm import BatchError, DeferredClient, LLMClient, MessageBatcher
+from aioc.retrieval import CorpusUnavailable, RetrievalResult
 from tests.test_baseline import _BASE, _Billing, _settings, _Wire
 from tests.test_baseline import wired as wired  # noqa: F401 - the fixture, used by name
 from tests.test_batch import _batcher, _Clock, _FakeAnthropic, _FakeBatches, _succeeded
@@ -195,6 +196,33 @@ def test_failures_in_a_row_stop_the_run_and_are_not_kept():
     assert [result.item.key for result in stopped.results] == ["case_01:diagnose", "case_01:recall"]
     assert "3 items in a row failed on the API itself" in str(stopped)
     assert len(wire.calls) == 5
+
+
+class _Unreachable(_Corpus):
+    """The corpus database is down: every search fails before it reaches a query."""
+
+    def search(self, query: str, *, k: int = 5) -> RetrievalResult:
+        self.calls.append(query)
+        raise CorpusUnavailable("the corpus database could not be reached")
+
+
+def test_an_unreachable_corpus_is_the_environments_failure_and_stops_the_run():
+    # The Day 24 re-run was scored with the stack down, and each recall was recorded as the
+    # agent's failure - kept on resume, never asked again.
+    error = CorpusUnavailable("the corpus database could not be reached")
+    assert is_environment_error(error)
+    assert score_failure(ITEMS["case_01:recall"], error).error_kind == "environment"
+    assert "make up" in (stops_the_run(error) or "")
+
+    wire = _Flaky({})
+    corpus = _Unreachable()
+    with pytest.raises(EvalAborted) as caught:
+        run_realtime(_SUBSET, _client(wire), corpus)
+    stopped = caught.value
+    # The diagnosis before it is kept; the recall is not, so a continued run asks again.
+    assert [result.item.key for result in stopped.results] == ["case_01:diagnose"]
+    assert "stopped at case_01:recall" in str(stopped)
+    assert corpus.calls == [ITEMS["case_01:recall"].query]  # one wait, not one per recall
 
 
 def test_two_failures_then_an_answer_is_weather():

@@ -27,7 +27,9 @@ did exactly that: one on a revoked key, one on an empty balance five items in.
 
 Two rules, because the failures that matter cannot all be listed in advance. A refusal
 that is known to be about the caller (the key, the permission, the balance) stops the run
-at once. Anything else the API itself fails on is given the benefit of the doubt, item by
+at once, and so does a corpus database that cannot be reached: every recall retrieves
+from it, and the third run of this harness recorded a stopped database as the Docs
+agent's failure. Anything else the API itself fails on is given the benefit of the doubt, item by
 item, until `MAX_ENVIRONMENT_FAILURES` in a row have failed that way - one overloaded
 response is weather, three in a row is the climate.
 
@@ -60,7 +62,7 @@ from aioc.llm import (
     PendingRequest,
     Usage,
 )
-from aioc.retrieval import RetrievalResult
+from aioc.retrieval import CorpusUnavailable, RetrievalResult
 
 from .cases import EvalItem, Task
 from .scoring import ItemScore, RetryStats, is_environment_error, score_failure, score_item
@@ -115,6 +117,11 @@ def stops_the_run(exc: BaseException) -> str | None:
         return (
             "the API refused the credential. Nothing more can succeed until the key is "
             "replaced - see HANDOFF.md sec 7 item 10"
+        )
+    if isinstance(exc, CorpusUnavailable):
+        return (
+            "the corpus database could not be reached, and every recall retrieves from it. "
+            "Start the stack (make up); the run can then be resumed"
         )
     if is_environment_error(exc) and "credit balance" in str(exc).lower():
         return (

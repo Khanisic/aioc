@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .corpus import (
     CorpusSearcher,
+    CorpusUnavailable,
     IngestReport,
     RetrievalResult,
     RetrievedDoc,
@@ -25,6 +26,7 @@ from .embeddings import (
 
 __all__ = [
     "CorpusSearcher",
+    "CorpusUnavailable",
     "Embedder",
     "EmbeddingError",
     "EmbeddingSettings",
