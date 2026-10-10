@@ -1,29 +1,30 @@
 # Handoff - point a new session here
 
-Written during **Day 24** of 30 (2026-10-07; updated 2026-10-08). **The project spends $0 on the Anthropic API
-(§1)**, with two exceptions the owner approved: the Day 24 eval re-run (below) and, at Day 25,
-one deployed run that still needs a yes at the time.
+Written during **Day 25** of 30 (2026-10-10). **The project spends $0 on the Anthropic API
+(§1)**, with the exceptions the owner approved one at a time: the Day 24 eval re-run and the
+two Day 25 runs (below). Any further live call still needs a yes at the time.
 
-**The Day 24 eval re-run is on its second pass, in the Batch API queue.** The first batch
-(`msgbatch_01CuGsixLyyEL2nUfVLtZFEr`, 38 items, Sonnet 5, batch cached) ended and was read
-back on 2026-10-08: 27 items scored (26 correct, `case_18:diagnose` wrong), and the 11 reports
-the contract or the grounding check refused went out as the retry batch
-`msgbatch_01TFPchc2MJNwdL16iJuVrEf`. Day 20's batch run needed 8 retry calls over two passes,
-so 11 in one pass is worth reading in the finished record (each item's `retry.rejections`).
-To continue (free while it runs; may submit one more small retry batch):
+**Day 25 passed, locally, by the owner's choice (2026-10-10).** `scripts/check_day25_service.py
+--deploy` sends the Day 15 scenario to the service container: four agents complete through
+`POST /v1/requests`, the parallel group overlapping in the Langfuse trace, the gate withholding
+every recommendation. Two live runs, $0.81 in all (owner's yes for each): the first found that
+MCP tool servers got no settings in a container (no `.env` there; fixed in
+`agents/_toolset.server_env`), the second passed. GIF: `docs/assets/day25-demo.gif`; numbers:
+`numbers.md` Day 25. Day 26-29 material is underway: `docs/guides/quickstart.md` (not yet
+fresh-clone tested), and screenshots wait on the Chrome extension being connected (Langfuse
+needs the owner's logged-in browser).
+
+**The Day 24 eval re-run is one item from done.** 37 of 38 scored across five batches; the last
+retry is `msgbatch_016oEJSz9wBRXUjyg5G2BhwD`. Two harness bugs it found are fixed: a stopped
+database scored as the Docs agent's failure (now `CorpusUnavailable`, which stops the run), and
+a report emitted twice in one turn broke the retry (forced emits now send
+`disable_parallel_tool_use`, and a retry answers every `tool_use`). Start the stack, then:
 
 ```
-uv run python scripts/run_evals.py --mode batch --detach --resume test-results/runs/2026-10-08/20261008T165816Z__llm__evals-batch
+uv run python scripts/run_evals.py --mode batch --detach --resume test-results/runs/2026-10-10/20261010T035400Z__llm__evals-batch
 ```
 
-**Start the stack first** (`docker compose up -d --wait`): the first read-back on 2026-10-08
-ran with Docker Desktop stopped, and the harness recorded each recall's database timeout as
-the Docs agent's failure, which a resume would have kept. Fixed the same day:
-`CorpusSearcher` raises `CorpusUnavailable` after a 10 s connect timeout, and the eval runner
-treats it as the environment's and stops the run at once (`tests/test_eval_resume.py`,
-`tests/test_retrieval.py`). The mis-scored run directory made no paid call and was moved out
-of the chain. `docs/guides/detached-batch-eval.md` is the owner's step-by-step; when the run
-finishes, the work is §6 item 1.
+When it prints the report, the work is §6 item 1.
 
 Day 24B is done as **config only** (owner's choice: no host yet): the orchestrator is an HTTP
 service (`aioc.api`, requests as jobs, closed until `AIOC_API_TOKEN` is set, a free `smoke`

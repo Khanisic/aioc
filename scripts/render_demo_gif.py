@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -110,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run", required=True, help="run directory holding transcript.json")
     parser.add_argument("--out", default="docs/assets/day10-demo.gif")
+    parser.add_argument(
+        "--transcript",
+        default="transcript.json",
+        help="the transcript file in the run directory (check_day25_service.py --replay "
+        "writes transcript.replayed.json)",
+    )
     parser.add_argument("--title", default="AIOC - Day 10 demo", help="window title bar text")
     parser.add_argument(
         "--command",
@@ -118,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    transcript_path = Path(args.run) / "transcript.json"
+    transcript_path = Path(args.run) / args.transcript
     if not transcript_path.is_file():
         print(f"{transcript_path} does not exist - did the demo run record it?", file=sys.stderr)
         return 2
@@ -126,8 +133,11 @@ def main(argv: list[str] | None = None) -> int:
 
     font = _load_font()
     box = font.getbbox("M")
-    char_w, line_h = box[2] - box[0], (box[3] - box[1]) + 7
-    width = PAD_X * 2 + COLS * char_w
+    line_h = (box[3] - box[1]) + 7
+    # A full row measured as drawn, not the ink box of one glyph times COLS: Consolas at 15px
+    # advances 8.25px a character against an 8px ink box, so a full row overran the image
+    # and its last character or two were clipped.
+    width = PAD_X * 2 + math.ceil(font.getlength("M" * COLS))
     height = PAD_TOP + ROWS * line_h + PAD_BOTTOM
 
     # The typed command opens the replay; everything after it is the recorded transcript.

@@ -201,11 +201,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--settle-seconds", type=int, default=45)
     parser.add_argument("--window-minutes", type=int, default=10)
     parser.add_argument(
+        "--replay",
+        default=None,
+        help="re-print a recorded run's step 5 from its job.json into transcript.replayed.json",
+    )
+    parser.add_argument(
         "--job",
         default=None,
         help="read back a job this service is already running (job_...), paying nothing more",
     )
     args = parser.parse_args(argv)
+
+    if args.replay is not None:
+        return _replay(Path(args.replay))
 
     token = os.environ.get("AIOC_API_TOKEN", "").strip()
     if not token:
@@ -310,6 +318,68 @@ def main(argv: list[str] | None = None) -> int:
     return _report(job, args, say, t, situation=situation, versions=(from_version, to_version))
 
 
+def _replay(run_dir: Path) -> int:
+    """A recorded run's transcript with step 5 re-printed by today's `_print_answer` from the
+    run's own recorded job. Free and offline. Every other line, and every line's offset, is
+    the recorded one; step 5's lines share the offset step 5 started at. Written beside the
+    original as ``transcript.replayed.json``, which `render_demo_gif.py --transcript` reads."""
+    lines = json.loads((run_dir / "transcript.json").read_text(encoding="utf-8"))
+    job = json.loads((run_dir / "job.json").read_text(encoding="utf-8"))
+    resp = CoordinatorResponse.model_validate(job["response"])
+    starts = [i for i, e in enumerate(lines) if e["line"].startswith(("[5/6]", "[6/6]"))]
+    if len(starts) != 2:
+        print(f"{run_dir} has no complete step 5 to re-print", file=sys.stderr)
+        return 2
+    begin, end = starts
+    printed: list[str] = []
+    _print_answer(job, resp, lambda text="": printed.extend(text.split("\n")))
+    at = lines[begin]["t"]
+    rebuilt = lines[:begin] + [{"t": at, "line": line} for line in printed] + lines[end:]
+    out = run_dir / "transcript.replayed.json"
+    out.write_text(json.dumps(rebuilt, indent=2, ensure_ascii=True), encoding="utf-8")
+    print(f"wrote {out} ({len(rebuilt)} lines; step 5 re-printed from job.json)")
+    return 0
+
+
+def _print_answer(job: dict[str, Any], resp: CoordinatorResponse, say: Any) -> None:
+    """Step 5: the coordinator's answer as the service returned it. Shared with
+    ``--replay``, which re-prints a recorded run's step 5 from its recorded job."""
+    say("[5/6] The coordinator's answer, as the service returned it")
+    say()
+    intent = resp.intent.value.value if resp.intent.value else "unclassified"
+    say(f"  intent      {intent} @ {resp.intent.confidence:.2f}")
+    for inv in resp.selected_agents:
+        deps = f" after {', '.join(inv.depends_on)}" if inv.depends_on else ""
+        say(f"  selected    {inv.agent.value:<11} {inv.mode.value}{deps}")
+    for skipped in resp.skipped_agents:
+        say(f"  skipped     {skipped.agent.value:<11} {skipped.reason}")
+    say()
+    for r in resp.agent_responses:
+        tools = ", ".join(f"{tc.tool_name}[{'ok' if tc.ok else 'err'}]" for tc in r.tool_calls)
+        say(
+            f"  -- {r.agent.value} agent ({r.status.value}, confidence "
+            f"{r.overall_confidence:.2f}) tools: {tools or 'none'}"
+        )
+        say(f"     {r.summary}")
+    say()
+    say(f"  answer ({resp.answer.confidence:.2f}): {resp.answer.value}")
+    say()
+    for decision in job["approvals"]:
+        # The whole action: the renderer wraps, and a cut action reads as a different one.
+        say(
+            f"  gate        {decision['decision']:<13} "
+            f"{decision['request']['agent']}: {decision['request']['action']}"
+        )
+    say()
+    cached = resp.cost.cache_read_tokens or 0
+    say(
+        f"  status {resp.status.value} | cost {resp.cost.input_tokens} in "
+        f"({cached} from cache) / {resp.cost.output_tokens} out | "
+        f"gaps {len(resp.unresolved_gaps)}"
+    )
+    say()
+
+
 def _report(
     job: dict[str, Any],
     args: argparse.Namespace,
@@ -357,39 +427,7 @@ def _report(
             },
         )
 
-        say("[5/6] The coordinator's answer, as the service returned it")
-        say()
-        intent = resp.intent.value.value if resp.intent.value else "unclassified"
-        say(f"  intent      {intent} @ {resp.intent.confidence:.2f}")
-        for inv in resp.selected_agents:
-            deps = f" after {', '.join(inv.depends_on)}" if inv.depends_on else ""
-            say(f"  selected    {inv.agent.value:<11} {inv.mode.value}{deps}")
-        for skipped in resp.skipped_agents:
-            say(f"  skipped     {skipped.agent.value:<11} {skipped.reason}")
-        say()
-        for r in resp.agent_responses:
-            tools = ", ".join(f"{tc.tool_name}[{'ok' if tc.ok else 'err'}]" for tc in r.tool_calls)
-            say(
-                f"  -- {r.agent.value} agent ({r.status.value}, confidence "
-                f"{r.overall_confidence:.2f}) tools: {tools or 'none'}"
-            )
-            say(f"     {r.summary}")
-        say()
-        say(f"  answer ({resp.answer.confidence:.2f}): {resp.answer.value}")
-        say()
-        for decision in job["approvals"]:
-            action = decision["request"]["action"]
-            say(
-                f"  gate        {decision['decision']:<13} "
-                f"{decision['request']['agent']}: {action[:80]}"
-            )
-        cached = resp.cost.cache_read_tokens or 0
-        say(
-            f"  status {resp.status.value} | cost {resp.cost.input_tokens} in "
-            f"({cached} from cache) / {resp.cost.output_tokens} out | "
-            f"gaps {len(resp.unresolved_gaps)}"
-        )
-        say()
+        _print_answer(job, resp, say)
 
         say("[6/6] Reading the trace back from Langfuse")
         trace = (

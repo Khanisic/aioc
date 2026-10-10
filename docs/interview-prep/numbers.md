@@ -691,6 +691,30 @@ The service in a container on this machine (`docs/design-notes/deployment.md`), 
 | Schema on an empty database | 5 files applied: 18 incidents, 65 events, the audit table; a second run applied nothing |
 | Offline suite | 1140 passed with the stack up |
 
+
+## Day 25 - four agents through the service container ($0.81 of the owner's yes)
+
+The Day 15 scenario sent to `POST /v1/requests` on the local container (`scripts/check_day25_service.py --deploy`): PR #11's release deployed, `downstream_latency` injected, the situation built from live Prometheus, one `live` request with no refinement round and the deterministic synthesis.
+Local, by the owner's choice; the container is the image a host would run.
+
+| | Run 1 (failed) | Run 2 (passed) |
+|---|---|---|
+| Paid | $0.43 | $0.38 |
+| Input tokens, of which from the cache | 184,416, 112,296 (61%) | 161,164, 90,451 (56%) |
+| Output tokens | 23,411 | 19,268 |
+| Submitted to succeeded | 154 s | 111 s |
+| GitHub / Deployment | error / error: no repository, no token, default Prometheus | complete 0.85 / complete 0.70 |
+| Incident / Docs | partial 0.55 / partial 0.55 | partial 0.55 / partial 0.55 |
+| Parallel group overlapped in the trace | 3 of 3 pairs | 3 of 3 pairs |
+| Gate | 2 withheld, 1 not required | 3 withheld |
+| Trace complete in Langfuse | the script read it before the Deployment span landed | 18 s after the job ended |
+
+**What run 1 found.** The MCP client starts a tool server with six environment variables unless it is given an env; locally every server reads the repository's `.env` itself, so 1140 tests and every live run since Day 11 never saw it, and the image has no `.env`. Fixed (`agents/_toolset.server_env`: each server gets the variables its own settings read, never the Claude or Langfuse key) and checked inside the container with direct tool calls before run 2.
+
+**What the trace showed.** Deployment depends on GitHub only, but the executor starts the sequential chain after the whole parallel group: in run 1 Deployment waited 34 s for Docs after GitHub had finished. In run 2 GitHub was the slowest of the group and nothing waited.
+
+**The answer is one agent's.** The deterministic synthesis adopts the highest-confidence report, so the answer is GitHub's (the PR touched tracing code only and cannot explain the latency) and does not name payments-api, which the Incident agent did. The model-written synthesis combines them, at one more call.
+
 ---
 
 ## What is not measured yet
