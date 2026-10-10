@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import httpx
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
@@ -47,6 +47,16 @@ class EmbeddingSettings(BaseSettings):
     )
 
     voyage_api_key: SecretStr | None = Field(default=None, validation_alias="VOYAGE_API_KEY")
+
+    @field_validator("voyage_api_key", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # `.env.example` ships `VOYAGE_API_KEY=` blank and compose's env_file passes the
+        # blank on: an empty string is a key nobody set (the Day 25 fresh-clone test).
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     model: str = Field(default="voyage-3.5", validation_alias="AIOC_EMBEDDING_MODEL")
     # Must match the vector(N) column in 04-embeddings.sql. voyage-3.5's native size.
     dim: int = Field(default=1024, validation_alias="AIOC_EMBEDDING_DIM")

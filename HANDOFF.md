@@ -332,26 +332,31 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: finish Day 24A, then Day 25
+## 6. Next work: Days 26-29, the evidence (Day 24 and Day 25 are done)
 
-1. **When the owner says the batch finished** (or to check: the one command in
-   `docs/guides/detached-batch-eval.md` sec 3, free while it is still running). The finished
-   run is the `records:` line. Then, all free: `scripts/eval_baseline.py --against
-   evaluations/baseline.json <run> --heading "Day 24 re-run against the Day 20 baseline"
-   --write evaluations/day24-vs-baseline.md`; copy its `report.md` to
-   `evaluations/results/day24-batch-cached.md`; record the numbers in `numbers.md` (Day 24
-   section, replacing "submitted and not yet scored") and here; commit. **Read it knowing what
-   changed:** the 18 diagnoses sent requests byte-identical to Day 20, so they measure the
-   noise floor; the 20 recalls carry only the Day 22 reordering (documents before context);
-   the Day 21 trimming is not in this set. A token change near zero is the expected result.
-2. **Day 25 needs a host.** The owner chose "config only" on Day 24. Everything a host needs is
-   in `docs/design-notes/deployment.md` ("What a host has to provide"): a container runtime
-   with `$PORT`, Postgres 17 with `vector`, `python -m aioc.db migrate` as the pre-deploy step,
-   and the environment. Then, free: `/readyz`, then a `smoke` request, then read its trace back
-   (allow several minutes for Langfuse). The one paid run (`mode: live`, `AIOC_API_LIVE=true`,
-   rounds 0, deterministic synthesis, ~$0.55) needs the owner's yes at the time.
-3. If no host is chosen, Day 25's checkpoint can run against the local container
-   (`docker compose --profile api up`), which is the same image; say plainly that it is local.
+The owner's direction (2026-10-10): local only, with instructions to run it, screenshots, and
+video. All free from here unless a step says otherwise.
+
+1. **Screenshots** (Day 26). Need the Claude in Chrome extension connected, and the owner logged
+   into Langfuse in that browser (never sign in for them). Wanted, into `docs/assets/`: the
+   Day 25 trace (`https://us.cloud.langfuse.com/project/cmry520x401voad0ixr23h7wu/traces/ac21f86e1a369f336f3727510e9b4d05`:
+   the three agents overlapping, then Deployment, tokens per span), Prometheus graphing the p99
+   query from `docs/guides/quickstart.md` during a `make chaos-downstream-latency`, the service's
+   `/docs` page, and the eval tables (`evaluations/baseline.md`, `day24-vs-baseline.md`).
+2. **The quickstart** (`docs/guides/quickstart.md`) was fresh-clone tested on 2026-10-10: clone to
+   a passing smoke request in about 7 minutes. It found three bugs, all fixed: `make verify`'s
+   Prometheus check had sent a backslash-escaped query since Day 3 (400 on every shell), blank
+   keys from `.env.example` read as configured (`/readyz` said "configured" for empty strings),
+   and the guide named the wrong ports. Not covered by that test: a cold database and cold image
+   pulls, because the compose file pins the volume name and this machine's data would have had
+   to go. A second machine is the Day 29 test.
+3. **Video** (Day 28). `docs/assets/day25-demo.gif` is the terminal half. The plan's structure is
+   break -> diagnose -> trace and cost -> architecture; the trace and architecture halves need
+   item 1's screenshots and a diagram.
+4. **Known and not fixed:** the executor starts the sequential chain after the whole parallel
+   group (Day 25 run 1: Deployment waited 34 s for Docs after GitHub had finished); the
+   deterministic synthesis adopts one agent's report, so the Day 25 answer is GitHub's and does
+   not name payments-api, which Incident did.
 
 **Owner decisions waiting:**
 

@@ -403,3 +403,30 @@ def test_the_kubernetes_manifests_match_the_service():
     assert config["AIOC_API_LIVE"] == "false" and config["AIOC_API_MAX_ROUNDS"] == "0"
     secret = yaml.safe_load((root / "secret.example.yaml").read_text())
     assert "AIOC_API_TOKEN" in secret["stringData"] and not any(secret["stringData"].values())
+
+
+def test_a_blank_key_is_reported_as_not_set(monkeypatch: pytest.MonkeyPatch):
+    # The Day 25 fresh-clone test: `.env.example` ships `ANTHROPIC_API_KEY=` and the
+    # LANGFUSE_* keys blank, compose's env_file hands the blanks to the container, and
+    # /readyz said "configured" for keys that were empty strings.
+    from aioc.api.readiness import default_checks
+    from aioc.llm import LLMSettings
+    from aioc.observability.tracing import TracingSettings
+    from aioc.retrieval import EmbeddingSettings
+
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "VOYAGE_API_KEY",
+    ):
+        monkeypatch.setenv(name, "  ")
+    assert LLMSettings().anthropic_api_key is None
+    assert not TracingSettings().configured
+    assert EmbeddingSettings().voyage_api_key is None
+
+    checks = {check.name: check for check in (run() for run in default_checks("x", "y")[1:3])}
+    assert (
+        not checks["anthropic"].ok and "ANTHROPIC_API_KEY is not set" in checks["anthropic"].detail
+    )
+    assert not checks["langfuse"].ok

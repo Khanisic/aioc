@@ -47,6 +47,9 @@ POSTGRES_PORT=55432
 DATABASE_URL=postgresql://aioc:aioc_dev_only@localhost:55432/aioc
 ```
 
+Exporting the same two variables in your shell works too; an exported variable wins over `.env`.
+The integration tests say exactly this when they skip for this reason.
+
 ## 3. The offline tour ($0, no key)
 
 **The test suite.** Over a thousand tests, with no network and no API key:

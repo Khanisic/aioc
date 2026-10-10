@@ -25,7 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from aioc.contracts import ToolCallRef
@@ -53,6 +53,16 @@ class TracingSettings(BaseSettings):
 
     public_key: SecretStr | None = Field(default=None, validation_alias="LANGFUSE_PUBLIC_KEY")
     secret_key: SecretStr | None = Field(default=None, validation_alias="LANGFUSE_SECRET_KEY")
+
+    @field_validator("public_key", "secret_key", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # `.env.example` ships the `LANGFUSE_*` keys blank and compose's env_file passes the
+        # blank on: an empty string is a key nobody set (the Day 25 fresh-clone test).
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     host: str = Field(default="https://cloud.langfuse.com", validation_alias="LANGFUSE_HOST")
 
     @property
