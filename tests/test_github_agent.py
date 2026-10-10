@@ -359,7 +359,11 @@ def test_context_is_passed_explicitly_and_the_emit_call_is_forced():
     assert "tool_choice" not in first or first["tool_choice"] is None
 
     emit = messages.calls[2]
-    assert emit["tool_choice"] == {"type": "tool", "name": GITHUB_EMIT_TOOL_NAME}
+    assert emit["tool_choice"] == {
+        "type": "tool",
+        "name": GITHUB_EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert GITHUB_EMIT_TOOL_NAME in {t["name"] for t in emit["tools"]}
     # The whole investigation (assistant turns + tool results) precedes the emit request.
     roles = [m["role"] for m in emit["messages"]]

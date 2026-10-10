@@ -132,7 +132,11 @@ def test_plan_forces_the_select_tool_with_the_selection_prompt():
     call = messages.calls[0]
 
     assert system_text(call["system"]) == SELECTION_SYSTEM_PROMPT
-    assert call["tool_choice"] == {"type": "tool", "name": SELECT_TOOL_NAME}
+    assert call["tool_choice"] == {
+        "type": "tool",
+        "name": SELECT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert [t["name"] for t in call["tools"]] == [SELECT_TOOL_NAME]
 
 

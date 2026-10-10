@@ -102,7 +102,11 @@ def test_a_format_rejection_is_re_requested_with_the_error_attached_and_recovers
     assert "findings.root_cause" in block["content"]  # the field the contract named
     assert "attempt(s) remain" in block["content"]
     assert "shape problem" in block["content"]  # format advice, not grounding advice
-    assert retry["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    assert retry["tool_choice"] == {
+        "type": "tool",
+        "name": EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert retry["system"] == messages.calls[0]["system"]
 
     (record,) = log.records
@@ -112,6 +116,41 @@ def test_a_format_rejection_is_re_requested_with_the_error_attached_and_recovers
     assert record.rejections[0].error_type == "ValidationError"
     assert record.request_id == "req_1" and record.invocation_id == "inv_1"
     assert record.accepted and record.stopped_by is None
+
+
+def test_every_forced_emit_asks_for_exactly_one_call():
+    # A forced tool_choice alone still allows parallel calls of the forced tool; the Day 24
+    # batch re-run got a Docs report emitted twice in one turn.
+    agent, messages = _incident(
+        [inc._tool_use_message(_broken_incident()), inc._tool_use_message(inc._STRUCTURED_PAYLOAD)]
+    )
+    agent.diagnose("q", context=inc._CONTEXT)
+    for call in messages.calls:
+        assert call["tool_choice"] == {
+            "type": "tool",
+            "name": EMIT_TOOL_NAME,
+            "disable_parallel_tool_use": True,
+        }
+
+
+def test_a_retry_answers_every_tool_use_in_the_refused_turn():
+    # The Day 24 re-run, reproduced: two emit calls in one turn, the report refused, and
+    # the retry answered only the first id - the API refused the whole conversation
+    # (messages.2: tool_use ids were found without tool_result blocks). The scripted
+    # client enforces the pairing rule, so a retry that misses one fails here first.
+    doubled = inc._tool_use_message(_broken_incident())
+    doubled.content = [
+        ToolUseBlock(type="tool_use", id="toolu_1", name=EMIT_TOOL_NAME, input=_broken_incident()),
+        ToolUseBlock(type="tool_use", id="toolu_2", name=EMIT_TOOL_NAME, input=_broken_incident()),
+    ]
+    agent, messages = _incident([doubled, inc._tool_use_message(inc._STRUCTURED_PAYLOAD)])
+    assert isinstance(agent.diagnose("q", context=inc._CONTEXT), IncidentAgentResponse)
+
+    first, second = messages.calls[1]["messages"][-1]["content"]
+    assert (first["tool_use_id"], first["is_error"]) == ("toolu_1", True)
+    assert "validation error" in first["content"]
+    assert (second["tool_use_id"], second["is_error"]) == ("toolu_2", True)
+    assert "only the first report in a turn is read" in second["content"]
 
 
 def test_a_grounding_rejection_tells_the_model_an_honest_gap_is_the_answer():
@@ -315,7 +354,11 @@ def test_a_forced_emit_retry_answers_the_refused_tool_use_and_keeps_the_data_too
     block = _tool_result_block(retry)
     assert block["tool_use_id"] == "toolu_emit" and block["is_error"] is True
     assert "does not appear verbatim" in block["content"]
-    assert retry["tool_choice"] == {"type": "tool", "name": GITHUB_EMIT_TOOL_NAME}
+    assert retry["tool_choice"] == {
+        "type": "tool",
+        "name": GITHUB_EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     # The data tools stay defined so the earlier tool_use turns in the history stay valid,
     # and no data tool ran again: the wire calls are the loop's, not the retry's.
     assert {t["name"] for t in retry["tools"]} >= {"get_pull_request", GITHUB_EMIT_TOOL_NAME}

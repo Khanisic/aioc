@@ -256,7 +256,11 @@ def test_the_model_form_is_one_forced_call_over_the_digests_and_counts_its_token
     assert (usage.input_tokens, usage.output_tokens) == (640, 120)
     (call,) = messages.calls
     assert system_text(call["system"]) == SYNTHESIS_SYSTEM_PROMPT
-    assert call["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    assert call["tool_choice"] == {
+        "type": "tool",
+        "name": EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert [t["name"] for t in call["tools"]] == [EMIT_TOOL_NAME]
     assert call["messages"][0]["content"] == render_prompt(_request())
 
@@ -344,7 +348,11 @@ def test_a_synthesis_missing_its_answer_is_re_requested_and_recovered():
     assert result.answer.value is not None and result.answer.evidence == ["ev_1"]
     assert usage.input_tokens == 2 * 640  # the refused attempt still cost
     retry = messages.calls[1]
-    assert retry["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    assert retry["tool_choice"] == {
+        "type": "tool",
+        "name": EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     feedback = retry["messages"][-1]["content"][0]
     assert feedback["tool_use_id"] == "toolu_1" and feedback["is_error"] is True
     assert "answer: Field required" in feedback["content"]

@@ -373,7 +373,11 @@ def test_the_agent_runs_unchanged_and_answers_on_the_second_pass():
     assert [r.outcome for r in log.records] == ["accepted"]
     # What went out is the agent's own forced emit.
     (request,) = batches.created[0]
-    assert request["params"]["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    assert request["params"]["tool_choice"] == {
+        "type": "tool",
+        "name": EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert request["custom_id"] == request_key(request["params"])
 
 
