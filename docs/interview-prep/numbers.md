@@ -677,9 +677,21 @@ Four agents on one query (the Day 21 run, Sonnet 5 for both roles, $0.74 measure
 |---|---|
 | Offline suite | 1084 passed with the stack up (1067 without Docker) |
 
-## Day 24 - the deployable service, rehearsed locally ($0 so far); the eval re-run in the queue
+## Day 24 - the deployable service, rehearsed locally ($0); the eval re-run ($0.87)
 
-**The eval re-run is submitted and not yet scored.** Batch `msgbatch_01CuGsixLyyEL2nUfVLtZFEr`, all 38 items, Sonnet 5, batch cached (the Day 20 baseline's $0.71 configuration), submitted 2026-10-07 16:35 UTC with `--detach`; checked once, `in_progress`. How to finish it: `docs/guides/detached-batch-eval.md`. Its numbers go here when it ends.
+**The eval re-run, against the Day 20 batch-cached run** (`evaluations/day24-vs-baseline.md`; the report is `evaluations/results/day24-batch-cached.md`). Same set, model, and configuration; the 18 diagnoses sent requests byte-identical to Day 20 and the 20 recalls carry only the Day 22 reordering, so this measures the noise floor more than any change.
+
+| | Day 20 | Day 24 |
+|---|---|---|
+| Failure mode correct | 17/18 | 16/18 (`case_06` flipped; it was one of Day 20's three noisy items) |
+| Severity exact / within one | 12/18 / 18/18 | 10/18 / 18/18 |
+| Recall cites its post-mortem | 18/18 | 18/18 |
+| Ungrounded statements | 1/291 | 4/298 (four invented service names in two diagnoses) |
+| Recovered by a retry / retry calls | 7 / 8 | 10 / 10 |
+| Input / output tokens | 383,829 / 106,482 | 406,387 / 117,875 |
+| Paid | $0.71 | $0.87 |
+
+The extra tokens are the two extra retry calls, each a whole conversation re-sent; the requests themselves did not grow. The run spanned five batches from 2026-10-07 to 2026-10-10 (the report's "5 s" wall clock is the last read-back only), because reading it back found two harness bugs, both fixed first: a stopped database scored as the Docs agent's failure, and a report emitted twice in one turn whose retry the API refused. `case_10:recall`'s first request therefore carries `disable_parallel_tool_use`, which Day 20's did not.
 
 The service in a container on this machine (`docs/design-notes/deployment.md`), zero Claude calls:
 

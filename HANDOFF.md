@@ -14,17 +14,11 @@ MCP tool servers got no settings in a container (no `.env` there; fixed in
 fresh-clone tested), and screenshots wait on the Chrome extension being connected (Langfuse
 needs the owner's logged-in browser).
 
-**The Day 24 eval re-run is one item from done.** 37 of 38 scored across five batches; the last
-retry is `msgbatch_016oEJSz9wBRXUjyg5G2BhwD`. Two harness bugs it found are fixed: a stopped
-database scored as the Docs agent's failure (now `CorpusUnavailable`, which stops the run), and
-a report emitted twice in one turn broke the retry (forced emits now send
-`disable_parallel_tool_use`, and a retry answers every `tool_use`). Start the stack, then:
-
-```
-uv run python scripts/run_evals.py --mode batch --detach --resume test-results/runs/2026-10-10/20261010T035400Z__llm__evals-batch
-```
-
-When it prints the report, the work is §6 item 1.
+**The Day 24 eval re-run is done and committed** (2026-10-10, $0.87): 16/18 failure modes,
+18/18 recalls, against Day 20's 17/18 and 18/18; `evaluations/day24-vs-baseline.md`. Reading it
+back found two harness bugs, both fixed: a stopped database scored as the Docs agent's failure
+(now `CorpusUnavailable`, which stops the run), and a report emitted twice in one turn broke the
+retry (forced emits send `disable_parallel_tool_use`; a retry answers every `tool_use`).
 
 Day 24B is done as **config only** (owner's choice: no host yet): the orchestrator is an HTTP
 service (`aioc.api`, requests as jobs, closed until `AIOC_API_TOKEN` is set, a free `smoke`
