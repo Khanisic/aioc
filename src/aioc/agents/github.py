@@ -63,7 +63,7 @@ from aioc.tools.github.api import GitHubSettings
 from ._annotate import ROOT, apply_guidance
 from ._retry import RejectionKind, ReportRejected, RetryLog, default_retry_log, emit_with_retry
 from ._status import settle_status
-from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
+from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id, server_env
 from .incident import _CONFIDENCE_BANDS
 
 __all__ = ["GitHubAgent", "GitHubAgentError", "GitHubReport", "Toolset", "ToolsetFactory"]
@@ -383,7 +383,7 @@ _EMIT_TOOL = ToolSpec(
 
 def default_toolset() -> AbstractContextManager[Toolset]:
     """The real thing: the `aioc-github` stdio server, launched in this interpreter."""
-    return McpStdioToolset.for_module(GITHUB_SERVER_MODULE)
+    return McpStdioToolset.for_module(GITHUB_SERVER_MODULE, env=server_env(GitHubSettings))
 
 
 # ---------------------------------------------------------------------------- the ledger
