@@ -81,9 +81,10 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 
 ## 3. Where the code is
 
-**`origin/main` holds everything through Day 22 (merged 2026-10-02, PR #26).** `khanisic/main`
-was fast-forwarded to match on 2026-10-06. Day 23 is the branch `d23-handoffs-routing`,
-branched from that `main`.
+**`origin/main` holds everything through Day 25 (merged 2026-10-10, PR #29).** `khanisic/main`
+was fast-forwarded to match the same day. Day 26 is the branch `d26-evidence`, branched from
+that `main`. Day 23 was PR #27; Days 24-25 were PRs #28 and #29 from one branch,
+`d24-measure-deploy` (deleted on GitHub after each merge, pushed again for the second).
 
 - How Day 17 got there is worth knowing: PR #20 was merged 26 seconds after #19, before
   GitHub had retargeted it, and landed on `d16-schemas-hitl` instead of `main`. #21 carried
@@ -337,6 +338,12 @@ coordinator prompt change. Remember `make chaos-reset` (or
 The owner's direction (2026-10-10): local only, with instructions to run it, screenshots, and
 video. All free from here unless a step says otherwise.
 
+0. **Day 26 done so far (2026-10-10, branch `d26-evidence`):** the README's CCA-F domain
+   evidence (per domain: code, the test or number that proves it, the design note), a Mermaid
+   architecture diagram under "How it fits together" (rendered to `docs/assets/architecture.png`
+   with `npx -y @mermaid-js/mermaid-cli@11.4.2 -i <block>.mmd -o architecture.png -w 1400 -b white`;
+   re-render after editing the README block), and the eval tables in the README. Left: the
+   screenshots below (the extension was not connected, and Docker Desktop was not running).
 1. **Screenshots** (Day 26). Need the Claude in Chrome extension connected, and the owner logged
    into Langfuse in that browser (never sign in for them). Wanted, into `docs/assets/`: the
    Day 25 trace (`https://us.cloud.langfuse.com/project/cmry520x401voad0ixr23h7wu/traces/ac21f86e1a369f336f3727510e9b4d05`:

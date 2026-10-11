@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 25 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
+> **Status: Day 26 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -41,6 +41,53 @@ four agents inside its container: the PR touched tracing code only, the release 
 configuration or image, the latency comes from payments-api downstream, and every
 recommended action is withheld by the approval gate. The same scenario run in process on
 Day 15 is [`day15-demo.gif`](docs/assets/day15-demo.gif).*
+
+---
+
+## How it fits together
+
+```mermaid
+flowchart TB
+    PROM[("Prometheus<br/>demo app metrics")] -->|situation block| Q["Operational query"]
+    Q --> API["HTTP service · POST /v1/requests"]
+    API --> P
+
+    subgraph REASON["Reasoning Layer"]
+        direction TB
+        P["Planner<br/>select or skip each agent, write its context"] --> X["Executor"]
+        X -->|parallel| INC["Incident"]
+        X -->|parallel| DOC["Docs"]
+        X -->|parallel| GH["GitHub"]
+        GH -->|"digest, sequential"| DEP["Deployment"]
+        INC --> RESP["AgentResponses + gaps"]
+        DOC --> RESP
+        GH --> RESP
+        DEP --> RESP
+        RESP -->|"resolvable gaps: re-delegate, capped"| X
+        RESP --> S["Synthesis, grounded in evidence ids"]
+    end
+
+
+    GH -->|MCP tool_use| GHT["aioc-github MCP server<br/>get_pull_request · list_commits · diff_refs"]
+    DOC -->|hybrid retrieval| PG[("Postgres + pgvector<br/>incident corpus")]
+    INT["aioc-incident-timeline · aioc-incident-correlate · aioc-search<br/>standalone MCP servers, for any client"] --> PG
+    DEP -->|MCP tool_use| DPT["aioc-deployment MCP server<br/>diff_release · check_rollout_health"]
+
+    S --> G["HITL gate, fail-closed"]
+    G --> AUD[("Append-only audit log")]
+    G --> OUT["CoordinatorResponse<br/>schema 1.1.0 · cost · trace_id"]
+    X -.->|spans| LF[("Langfuse")]
+
+    classDef platform fill:#e8f4ea,stroke:#3a7d44
+    class GHT,DPT,INT platform
+```
+
+The two layers meet at a frozen JSON contract ([`docs/CONTRACTS.md`](docs/CONTRACTS.md)): Pydantic models on the reasoning side, JSON Schema across the MCP boundary.
+Every arrow into an agent carries an explicit context block, and nothing is inherited.
+The Incident agent has no tools: its live metrics arrive in the situation block the caller builds from Prometheus.
+The GitHub and Deployment agents drive their servers over the real stdio wire; those servers read the GitHub API and, for rollout health, Prometheus.
+The incident tool servers stand alone, for any MCP client: no agent drives them yet, and the two search tools are what the routing case study measures.
+[`docs/assets/architecture.png`](docs/assets/architecture.png) is this diagram rendered, for slides and the video.
 
 ---
 
@@ -224,13 +271,87 @@ for why each piece sits where it does.
 
 ## CCA-F domain evidence
 
-<!-- Day 26: domain → implementing module → design note. -->
-*Filled in on Day 26, once there is something to point at.*
+Each domain below names the decision, the code that implements it, the test or measurement that proves it, and where the reasoning is written down.
+Decision numbers refer to [`docs/interview-prep/decisions.md`](docs/interview-prep/decisions.md); measured numbers come from [`numbers.md`](docs/interview-prep/numbers.md).
 
 | Domain | Weight | Implemented in | Design note |
 |---|---|---|---|
-| 1 - Agentic Architecture & Orchestration | 27% | - | - |
-| 2 - Tool Design & MCP Integration | 18% | - | - |
-| 3 - Claude Code Configuration & Workflows | 20% | - | - |
-| 4 - Prompt Engineering & Structured Output | 20% | - | - |
-| 5 - Context Management & Reliability | 15% | - | - |
+| 1 - Agentic Architecture & Orchestration | 27% | [`src/aioc/coordinator/`](src/aioc/coordinator/) | decisions #3, #11, #15, #20, #22, #23, #28 |
+| 2 - Tool Design & MCP Integration | 18% | [`src/aioc/tools/`](src/aioc/tools/), [`src/aioc/llm/mcp.py`](src/aioc/llm/mcp.py) | [`case-study-tool-routing.md`](docs/case-study-tool-routing.md), [`contract-changes.md`](docs/design-notes/contract-changes.md) |
+| 3 - Claude Code Configuration & Workflows | 20% | [`.claude/`](.claude/), [`.github/workflows/`](.github/workflows/), [`.github/claude/review.md`](.github/claude/review.md) | [`domain-3-config-layer.md`](docs/design-notes/domain-3-config-layer.md), [`review-prompt-tuning.md`](docs/design-notes/review-prompt-tuning.md) |
+| 4 - Prompt Engineering & Structured Output | 20% | [`src/aioc/agents/`](src/aioc/agents/), [`src/aioc/contracts/`](src/aioc/contracts/), [`src/aioc/evals/`](src/aioc/evals/) | [`CONTRACTS.md`](docs/CONTRACTS.md), decisions #2, #13, #21, #30, #34 |
+| 5 - Context Management & Reliability | 15% | [`handoff.py`](src/aioc/coordinator/handoff.py), [`confidence.py`](src/aioc/coordinator/confidence.py), [`provenance.py`](src/aioc/coordinator/provenance.py), [`src/aioc/hitl/`](src/aioc/hitl/), [`src/aioc/llm/`](src/aioc/llm/) | decisions #25, #29, #31-#33, #35, #40, #43, [`model-routing.md`](docs/design-notes/model-routing.md) |
+
+### Domain 1 - Agentic Architecture & Orchestration
+
+A coordinator plans which of the four agents a query needs, then executes that plan.
+
+- **Dynamic selection.** [`planner.py`](src/aioc/coordinator/planner.py) must account for all four agents: each is selected, or skipped with a reason, enforced by validators rather than prompt text (`test_plan_rejects_an_agent_that_is_neither_selected_nor_skipped` in [`tests/test_coordinator.py`](tests/test_coordinator.py)).
+- **Explicit context passing.** Each agent receives `context_passed` and nothing else, and an empty context or one that only restates the query is a validation error (`test_subagent_receives_exactly_context_passed_and_nothing_else` in [`tests/test_executor.py`](tests/test_executor.py), `test_plan_rejects_context_that_only_restates_the_query`).
+- **Parallel and sequential.** [`executor.py`](src/aioc/coordinator/executor.py) runs independent agents on a thread pool and dependent ones in order, each dependent handed a bounded digest of its dependency ([`handoff.py`](src/aioc/coordinator/handoff.py)) that is recorded verbatim on the invocation.
+  A barrier test fails if the parallel group runs serially (`test_parallel_group_runs_concurrently`), and on the Day 25 run every pair in the parallel group overlapped in the Langfuse trace.
+- **Refinement loop.** Open gaps that are `resolvable` and name a `suggested_agent` are re-delegated with their `suggested_query` verbatim, capped in rounds, and the same gap is never asked twice ([`tests/test_refinement.py`](tests/test_refinement.py)).
+  An agent that does not exist yields a `resolvable: false` gap, never a fabricated report.
+- **Synthesis as a seam.** The deterministic synthesis is the default; the model-written one is grounded in code against the agents' evidence ids and falls back to the deterministic form when rejected ([`synthesis.py`](src/aioc/coordinator/synthesis.py)).
+
+### Domain 2 - Tool Design & MCP Integration
+
+Six contract-named tools run as real stdio MCP servers, and two agents consume them over the wire.
+
+- **Servers.** [`tools/incident/`](src/aioc/tools/incident/), [`tools/github/`](src/aioc/tools/github/), and [`tools/deployment/`](src/aioc/tools/deployment/) share one wire envelope ([`envelope.py`](src/aioc/tools/envelope.py)).
+  They do not import the Pydantic models, because the MCP boundary is JSON Schema; a test holds their enum copies to the Python ones.
+- **Four error classes.** `transient`, `validation`, `business`, and `permission` are each produced from a real code path and returned distinctly (`test_all_four_error_classes_return_distinctly`, in each tool's test module).
+- **Descriptions.** Every tool description follows the four-part template: what it does, three example queries, edge cases, and when to use it instead of the named alternative.
+- **The routing case study.** `analyze_logs` and `analyze_events` shipped deliberately overlapping, were measured, then split into `search_container_logs` and `search_recorded_events` through the contract's change process.
+  The result was 0/40 misrouted before and after with Sonnet, and [the write-up](docs/case-study-tool-routing.md) says what that does and does not show.
+- **Safety at the tool.** Config values are hashed at parse time and only keys are returned ([`release.py`](src/aioc/tools/deployment/release.py)), and the chaos ground truth is a `permission` error at every server ([`policy.py`](src/aioc/tools/policy.py)).
+
+### Domain 3 - Claude Code Configuration & Workflows
+
+The configuration is committed on purpose: it is the evidence, not local scratch.
+
+- **Configuration.** A user, project, and directory `CLAUDE.md` hierarchy; seven path-scoped rules in [`.claude/rules/`](.claude/rules/); the `/contract` and `/validate-schema` commands; the `contract-audit` skill running read-only in a forked context; and [`.claude/settings.json`](.claude/settings.json) as the shared permission layer, where destructive commands ask and secrets are unreadable.
+- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,122 tests on every pull request, with no secrets and no network.
+- **Claude Code on pull requests.** [`claude-review.yml`](.github/workflows/claude-review.yml) runs a review or writes tests when a pull request is labelled.
+  The review prompt names this repository's defect classes and allows "No defects found.", and generated tests are pushed only when they touch `tests/` alone and the suite passes.
+  The prompt was tuned on scored local reviews.
+
+### Domain 4 - Prompt Engineering & Structured Output
+
+Every agent returns a contract-valid `AgentResponse` through a forced `tool_use`, never through parsed prose.
+
+- **Schemas.** The emit tool's JSON Schema is generated from the frozen models and annotated with the cross-field rules a shape cannot state ([`_annotate.py`](src/aioc/agents/_annotate.py)): `null` versus `[]`, the `other` enum with its detail string, and the confidence bands, with a gap instead of a guess below 0.25.
+- **The runtime owns facts.** Titles, SHAs, config keys, and health signals are stamped from tool replies, and a citation retrieval never returned or a paraphrased quote is refused in code ([`docs.py`](src/aioc/agents/docs.py), [`_toolset.py`](src/aioc/agents/_toolset.py)).
+- **Validation-retry loop.** A refused report is answered in the same conversation with the rendered error, and the loop records whether each rejection was a format error or a grounding error ([`_retry.py`](src/aioc/agents/_retry.py)).
+  In the Day 20 batch baseline, 7 of 38 items were recovered by a retry and none were given up on.
+- **Evals.** [`src/aioc/evals/`](src/aioc/evals/) scores the shipped agents against the seeded incidents' recorded truth, read from the seed SQL, and a case whose context carries its own answer is refused at load.
+  The results are below.
+
+### Domain 5 - Context Management & Reliability
+
+- **Context engineering.** Handoffs are bounded digests that keep the evidence ids when they cut.
+  Tool replies are trimmed at the tool by extracting facts, -34% on the commit-bearing replies ([`commits.py`](src/aioc/tools/github/commits.py)).
+  Every prompt puts stable reference first and the freshest signals and the query last.
+- **Cost.** Prompt caching on the system block and the tool loop's tail took 29% off the same tokens and the Batch API 61% ([`evaluations/baseline.md`](evaluations/baseline.md)).
+  The four-agent run went from $1.16 to $0.74 with caching and the sibling roster.
+- **Provenance and confidence.** Every Docs claim traces to the retrieval call behind it and every unanswered sub-question to its gap, and every judgement is read back with its band and flagged where it claims more than it cites ([`provenance.py`](src/aioc/coordinator/provenance.py), [`confidence.py`](src/aioc/coordinator/confidence.py)).
+- **Human in the loop.** Every recommended production write passes a fail-closed approval gate, and every decision is written to an append-only Postgres table before it is returned ([`src/aioc/hitl/`](src/aioc/hitl/)).
+
+### Measured results
+
+The eval set is 38 items over the 18 seeded incidents: each one as a diagnosis by the Incident agent and as a recall of its post-mortem by the Docs agent, plus two probes with no precedent.
+Run three ways on `claude-sonnet-5` (Day 20, [`evaluations/baseline.md`](evaluations/baseline.md)):
+
+| | realtime, uncached | realtime, cached | batch, cached |
+|---|---|---|---|
+| Failure mode correct | 15/18 | 16/18 | 17/18 |
+| Severity within one level | 18/18 | 18/18 | 18/18 |
+| Recall cites the post-mortem | 18/18 | 18/18 | 18/18 |
+| Probes declined, no precedent invented | 1/1 | 2/2 | 2/2 |
+| Ungrounded statements | 2/270 | 1/271 | 1/291 |
+| Paid | $1.77 | $1.24 | $0.71 |
+| Same tokens, against realtime uncached | - | -29% | -61% |
+
+35 of the 38 items scored the same in every run, so the differences in the first row are the model answering identical requests differently, not the levers.
+The Day 24 re-run ([`evaluations/day24-vs-baseline.md`](evaluations/day24-vs-baseline.md)) scored 16/18 and 18/18, within that noise.
+What is not measured yet is listed plainly at the end of [`numbers.md`](docs/interview-prep/numbers.md#what-is-not-measured-yet).
