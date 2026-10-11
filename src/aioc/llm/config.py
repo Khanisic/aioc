@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Role = Literal["coordinator", "subagent"]
@@ -39,6 +39,16 @@ class LLMSettings(BaseSettings):
     )
 
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # `.env.example` ships `ANTHROPIC_API_KEY=` blank and compose's env_file passes the
+        # blank on: an empty string is a key nobody set (the Day 25 fresh-clone test).
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     # Sonnet rather than Opus: measured by scripts/check_structured_output.py, it is the cheapest
     # model that returns a contract-valid IncidentAgentResponse on the first try (Haiku still
     # breaks the timeline ordering invariant). Both roles run it unless overridden below; the

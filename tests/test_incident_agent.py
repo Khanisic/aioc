@@ -304,7 +304,11 @@ def test_diagnose_forces_the_emit_tool_with_the_structured_prompt():
     call = messages.calls[0]
 
     assert system_text(call["system"]) == INCIDENT_STRUCTURED_SYSTEM_PROMPT
-    assert call["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    assert call["tool_choice"] == {
+        "type": "tool",
+        "name": EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert [t["name"] for t in call["tools"]] == [EMIT_TOOL_NAME]
     # Context is still passed explicitly - the Day 3 invariant holds on the structured path.
     assert _CONTEXT in call["messages"][0]["content"]

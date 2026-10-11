@@ -70,7 +70,7 @@ verify: ## Stack usable: pgvector present, redis answering, demo app exposing me
 		&& echo "OK   inventory-api exposing metrics" || (echo "FAIL inventory-api metrics missing" && exit 1)
 	@$(COMPOSE) exec -T checkout-api python -c "import urllib.request; assert b'service_build_info' in urllib.request.urlopen('http://localhost:8000/metrics', timeout=5).read()" \
 		&& echo "OK   demo image exports service_build_info (Day 12)" || (echo "FAIL service_build_info missing - stale demo image; docker compose up -d --build" && exit 1)
-	@$(COMPOSE) exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/query?query=up{job=\"demo-app\"}' \
+	@$(COMPOSE) exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22demo-app%22%7D' \
 		| grep -q '"value"' && echo "OK   prometheus scraping demo-app" || (echo "FAIL prometheus not scraping demo-app" && exit 1)
 	@$(PSQL) -tAc "SELECT count(*) FROM incidents" 2>/dev/null | grep -qE '^1[5-9]|^20$$' \
 		&& echo "OK   incident corpus seeded" \

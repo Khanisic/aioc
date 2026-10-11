@@ -277,9 +277,11 @@ def emit_with_retry[T](
         raise ValueError("max_retries must be >= 0")
     convo: list[MessageParam] = list(messages)
     rejections: list[Rejection] = []
-    pending: str | None
+    # The ``tool_use`` ids of the last assistant turn, the report read from the first. Every
+    # one needs its ``tool_result`` in the next user turn, or the API refuses the request.
+    pending: list[str]
     if captured is not None:
-        payload, pending = captured, None
+        payload, pending = captured, []
     else:
         payload, pending = _request(
             client,
@@ -329,22 +331,10 @@ def emit_with_retry[T](
                 remaining=max_retries - attempt + 1,
                 grounding_advice=grounding_advice,
             )
-            if pending is None:
+            if not pending:
                 convo.append({"role": "user", "content": feedback})
             else:
-                convo.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": pending,
-                                "content": feedback,
-                                "is_error": True,
-                            }
-                        ],
-                    }
-                )
+                convo.append({"role": "user", "content": _answers(pending, feedback)})
             payload, pending = _request(
                 client,
                 convo,
@@ -379,14 +369,15 @@ def _request(
     emit_tool: str,
     error_type: type[ReportRejected],
     usage: Usage | None,
-) -> tuple[dict[str, Any], str]:
+) -> tuple[dict[str, Any], list[str]]:
     """One forced call. Appends the assistant turn to ``convo`` and returns the payload
-    with the ``tool_use`` id a retry must answer."""
+    with every ``tool_use`` id in that turn, all of which a retry must answer."""
     resp = client.complete(
         messages=convo,
         system=system,
         tools=tools,
-        tool_choice={"type": "tool", "name": emit_tool},
+        # Forcing the tool does not stop the model calling it twice in one turn.
+        tool_choice={"type": "tool", "name": emit_tool, "disable_parallel_tool_use": True},
     )
     if usage is not None:
         usage.record(resp.usage)
@@ -401,7 +392,25 @@ def _request(
         )
     block = _emit_block(resp, emit_tool, error_type)
     convo.append(cast("MessageParam", {"role": "assistant", "content": resp.content}))
-    return dict(block.input), block.id
+    others = [b.id for b in resp.content if isinstance(b, ToolUseBlock) and b.id != block.id]
+    return dict(block.input), [block.id, *others]
+
+
+_NOT_READ = "Not read: only the first report in a turn is read. Emit the report once."
+
+
+def _answers(pending: Sequence[str], feedback: str) -> list[Any]:
+    """The retry turn: the rejection on the call whose report was read, and a plain
+    refusal on any other call the model made in the same turn."""
+    return [
+        {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": feedback if index == 0 else _NOT_READ,
+            "is_error": True,
+        }
+        for index, tool_use_id in enumerate(pending)
+    ]
 
 
 def _emit_block(resp: Message, emit_tool: str, error_type: type[ReportRejected]) -> ToolUseBlock:

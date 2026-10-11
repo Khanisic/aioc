@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import Any
 
 import pytest
 
@@ -216,3 +217,64 @@ def test_a_closed_toolset_refuses_calls():
         pass
     with pytest.raises(McpToolsetError, match="not open"):
         ts.call("list_commits", {})
+
+
+# ------------------------------------------------- what an agent's server is started with
+
+
+def _launched_env(monkeypatch: pytest.MonkeyPatch, factory: Any) -> dict[str, str]:
+    seen: dict[str, Any] = {}
+
+    def capture(module: str, *, env: dict[str, str] | None = None, **_: Any) -> Any:
+        seen["env"] = env
+        return None
+
+    monkeypatch.setattr(McpStdioToolset, "for_module", staticmethod(capture))
+    factory()
+    assert seen["env"] is not None, "no env means the MCP client's six-variable default"
+    return dict(seen["env"])
+
+
+def test_each_agent_hands_its_server_the_settings_it_reads_and_nothing_else(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The first Day 25 run through the service container: without an explicit env the MCP
+    # client starts a server with HOME, PATH, SHELL, TERM, USER, and LOGNAME only. Locally
+    # each server reads the repository's .env itself; the image has none, so the GitHub and
+    # Deployment servers ran with no repository, no token, and the wrong Prometheus.
+    from aioc.agents import deployment, github
+
+    values = {
+        "GITHUB_TOKEN": "ghp_from_env",
+        "GITHUB_REPO": "owner/from-env",
+        "PROMETHEUS_URL": "http://prometheus:9090",
+        "AIOC_ENV": "development",
+        "ANTHROPIC_API_KEY": "sk-ant-not-for-a-tool-server",
+        "LANGFUSE_SECRET_KEY": "sk-lf-not-either",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+    gh_env = _launched_env(monkeypatch, github.default_toolset)
+    assert (gh_env["GITHUB_TOKEN"], gh_env["GITHUB_REPO"]) == ("ghp_from_env", "owner/from-env")
+    assert "PROMETHEUS_URL" not in gh_env
+
+    dep_env = _launched_env(monkeypatch, deployment.default_toolset)
+    assert dep_env["GITHUB_REPO"] == "owner/from-env"
+    assert dep_env["PROMETHEUS_URL"] == "http://prometheus:9090"
+    assert dep_env["AIOC_ENV"] == "development"
+
+    for env in (gh_env, dep_env):
+        assert "ANTHROPIC_API_KEY" not in env and "LANGFUSE_SECRET_KEY" not in env
+        assert env.get("PATH") == os.environ["PATH"]  # the defaults are kept
+
+
+def test_a_setting_not_in_the_environment_is_left_for_the_server_to_read(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Locally the values live in .env, which the server reads itself; passing a blank
+    # would override that file with nothing.
+    from aioc.agents import github
+
+    monkeypatch.delenv("GITHUB_REPO", raising=False)
+    assert "GITHUB_REPO" not in _launched_env(monkeypatch, github.default_toolset)

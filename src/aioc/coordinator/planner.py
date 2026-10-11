@@ -407,7 +407,12 @@ class Coordinator:
             messages=[{"role": "user", "content": plan_prompt(query, situation)}],
             system=SELECTION_SYSTEM_PROMPT,
             tools=[_SELECT_TOOL],
-            tool_choice={"type": "tool", "name": SELECT_TOOL_NAME},
+            # One plan: a second call in the same turn would be a plan nobody reads.
+            tool_choice={
+                "type": "tool",
+                "name": SELECT_TOOL_NAME,
+                "disable_parallel_tool_use": True,
+            },
         )
         if usage is not None:
             usage.record(resp.usage)

@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 20 of 30.** All four agents run live on one query. The coordinator plans
+> **Status: Day 25 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -24,13 +24,23 @@ confidence-scored output through custom MCP tools.
 > ways: the scores agree within noise, caching takes 29% off the same tokens and the
 > batch 61%. A stopped run is continued rather than repeated, and a batch outlives the
 > process that submitted it.
+> The orchestrator also runs as a containerised HTTP service (requests as jobs, closed
+> until a token is set, live requests behind their own switch), with the schema applied as
+> migrations.
 > See [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) for what lands when.
 
-![Four agents answering one query: three in parallel, Deployment after GitHub](docs/assets/day15-demo.gif)
+**Run it yourself:** [`docs/guides/quickstart.md`](docs/guides/quickstart.md) goes from
+`git clone` to a fault injected and four agents diagnosing it. Everything up to the live
+agents costs nothing.
 
-*The Day 15 checkpoint, replayed from the run's own transcript. A real fault is injected, the
-on-call suspects the last release, and four agents show it is not the cause: the PR touched
-tracing code only, the release diff is empty, and the latency originates downstream.*
+![Four agents diagnosing a real fault through the service container](docs/assets/day25-demo.gif)
+
+*The Day 25 checkpoint, replayed from the run's own transcript. A real fault is injected, the
+on-call suspects the last release, and one request to the orchestrator's HTTP service runs
+four agents inside its container: the PR touched tracing code only, the release changed no
+configuration or image, the latency comes from payments-api downstream, and every
+recommended action is withheld by the approval gate. The same scenario run in process on
+Day 15 is [`day15-demo.gif`](docs/assets/day15-demo.gif).*
 
 ---
 
@@ -41,7 +51,7 @@ tracing code only, the release diff is empty, and the latency originates downstr
 | [`BUILD_PLAN.md`](docs/BUILD_PLAN.md) | What we're building, and why each piece exists |
 | [`EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) | Who builds it, on which day, and how we know it's done |
 | [`docs/CONTRACTS.md`](docs/CONTRACTS.md) | **Frozen.** Every data shape crossing between the two layers |
-| [`docs/guides/`](docs/guides/) | How-to guides: [running the tests](docs/guides/running-tests.md), [the incidents table](docs/guides/incidents-table.md) |
+| [`docs/guides/`](docs/guides/) | How-to guides: [quickstart](docs/guides/quickstart.md), [running the tests](docs/guides/running-tests.md), [the incidents table](docs/guides/incidents-table.md) |
 | [`docs/interview-prep/`](docs/interview-prep/README.md) | War stories, decisions, and the measured numbers behind them |
 
 `docs/CONTRACTS.md` is frozen at `1.1.0` (one pre-authorized tool split on Day 14). Changing anything in it requires a written

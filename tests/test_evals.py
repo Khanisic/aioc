@@ -1173,11 +1173,19 @@ def test_each_agent_is_handed_its_context_explicitly_and_nothing_else():
     assert diagnose["messages"][0]["content"] == (
         f"<context>\n{item.context}\n</context>\n\nOperational query: {item.query}"
     )
-    assert diagnose["tool_choice"] == {"type": "tool", "name": EMIT_TOOL_NAME}
+    assert diagnose["tool_choice"] == {
+        "type": "tool",
+        "name": EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     # The answer key stays out of the prompt: nothing but the item reaches the agent.
     assert item.incident is not None
     assert item.incident.true_root_cause not in json.dumps(diagnose, default=str)
-    assert recall["tool_choice"] == {"type": "tool", "name": DOCS_EMIT_TOOL_NAME}
+    assert recall["tool_choice"] == {
+        "type": "tool",
+        "name": DOCS_EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
     assert ITEMS["case_01:recall"].context in recall["messages"][0]["content"]
 
 

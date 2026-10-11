@@ -282,7 +282,11 @@ def test_prompt_carries_context_documents_and_query_explicitly():
     assert system == DOCS_STRUCTURED_SYSTEM_PROMPT
     assert "ONLY from the retrieved documents" in system
     assert "0.90-1.00" in system  # the CONTRACTS.md sec 2.1 band table, verbatim
-    assert call["tool_choice"] == {"type": "tool", "name": DOCS_EMIT_TOOL_NAME}
+    assert call["tool_choice"] == {
+        "type": "tool",
+        "name": DOCS_EMIT_TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
 
 
 def test_degraded_retrieval_is_surfaced_to_the_model():

@@ -1,14 +1,24 @@
 # Handoff - point a new session here
 
-Written during **Day 24** of 30 (2026-10-07). **The project spends $0 on the Anthropic API
-(§1)**, with two exceptions the owner approved: the Day 24 eval re-run (below) and, at Day 25,
-one deployed run that still needs a yes at the time.
+Written during **Day 25** of 30 (2026-10-10). **The project spends $0 on the Anthropic API
+(§1)**, with the exceptions the owner approved one at a time: the Day 24 eval re-run and the
+two Day 25 runs (below). Any further live call still needs a yes at the time.
 
-**The Day 24 eval re-run is in the Batch API queue, and nobody is waiting on it.** Batch
-`msgbatch_01CuGsixLyyEL2nUfVLtZFEr` (38 items, Sonnet 5, batch cached, ~$0.71) was submitted
-with the new `run_evals.py --mode batch --detach`; `docs/guides/detached-batch-eval.md` is the
-owner's step-by-step for checking on it and comparing it with the baseline. When the owner
-says it finished, the work is §6 item 1.
+**Day 25 passed, locally, by the owner's choice (2026-10-10).** `scripts/check_day25_service.py
+--deploy` sends the Day 15 scenario to the service container: four agents complete through
+`POST /v1/requests`, the parallel group overlapping in the Langfuse trace, the gate withholding
+every recommendation. Two live runs, $0.81 in all (owner's yes for each): the first found that
+MCP tool servers got no settings in a container (no `.env` there; fixed in
+`agents/_toolset.server_env`), the second passed. GIF: `docs/assets/day25-demo.gif`; numbers:
+`numbers.md` Day 25. Day 26-29 material is underway: `docs/guides/quickstart.md` (not yet
+fresh-clone tested), and screenshots wait on the Chrome extension being connected (Langfuse
+needs the owner's logged-in browser).
+
+**The Day 24 eval re-run is done and committed** (2026-10-10, $0.87): 16/18 failure modes,
+18/18 recalls, against Day 20's 17/18 and 18/18; `evaluations/day24-vs-baseline.md`. Reading it
+back found two harness bugs, both fixed: a stopped database scored as the Docs agent's failure
+(now `CorpusUnavailable`, which stops the run), and a report emitted twice in one turn broke the
+retry (forced emits send `disable_parallel_tool_use`; a retry answers every `tool_use`).
 
 Day 24B is done as **config only** (owner's choice: no host yet): the orchestrator is an HTTP
 service (`aioc.api`, requests as jobs, closed until `AIOC_API_TOKEN` is set, a free `smoke`
@@ -322,26 +332,31 @@ delegation check (`check_day7_delegation.py`, 2 calls) is still worth re-running
 coordinator prompt change. Remember `make chaos-reset` (or
 `uv run python demo-app/chaos/inject.py --reset`) after a demo - injected chaos persists.
 
-## 6. Next work: finish Day 24A, then Day 25
+## 6. Next work: Days 26-29, the evidence (Day 24 and Day 25 are done)
 
-1. **When the owner says the batch finished** (or to check: the one command in
-   `docs/guides/detached-batch-eval.md` sec 3, free while it is still running). The finished
-   run is the `records:` line. Then, all free: `scripts/eval_baseline.py --against
-   evaluations/baseline.json <run> --heading "Day 24 re-run against the Day 20 baseline"
-   --write evaluations/day24-vs-baseline.md`; copy its `report.md` to
-   `evaluations/results/day24-batch-cached.md`; record the numbers in `numbers.md` (Day 24
-   section, replacing "submitted and not yet scored") and here; commit. **Read it knowing what
-   changed:** the 18 diagnoses sent requests byte-identical to Day 20, so they measure the
-   noise floor; the 20 recalls carry only the Day 22 reordering (documents before context);
-   the Day 21 trimming is not in this set. A token change near zero is the expected result.
-2. **Day 25 needs a host.** The owner chose "config only" on Day 24. Everything a host needs is
-   in `docs/design-notes/deployment.md` ("What a host has to provide"): a container runtime
-   with `$PORT`, Postgres 17 with `vector`, `python -m aioc.db migrate` as the pre-deploy step,
-   and the environment. Then, free: `/readyz`, then a `smoke` request, then read its trace back
-   (allow several minutes for Langfuse). The one paid run (`mode: live`, `AIOC_API_LIVE=true`,
-   rounds 0, deterministic synthesis, ~$0.55) needs the owner's yes at the time.
-3. If no host is chosen, Day 25's checkpoint can run against the local container
-   (`docker compose --profile api up`), which is the same image; say plainly that it is local.
+The owner's direction (2026-10-10): local only, with instructions to run it, screenshots, and
+video. All free from here unless a step says otherwise.
+
+1. **Screenshots** (Day 26). Need the Claude in Chrome extension connected, and the owner logged
+   into Langfuse in that browser (never sign in for them). Wanted, into `docs/assets/`: the
+   Day 25 trace (`https://us.cloud.langfuse.com/project/cmry520x401voad0ixr23h7wu/traces/ac21f86e1a369f336f3727510e9b4d05`:
+   the three agents overlapping, then Deployment, tokens per span), Prometheus graphing the p99
+   query from `docs/guides/quickstart.md` during a `make chaos-downstream-latency`, the service's
+   `/docs` page, and the eval tables (`evaluations/baseline.md`, `day24-vs-baseline.md`).
+2. **The quickstart** (`docs/guides/quickstart.md`) was fresh-clone tested on 2026-10-10: clone to
+   a passing smoke request in about 7 minutes. It found three bugs, all fixed: `make verify`'s
+   Prometheus check had sent a backslash-escaped query since Day 3 (400 on every shell), blank
+   keys from `.env.example` read as configured (`/readyz` said "configured" for empty strings),
+   and the guide named the wrong ports. Not covered by that test: a cold database and cold image
+   pulls, because the compose file pins the volume name and this machine's data would have had
+   to go. A second machine is the Day 29 test.
+3. **Video** (Day 28). `docs/assets/day25-demo.gif` is the terminal half. The plan's structure is
+   break -> diagnose -> trace and cost -> architecture; the trace and architecture halves need
+   item 1's screenshots and a diagram.
+4. **Known and not fixed:** the executor starts the sequential chain after the whole parallel
+   group (Day 25 run 1: Deployment waited 34 s for Docs after GitHub had finished); the
+   deterministic synthesis adopts one agent's report, so the Day 25 answer is GitHub's and does
+   not name payments-api, which Incident did.
 
 **Owner decisions waiting:**
 

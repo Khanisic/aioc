@@ -677,9 +677,21 @@ Four agents on one query (the Day 21 run, Sonnet 5 for both roles, $0.74 measure
 |---|---|
 | Offline suite | 1084 passed with the stack up (1067 without Docker) |
 
-## Day 24 - the deployable service, rehearsed locally ($0 so far); the eval re-run in the queue
+## Day 24 - the deployable service, rehearsed locally ($0); the eval re-run ($0.87)
 
-**The eval re-run is submitted and not yet scored.** Batch `msgbatch_01CuGsixLyyEL2nUfVLtZFEr`, all 38 items, Sonnet 5, batch cached (the Day 20 baseline's $0.71 configuration), submitted 2026-10-07 16:35 UTC with `--detach`; checked once, `in_progress`. How to finish it: `docs/guides/detached-batch-eval.md`. Its numbers go here when it ends.
+**The eval re-run, against the Day 20 batch-cached run** (`evaluations/day24-vs-baseline.md`; the report is `evaluations/results/day24-batch-cached.md`). Same set, model, and configuration; the 18 diagnoses sent requests byte-identical to Day 20 and the 20 recalls carry only the Day 22 reordering, so this measures the noise floor more than any change.
+
+| | Day 20 | Day 24 |
+|---|---|---|
+| Failure mode correct | 17/18 | 16/18 (`case_06` flipped; it was one of Day 20's three noisy items) |
+| Severity exact / within one | 12/18 / 18/18 | 10/18 / 18/18 |
+| Recall cites its post-mortem | 18/18 | 18/18 |
+| Ungrounded statements | 1/291 | 4/298 (four invented service names in two diagnoses) |
+| Recovered by a retry / retry calls | 7 / 8 | 10 / 10 |
+| Input / output tokens | 383,829 / 106,482 | 406,387 / 117,875 |
+| Paid | $0.71 | $0.87 |
+
+The extra tokens are the two extra retry calls, each a whole conversation re-sent; the requests themselves did not grow. The run spanned five batches from 2026-10-07 to 2026-10-10 (the report's "5 s" wall clock is the last read-back only), because reading it back found two harness bugs, both fixed first: a stopped database scored as the Docs agent's failure, and a report emitted twice in one turn whose retry the API refused. `case_10:recall`'s first request therefore carries `disable_parallel_tool_use`, which Day 20's did not.
 
 The service in a container on this machine (`docs/design-notes/deployment.md`), zero Claude calls:
 
@@ -690,6 +702,30 @@ The service in a container on this machine (`docs/design-notes/deployment.md`), 
 | Its trace in Langfuse | five observations, every one with tokens in metadata (item 49 confirmed); readable after more than two minutes |
 | Schema on an empty database | 5 files applied: 18 incidents, 65 events, the audit table; a second run applied nothing |
 | Offline suite | 1140 passed with the stack up |
+
+
+## Day 25 - four agents through the service container ($0.81 of the owner's yes)
+
+The Day 15 scenario sent to `POST /v1/requests` on the local container (`scripts/check_day25_service.py --deploy`): PR #11's release deployed, `downstream_latency` injected, the situation built from live Prometheus, one `live` request with no refinement round and the deterministic synthesis.
+Local, by the owner's choice; the container is the image a host would run.
+
+| | Run 1 (failed) | Run 2 (passed) |
+|---|---|---|
+| Paid | $0.43 | $0.38 |
+| Input tokens, of which from the cache | 184,416, 112,296 (61%) | 161,164, 90,451 (56%) |
+| Output tokens | 23,411 | 19,268 |
+| Submitted to succeeded | 154 s | 111 s |
+| GitHub / Deployment | error / error: no repository, no token, default Prometheus | complete 0.85 / complete 0.70 |
+| Incident / Docs | partial 0.55 / partial 0.55 | partial 0.55 / partial 0.55 |
+| Parallel group overlapped in the trace | 3 of 3 pairs | 3 of 3 pairs |
+| Gate | 2 withheld, 1 not required | 3 withheld |
+| Trace complete in Langfuse | the script read it before the Deployment span landed | 18 s after the job ended |
+
+**What run 1 found.** The MCP client starts a tool server with six environment variables unless it is given an env; locally every server reads the repository's `.env` itself, so 1140 tests and every live run since Day 11 never saw it, and the image has no `.env`. Fixed (`agents/_toolset.server_env`: each server gets the variables its own settings read, never the Claude or Langfuse key) and checked inside the container with direct tool calls before run 2.
+
+**What the trace showed.** Deployment depends on GitHub only, but the executor starts the sequential chain after the whole parallel group: in run 1 Deployment waited 34 s for Docs after GitHub had finished. In run 2 GitHub was the slowest of the group and nothing waited.
+
+**The answer is one agent's.** The deterministic synthesis adopts the highest-confidence report, so the answer is GitHub's (the PR touched tracing code only and cannot explain the latency) and does not name payments-api, which the Incident agent did. The model-written synthesis combines them, at one more call.
 
 ---
 

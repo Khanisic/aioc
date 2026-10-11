@@ -21,11 +21,15 @@ received, so an excerpt must appear in one of them.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 from uuid import uuid4
+
+from mcp.client.stdio import get_default_environment
+from pydantic_settings import BaseSettings
 
 from aioc.contracts import ErrorClass, ToolCallRef
 from aioc.llm import ToolCallRecord, ToolSpec
@@ -182,3 +186,24 @@ class ToolLedger:
         """Whether ``excerpt`` appears verbatim in the explicit context block."""
         needle = normalise(excerpt)
         return bool(needle) and needle in self._context
+
+
+def server_env(*settings: type[BaseSettings]) -> dict[str, str]:
+    """The environment to start a tool server with: the MCP client's safe defaults plus
+    every variable the server's own settings read, where this process has it set.
+
+    Without an explicit env the MCP client passes a server six variables (``HOME``,
+    ``PATH``, ...) and nothing else. Locally that hid behind the repository's ``.env``,
+    which each server reads for itself; in a container there is no ``.env``, and the first
+    Day 25 run's GitHub and Deployment servers started with no repository, no token, and
+    the default Prometheus. Only what the settings name is passed - a tool server has no
+    use for the Claude key - and a variable this process does not have is left out, so a
+    server that can still read a ``.env`` is not handed a blank that overrides it.
+    """
+    env = get_default_environment()
+    for model in settings:
+        for field in model.model_fields.values():
+            name = field.validation_alias
+            if isinstance(name, str) and name in os.environ:
+                env[name] = os.environ[name]
+    return env

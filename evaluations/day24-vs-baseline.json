@@ -1,0 +1,208 @@
+{
+  "configuration": "batch, cached",
+  "baseline_run": "20260930T151610Z__llm__evals-batch",
+  "run": "20261010T040702Z__llm__evals-batch",
+  "models": {
+    "before": "claude-sonnet-5",
+    "after": "claude-sonnet-5"
+  },
+  "retries": {
+    "before": {
+      "accepted_first_try": 31,
+      "recovered": 7,
+      "exhausted": 0,
+      "retry_calls": 8
+    },
+    "after": {
+      "accepted_first_try": 28,
+      "recovered": 10,
+      "exhausted": 0,
+      "retry_calls": 10
+    }
+  },
+  "seconds": {
+    "before": 8217.5,
+    "after": 5.1
+  },
+  "rates": {
+    "answered": {
+      "before": {
+        "hits": 38,
+        "total": 38,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 38,
+        "total": 38,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "failure_mode": {
+      "before": {
+        "hits": 17,
+        "total": 18,
+        "rate": 0.9444444444444444
+      },
+      "after": {
+        "hits": 16,
+        "total": 18,
+        "rate": 0.8888888888888888
+      },
+      "change": -0.05555555555555558
+    },
+    "severity": {
+      "before": {
+        "hits": 12,
+        "total": 18,
+        "rate": 0.6666666666666666
+      },
+      "after": {
+        "hits": 10,
+        "total": 18,
+        "rate": 0.5555555555555556
+      },
+      "change": -0.11111111111111105
+    },
+    "severity_within_one": {
+      "before": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "recall_cited": {
+      "before": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "recall_retrieved": {
+      "before": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "probes_abstained": {
+      "before": {
+        "hits": 2,
+        "total": 2,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 2,
+        "total": 2,
+        "rate": 1.0
+      },
+      "change": 0.0
+    },
+    "ungrounded": {
+      "before": {
+        "hits": 1,
+        "total": 291,
+        "rate": 0.003436426116838488
+      },
+      "after": {
+        "hits": 4,
+        "total": 298,
+        "rate": 0.013422818791946308
+      },
+      "change": 0.00998639267510782
+    },
+    "stitched": {
+      "before": {
+        "hits": 5,
+        "total": 291,
+        "rate": 0.01718213058419244
+      },
+      "after": {
+        "hits": 6,
+        "total": 298,
+        "rate": 0.020134228187919462
+      },
+      "change": 0.0029520976037270205
+    },
+    "invented_precedents": {
+      "before": {
+        "hits": 0,
+        "total": 2,
+        "rate": 0.0
+      },
+      "after": {
+        "hits": 0,
+        "total": 2,
+        "rate": 0.0
+      },
+      "change": 0.0
+    },
+    "grounding_refusals": {
+      "before": {
+        "hits": 0,
+        "total": 38,
+        "rate": 0.0
+      },
+      "after": {
+        "hits": 0,
+        "total": 38,
+        "rate": 0.0
+      },
+      "change": 0.0
+    },
+    "tool_success": {
+      "before": {
+        "hits": 20,
+        "total": 20,
+        "rate": 1.0
+      },
+      "after": {
+        "hits": 20,
+        "total": 20,
+        "rate": 1.0
+      },
+      "change": 0.0
+    }
+  },
+  "tokens": {
+    "in": {
+      "before": 383829,
+      "after": 406387,
+      "change": 0.05877096311117711
+    },
+    "out": {
+      "before": 106482,
+      "after": 117875,
+      "change": 0.10699460941755413
+    }
+  },
+  "usd": {
+    "before": 0.7065,
+    "after": 0.8698,
+    "change": 0.2311394196744515
+  },
+  "flipped": {
+    "case_06:diagnose": {
+      "before": true,
+      "after": false
+    }
+  }
+}

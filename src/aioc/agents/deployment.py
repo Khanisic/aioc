@@ -58,11 +58,13 @@ from aioc.contracts import (
 )
 from aioc.llm import LLMClient, LLMSettings, ToolCallRecord, ToolResult, ToolSpec, Usage
 from aioc.llm.mcp import McpStdioToolset
+from aioc.tools.deployment.server import DeploymentSettings
+from aioc.tools.github.api import GitHubSettings
 
 from ._annotate import ROOT, apply_guidance
 from ._retry import RejectionKind, ReportRejected, RetryLog, default_retry_log, emit_with_retry
 from ._status import settle_status
-from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id
+from ._toolset import ToolLedger, Toolset, ToolsetFactory, new_id, server_env
 from .incident import _CONFIDENCE_BANDS
 
 __all__ = ["DeploymentAgent", "DeploymentAgentError", "DeploymentReport"]
@@ -409,7 +411,9 @@ _EMIT_TOOL = ToolSpec(
 
 def default_toolset() -> AbstractContextManager[Toolset]:
     """The real thing: the `aioc-deployment` stdio server, launched in this interpreter."""
-    return McpStdioToolset.for_module(DEPLOYMENT_SERVER_MODULE)
+    return McpStdioToolset.for_module(
+        DEPLOYMENT_SERVER_MODULE, env=server_env(GitHubSettings, DeploymentSettings)
+    )
 
 
 # ---------------------------------------------------------------------------- the ledger
