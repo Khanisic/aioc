@@ -727,6 +727,28 @@ Local, by the owner's choice; the container is the image a host would run.
 
 **The answer is one agent's.** The deterministic synthesis adopts the highest-confidence report, so the answer is GitHub's (the PR touched tracing code only and cannot explain the latency) and does not name payments-api, which the Incident agent did. The model-written synthesis combines them, at one more call.
 
+## Day 27 - the retry loop read back, the scheduler, the secrets audit ($0)
+
+**Every recorded eval run's validation retries, by agent** (each run's `eval.json`; `docs/design-notes/retry-taxonomy.md`):
+
+| Runs | Emits | Accepted first try | Recovered | Exhausted | Refused attempts, `format` / `grounding` | Retry calls |
+|---|---:|---:|---:|---:|---|---:|
+| Sonnet 5, Day 20 x3 + Day 24: Incident | 72 | 58 | 14 | 0 | 14 / 0 | 14 |
+| Sonnet 5, Day 20 x3 + Day 24: Docs | 80 | 62 | 17 | 1 | 22 / 0 | 21 |
+| Haiku 4.5, Day 23: both agents | 38 | 27 | 9 | 2 | 15 / 1 | 14 |
+
+- **Sonnet: 79% accepted first time, 31 of 32 refused reports recovered, for 23% more calls.** Every one of its 36 refusals was `format`.
+- **Every exhausted report is an abstention**: a no-precedent Docs probe answered `null` without the gap the contract requires (once in 80 for Sonnet, both probes for Haiku).
+- **The reason was not recorded** for the 33 refusals in reports a retry recovered, only the kind; an exhausted item keeps its last error. Eval items keep the message from Day 27 (decision #51).
+
+**Scheduling** (decision #50, war story #16): the Day 25 run 1 trace's 34 s of Deployment idle behind Docs is now impossible by construction; not re-measured live.
+
+**Secrets audit** (`docs/design-notes/secrets-audit.md`): 0 findings in 260 tracked files, in 98 commits on every ref of both remotes, and in 38 pull request heads.
+
+| | |
+|---|---|
+| Offline suite | 1144 passed without Docker (25 `integration` tests deselected) |
+
 ---
 
 ## What is not measured yet
@@ -738,6 +760,6 @@ Say this plainly rather than letting it be discovered:
 - **No latency aggregate, and the cost aggregate is a floor.** Langfuse traces every request (Day 9) and each response carries measured cost; since Day 15 `scripts/cost_review.py` adds the recorded runs up by check and by day, but half of them predate usage recording and nothing aggregates latency. No trace before Day 23 carries tokens per span (war story #15).
 - **Model routing is mostly a projection.** Day 23 prices every route from counted tokens; the one route measured is Haiku 4.5 for the two forced-emit agents, once. The GitHub and Deployment agents and the coordinator have run on Sonnet 5 only.
 - **Delegation is verified live on two ad-hoc queries, not a set.** The Day 7 check plus the Day 10 demo runs; the coordinator's routing check has five scored cases, delegation still has none.
-- **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run.
+- **The routing case study is 0/40 before and 0/40 after, with Sonnet.** The write-up (`docs/case-study-tool-routing.md`) names the two levers that would produce a non-zero baseline; neither has been run (Haiku as the router is about $0.11 projected). The runs are committed in `evaluations/tool-routing/`.
 - **Prompt caching in the tool loop is one run's measurement.** The Day 21 four-agent run read 62% of its input from the cache; HANDOFF item 33's claim that the forced emit after a tool loop re-reads its conversation at full price is still reasoned from the documentation, not isolated in a measurement.
 - **The Batch API's queue time is a sample of three.** 2 h 40 min, 1 h 42 min, and 45 min on one day; a batch is the cheaper lever only for work nobody is waiting on.

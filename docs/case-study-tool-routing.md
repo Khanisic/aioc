@@ -109,7 +109,8 @@ Two levers, in the order they would be pulled.
 Neither was pulled unasked: the standing rule on this project is no model matrix without a request, and each is one flag or one module away.
 
 1. **A cheaper router.** `scripts/check_tool_routing.py --model claude-haiku-4-5-20251001` runs the same forty queries through Haiku, at a fraction of Sonnet's price.
-   Haiku is also the Day 23 question (a cheaper coordinator model), so a Haiku baseline would serve two measurements.
+   Day 23 measured Haiku 4.5 as the subagents' model on the eval set and found it answers where there is an answer but cannot record that there is none (`evaluations/routing/haiku-vs-sonnet.md`); how it routes between two overlapping tools is a separate question, still open.
+   The v1 runs read 115k input tokens and wrote 5k for both sets on Sonnet 5; rescaled by the tokenizer ratios Day 23 counted (0.78 input, 0.74 output) and priced at Haiku 4.5's rates, that is about $0.11, and like every live call since Day 22 it waits on the owner's yes.
 2. **Parts 1-3 written as loosely as part 4.** A second `v1` module with a one-line part 1, generic examples, and no "what this is not" sentence in part 3 is what a hastily written real tool looks like, and it is the condition under which part 4 would be the only discriminator.
    `VARIANTS` in the script is the one place to register it.
 
@@ -130,4 +131,7 @@ uv run python scripts/check_tool_routing.py --variant v1_1            # 40 calls
 uv run python scripts/check_tool_routing.py --variant v1_1 --set hard # 20 calls
 ```
 
-Records: `test-results/runs/2026-09-13/*tool-routing-v1*` (before) and `test-results/runs/2026-09-17/*tool-routing-v1_1*` (after); each holds `queries.json`, `descriptions.json`, and `routing.json` with the per-query decisions.
+The three runs are committed under `evaluations/tool-routing/`: `v1-plain/` and `v1-hard/` (before, 2026-09-13) and `v1_1/` (after, 2026-09-17, both sets in one run).
+Each holds `run.json` (model, variant, server module, commit, hashes), `queries.json` (every question with its ground truth), `descriptions.json` (the tool descriptions exactly as the server listed them over the wire), and `routing.json` (every decision, with its tokens).
+The originals stay under `test-results/runs/` on the machine that made them, which is gitignored.
+`--dry-run` recomputes both hashes from today's script; on 2026-10-11 they still matched the table above, so the forty questions have not moved since the measurement.

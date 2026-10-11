@@ -1,8 +1,17 @@
 # Handoff - point a new session here
 
-Written during **Day 25** of 30 (2026-10-10). **The project spends $0 on the Anthropic API
+Written during **Day 27** of 30 (2026-10-11). **The project spends $0 on the Anthropic API
 (§1)**, with the exceptions the owner approved one at a time: the Day 24 eval re-run and the
 two Day 25 runs (below). Any further live call still needs a yes at the time.
+
+**Day 27 is done at $0 (2026-10-11, branch `d27-design-notes`):** the three design notes the
+plan asks for (`docs/design-notes/workflow-vs-agent.md`, `parallel-and-sequential.md`,
+`retry-taxonomy.md`), the routing case study's records committed (`evaluations/tool-routing/`),
+and the secrets audit (`scripts/audit_secrets.py`, `docs/design-notes/secrets-audit.md`: nothing
+in the tree, in 98 commits on both remotes, or in 38 PR heads; a test runs the tree scan in CI).
+Writing the notes found two defects, both fixed offline: the executor started a dependent only
+after the whole parallel group (§6 item 4's Day 25 wait; decision #50, war story #16), and eval
+items dropped each refusal's message (decision #51). Neither is re-measured live.
 
 **Day 25 passed, locally, by the owner's choice (2026-10-10).** `scripts/check_day25_service.py
 --deploy` sends the Day 15 scenario to the service container: four agents complete through
@@ -82,8 +91,8 @@ The second engineer left after Day 6. What changed in the docs, and what deliber
 ## 3. Where the code is
 
 **`origin/main` holds everything through Day 25 (merged 2026-10-10, PR #29).** `khanisic/main`
-was fast-forwarded to match the same day. Day 26 is the branch `d26-evidence`, branched from
-that `main`. Day 23 was PR #27; Days 24-25 were PRs #28 and #29 from one branch,
+was fast-forwarded to match the same day. Day 26 was PR #30 (`d26-evidence`), merged; Day 27 is the
+branch `d27-design-notes`, branched from that `main`. Day 23 was PR #27; Days 24-25 were PRs #28 and #29 from one branch,
 `d24-measure-deploy` (deleted on GitHub after each merge, pushed again for the second).
 
 - How Day 17 got there is worth knowing: PR #20 was merged 26 seconds after #19, before
@@ -286,12 +295,14 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1140 passed
+uv run pytest -q                                                   # expect 1169 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1140 passed** with the stack up on Day 24 (2026-10-07);
-without Docker Desktop the 25 `integration`-marked tests skip and it is 1115. CI runs the
+Costs nothing. Last run: **1144 passed** without the stack on Day 27 (2026-10-11), the
+offline suite CI runs; with Docker Desktop up the 25 `integration`-marked tests run too, which
+should make 1169 - not run on Day 27, Docker Desktop was down (last run with the stack: 1140 on
+Day 24). CI runs the
 latter on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
@@ -360,10 +371,18 @@ video. All free from here unless a step says otherwise.
 3. **Video** (Day 28). `docs/assets/day25-demo.gif` is the terminal half. The plan's structure is
    break -> diagnose -> trace and cost -> architecture; the trace and architecture halves need
    item 1's screenshots and a diagram.
-4. **Known and not fixed:** the executor starts the sequential chain after the whole parallel
-   group (Day 25 run 1: Deployment waited 34 s for Docs after GitHub had finished); the
-   deterministic synthesis adopts one agent's report, so the Day 25 answer is GitHub's and does
-   not name payments-api, which Incident did.
+4. **Known and not fixed:** the deterministic synthesis adopts one agent's report, so the Day 25
+   answer is GitHub's and does not name payments-api, which Incident did (the model synthesis
+   combines them; `workflow-vs-agent.md` says why it stays opt-in). *Fixed on Day 27:* the
+   executor started the sequential chain after the whole parallel group (Day 25 run 1:
+   Deployment waited 34 s for Docs); each invocation now starts when its own dependencies settle.
+5. **Day 28-29 still need:** the screenshots (item 1), then the video (item 3), the final README
+   pass, and a fresh-clone test on a machine that is not this one. Before Day 30, re-run
+   `scripts/audit_secrets.py --history` with the PR heads fetched (`secrets-audit.md` says how).
+6. **One cheap live run would close two open questions** (each needs the owner's yes): the next
+   eval run fills the new "what refused them" table (`run_evals.py --mode batch --detach`,
+   ~$0.71-0.87), and Haiku as the routing case study's router is ~$0.11 projected
+   (`check_tool_routing.py --model claude-haiku-4-5-20251001`).
 
 **Owner decisions waiting:**
 

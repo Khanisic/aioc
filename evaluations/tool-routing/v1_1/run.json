@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "20260917T195934Z__llm__tool-routing-v1_1",
+  "kind": "llm",
+  "name": "tool-routing-v1_1",
+  "outcome": "passed",
+  "exit_code": null,
+  "started_at": "2026-09-17T19:59:34.050Z",
+  "finished_at": "2026-09-17T20:00:46.398Z",
+  "duration_ms": 72343.0,
+  "command": "check_tool_routing.py --variant v1_1 --set all",
+  "totals": {
+    "events": 40,
+    "passed": 40
+  },
+  "git": {
+    "branch": "d14-refinement-loop-routing-split",
+    "commit": "b4c375c2052a47562b5d1a4675e31a38d9862ed8",
+    "dirty": true
+  },
+  "env": {
+    "python": "3.12.13",
+    "platform": "win32",
+    "aioc_model": null,
+    "aioc_llm_effort": null,
+    "anthropic_api_key_in_shell_env": false
+  },
+  "metadata": {
+    "variant": "v1_1",
+    "server_module": "aioc.tools.incident.search_server",
+    "tool_names": {
+      "analyze_logs": "search_container_logs",
+      "analyze_events": "search_recorded_events"
+    },
+    "model": "claude-sonnet-5",
+    "sets": [
+      "plain",
+      "hard"
+    ],
+    "cases": [
+      "logs_error_lines",
+      "logs_traceback",
+      "logs_count_phrase",
+      "logs_request_paths",
+      "logs_stderr_startup",
+      "logs_warning_pattern",
+      "logs_exception_text",
+      "logs_latency_lines",
+      "logs_health_probe",
+      "logs_grep_sha",
+      "events_deploy_before_alert",
+      "events_restarts_week",
+      "events_alerts_day",
+      "events_scale_actions",
+      "events_config_changes",
+      "events_rollback_sequence",
+      "events_threshold_crossings",
+      "events_what_changed",
+      "events_incident_history",
+      "events_deploy_identity",
+      "hard_logs_events_word",
+      "hard_logs_timeline_word",
+      "hard_logs_history_word",
+      "hard_logs_saying",
+      "hard_logs_activity_word",
+      "hard_logs_recorded_word",
+      "hard_logs_alert_word",
+      "hard_logs_change_word",
+      "hard_logs_incident_word",
+      "hard_logs_deploy_word",
+      "hard_events_log_word",
+      "hard_events_output_word",
+      "hard_events_change_log",
+      "hard_events_alert_log",
+      "hard_events_done_to",
+      "hard_events_print_word",
+      "hard_events_grep_word",
+      "hard_events_message_word",
+      "hard_events_stderr_word",
+      "hard_events_trace_word"
+    ],
+    "queries_sha256": {
+      "plain": "b0da59605dcd382a42d73e2c9d9817369bd7ad5ce134a515456c511b6879c54a",
+      "hard": "9e31bedbe689cdcef308c75c774ff06fb8352388732d8d8a52b596894a136550"
+    },
+    "part_four": {
+      "search_container_logs": "When to use this vs `search_recorded_events`: use this tool when the question needs what the service's process itself wrote - lines, messages, tracebacks, request entries, anything on stdout or stderr. A deploy, a rollback, a restart, a scale action, a config change, or an alert is something recorded *about* the service, not something it printed; for those use `search_recorded_events`. The kind of data the question needs decides, not the word it uses: 'the deploy log' is a question about deploys.",
+      "search_recorded_events": "When to use this vs `search_container_logs`: use this tool when the question needs what was recorded as happening *to* the service - deploys, rollbacks, restarts, scale actions, config changes, alerts, threshold crossings - whether the question calls that a log, an output, a history, or a record. The text a process printed, its tracebacks, and its request lines are not events unless someone recorded them; for those use `search_container_logs`. The kind of data the question needs decides, not the word it uses: 'what it printed after the deploy' is a question about printed lines."
+    }
+  },
+  "events_file": "events.jsonl"
+}

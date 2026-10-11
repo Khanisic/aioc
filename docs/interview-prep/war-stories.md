@@ -1,10 +1,10 @@
 # War stories
 
-Ten things that went wrong, what the symptom looked like, and what it actually was.
+Sixteen things that went wrong, what the symptom looked like, and what it actually was.
 These are the answers to "tell me about a time when..." questions.
 Every one is traceable to a recorded run under `test-results/` or to a commit.
 
-The through-line worth naming out loud: **eight of the ten looked like the model or the orchestration being unreliable and were not** - five were engineering defects on my side, and three were my own test or scenario being wrong.
+The through-line worth naming out loud, counted over the first ten: **eight of them looked like the model or the orchestration being unreliable and were not** - five were engineering defects on my side, and three were my own test or scenario being wrong.
 The other two looked like bad credentials and were the environment naming the wrong cause.
 The one genuine model failure in the set (the nested synthesis argument in #10) was fixed by changing the schema's shape, not by arguing with the prompt.
 That is the most useful thing I learned building this, and it is a better interview answer than any architecture description.
@@ -400,6 +400,24 @@ The four-agent run's split was rebuilt instead: its two coordinator calls recons
 
 **Transferable lesson.** A stub verifies what you send, never what the other side keeps.
 For any write to a system you will later read numbers from, read one back end to end before relying on it; a write the backend silently ignores fails no test and loses data for as long as nobody looks.
+
+## 16. "Deployment started 0.0 s after GitHub ended," three runs in a row, by coincidence
+
+**Symptom.** The Day 15 integration check asserts the sequential path by timing: the dependent must start after its dependency ends.
+It passed on Day 15 and Day 21 with Deployment starting 0.0 s after GitHub, which read as the scheduler handing off instantly.
+The Day 25 service run's first trace showed Deployment starting 34 s after GitHub had ended.
+
+**Diagnosis.** Nothing was slow. The executor ran the whole parallel group, joined it, and only then started the chain, so a dependent waited for the slowest sibling, not for its dependency.
+On Days 15 and 21, and on the Day 25 run that passed, GitHub was the slowest agent in the group, so "after GitHub" and "after everyone" were the same instant.
+On the failed Day 25 run Docs was slower, and Deployment waited for an agent it did not depend on.
+The check's assertion was true and too weak: "started after its dependency" holds for a scheduler that waits for everything.
+
+**Fix.** Each invocation now starts the moment its own dependencies have settled (decision #50).
+The test was written first, and it makes the wrong schedule impossible rather than slow: Docs cannot finish until Deployment has started.
+Its first version still passed on the old code - Docs timed out, the refinement loop retried it, and the status came back `complete` - so it also asserts no refinement round ran.
+
+**Transferable lesson.** A timing assertion only tests the ordering you can tell apart. Ask what a wrong implementation would make the measurement read; if it reads the same, the measurement is not a test of that property.
+And a recovery mechanism is a place where a bug can hide: check that the path you meant to test is the path that produced the green.
 
 ---
 

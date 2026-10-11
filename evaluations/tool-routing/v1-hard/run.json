@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "20260913T213813Z__llm__tool-routing-v1",
+  "kind": "llm",
+  "name": "tool-routing-v1",
+  "outcome": "passed",
+  "exit_code": null,
+  "started_at": "2026-09-13T21:38:13.299Z",
+  "finished_at": "2026-09-13T21:38:46.259Z",
+  "duration_ms": 32953.0,
+  "command": "check_tool_routing.py --variant v1 --set hard",
+  "totals": {
+    "events": 20,
+    "passed": 20
+  },
+  "git": {
+    "branch": "main",
+    "commit": "a921f4cb443a2516e78dbaee54f4847356b52a32",
+    "dirty": true
+  },
+  "env": {
+    "python": "3.12.13",
+    "platform": "win32",
+    "aioc_model": null,
+    "aioc_llm_effort": null,
+    "anthropic_api_key_in_shell_env": false
+  },
+  "metadata": {
+    "variant": "v1",
+    "server_module": "aioc.tools.incident.analyze_server",
+    "model": "claude-sonnet-5",
+    "sets": [
+      "hard"
+    ],
+    "cases": [
+      "hard_logs_events_word",
+      "hard_logs_timeline_word",
+      "hard_logs_history_word",
+      "hard_logs_saying",
+      "hard_logs_activity_word",
+      "hard_logs_recorded_word",
+      "hard_logs_alert_word",
+      "hard_logs_change_word",
+      "hard_logs_incident_word",
+      "hard_logs_deploy_word",
+      "hard_events_log_word",
+      "hard_events_output_word",
+      "hard_events_change_log",
+      "hard_events_alert_log",
+      "hard_events_done_to",
+      "hard_events_print_word",
+      "hard_events_grep_word",
+      "hard_events_message_word",
+      "hard_events_stderr_word",
+      "hard_events_trace_word"
+    ],
+    "queries_sha256": {
+      "hard": "9e31bedbe689cdcef308c75c774ff06fb8352388732d8d8a52b596894a136550"
+    },
+    "part_four": {
+      "analyze_logs": "When to use this vs the alternative: Use this to analyze service output over a time window.",
+      "analyze_events": "When to use this vs the alternative: Use this to analyze service activity over a time window."
+    }
+  },
+  "events_file": "events.jsonl"
+}

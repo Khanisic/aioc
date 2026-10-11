@@ -35,7 +35,16 @@ from .cases import (
     render_signals,
     sentences,
 )
-from .report import CacheHealth, CostView, cache_health, cost_view, render_markdown, to_record
+from .report import (
+    CacheHealth,
+    CostView,
+    RefusalRule,
+    cache_health,
+    cost_view,
+    refusal_rules,
+    render_markdown,
+    to_record,
+)
 from .runner import (
     MAX_ENVIRONMENT_FAILURES,
     BatchDetached,
@@ -106,6 +115,7 @@ __all__ = [
     "ProgressFile",
     "Rate",
     "RecordingRetriever",
+    "RefusalRule",
     "RetryStats",
     "RunConfig",
     "SeedError",
@@ -122,6 +132,7 @@ __all__ = [
     "cited_documents",
     "compare",
     "cost_view",
+    "refusal_rules",
     "failure_kind",
     "ground_diagnosis",
     "is_environment_error",

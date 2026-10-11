@@ -11,6 +11,8 @@ Day 19's second half and a saving is only a number if its baseline is on the sam
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +39,61 @@ class CostView:
             "realtime_uncached_usd": _round(self.realtime_uncached),
             "per_item_usd": _round(self.per_item),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class RefusalRule:
+    """One rule that refused reports in a run: its kind, its text, and how often it fired."""
+
+    kind: str
+    rule: str
+    refusals: int
+    items: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "rule": self.rule,
+            "refusals": self.refusals,
+            "items": self.items,
+        }
+
+
+_PYDANTIC_LINE = re.compile(r"^- (?P<loc>[^:]+): (?:Value error, )?(?P<msg>.+)$")
+
+
+def _rules(message: str) -> list[str]:
+    """The rules one refusal names. A contract refusal is pydantic's errors one per line
+    (`render_rejection`), each its own rule; anything else is one rule, its first line.
+    Counts are folded to ``N`` so the same rule refusing two different reports is one row."""
+    lines = message.splitlines()
+    found = [m for m in (_PYDANTIC_LINE.match(line) for line in lines[1:]) if m]
+    if found:
+        texts = [f"{m['loc']}: {m['msg']}" for m in found]
+    else:
+        texts = lines[:1] or [message]
+    return [re.sub(r"\b\d+\b", "N", text.strip()) for text in texts]
+
+
+def _cell(text: str) -> str:
+    """Text safe inside a Markdown table cell."""
+    return text.replace("|", "\\|")
+
+
+def refusal_rules(scores: list[ItemScore]) -> list[RefusalRule]:
+    """Every rule that refused a report, most frequent first. Built from the rejection
+    messages a run recorded, so a run from before Day 27 (kinds only) yields nothing."""
+    refusals: Counter[tuple[str, str]] = Counter()
+    items: dict[tuple[str, str], set[str]] = {}
+    for score in scores:
+        for kind, message in zip(score.retry.rejections, score.retry.messages, strict=False):
+            for rule in _rules(message):
+                refusals[(kind, rule)] += 1
+                items.setdefault((kind, rule), set()).add(score.key)
+    return [
+        RefusalRule(kind, rule, count, len(items[(kind, rule)]))
+        for (kind, rule), count in sorted(refusals.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
 
 
 def _round(value: float | None) -> float | None:
@@ -150,6 +207,7 @@ def to_record(run: EvalRun, cases: EvalSet, *, run_id: str | None = None) -> dic
         "summary": summary.to_dict(),
         "cost": cost_view(run, summary).to_dict(),
         "cache": cache_health(run).to_dict(),
+        "refusals": [rule.to_dict() for rule in refusal_rules(list(run.scores))],
         "items": [score.to_dict() for score in run.scores],
     }
 
@@ -288,6 +346,22 @@ def render_markdown(run: EvalRun, cases: EvalSet, *, heading: str | None = None)
             f"| Recovered by a retry | {retries['recovered']} |",
             f"| Exhausted | {retries['exhausted']} |",
             f"| Retry calls made | {retries['retry_calls']} |",
+        ]
+    )
+    rules = refusal_rules(list(run.scores))
+    if rules:
+        lines.extend(
+            [
+                "",
+                "What refused them, one row a rule:",
+                "",
+                "| Kind | Rule | Refusals | Items |",
+                "|---|---|---|---|",
+            ]
+        )
+        lines.extend(f"| {r.kind} | {_cell(r.rule)} | {r.refusals} | {r.items} |" for r in rules)
+    lines.extend(
+        [
             "",
             "## Cost",
             "",

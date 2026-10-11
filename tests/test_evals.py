@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -39,6 +40,7 @@ from aioc.evals import (
     EvalItem,
     ItemScore,
     RecordingRetriever,
+    RetryStats,
     SeedError,
     SeedIncident,
     Task,
@@ -48,6 +50,7 @@ from aioc.evals import (
     load_cases,
     load_seed,
     parse_seed,
+    refusal_rules,
     render_markdown,
     run_batch,
     run_realtime,
@@ -1225,6 +1228,10 @@ def test_a_refused_report_is_retried_and_the_retry_is_counted():
         "recovered",
     )
     assert score.usage.output_tokens == 1_800  # both attempts cost
+    # The reason is kept with the kind, as the model was shown it (Day 27).
+    (message,) = score.retry.messages
+    assert message.startswith("1 validation error(s) against the contract:")
+    assert "findings.severity" in message and "detail" in message
     summary = summarise(run.scores)
     assert summary.retries == {
         "accepted_first_try": 0,
@@ -1521,6 +1528,60 @@ def test_the_report_lists_what_was_refused_and_what_was_invented():
     assert "- `case_01:diagnose`: affected service 'billing-api' is not in the context" in report
     assert "- `case_02:diagnose` produced no response: ValidationError" in report
     assert "| `case_02:diagnose` | - | no response | - | failed |" in report
+
+
+def test_the_report_names_the_rule_that_refused_each_report():
+    first, second = ITEMS["case_01:diagnose"], ITEMS["case_02:diagnose"]
+    fixed = []
+    for item in (first, second):
+        broken = _diagnosis(item)
+        broken["findings"]["severity"]["detail"] = "not allowed here"
+        fixed += [_message(EMIT_TOOL_NAME, broken), _message(EMIT_TOOL_NAME, _diagnosis(item))]
+    run = run_realtime([first, second], LLMClient(_SETTINGS, client=_Scripted(fixed)))  # type: ignore[arg-type]
+    (rule,) = refusal_rules(list(run.scores))
+    # One rule refused two reports, so it is one row with both counted.
+    assert (rule.kind, rule.refusals, rule.items) == ("format", 2, 2)
+    assert rule.rule.startswith("findings.severity")
+    report = render_markdown(run, CASES)
+    assert "What refused them, one row a rule:" in report
+    assert f"| format | {rule.rule} | 2 | 2 |" in report
+    record = to_record(run, CASES)
+    assert record["refusals"] == [rule.to_dict()]
+
+
+def test_a_refusal_rule_folds_counts_and_keeps_a_non_contract_reason_whole():
+    score = _scored_with_retry(
+        ("format", "grounding"),
+        (
+            "1 validation error(s) against the contract:\n"
+            "- (top level): Value error, 2 unanswered sub-question(s) but 0 Gap(s)",
+            "excerpt for ev_3 is not a verbatim quote of any tool reply\nsecond line",
+        ),
+    )
+    rules = {(r.kind, r.rule) for r in refusal_rules([score])}
+    assert rules == {
+        ("format", "(top level): N unanswered sub-question(s) but N Gap(s)"),
+        ("grounding", "excerpt for ev_3 is not a verbatim quote of any tool reply"),
+    }
+
+
+def test_a_record_from_before_day_27_has_kinds_and_no_rules():
+    score = _scored_with_retry(("format",), ())
+    assert refusal_rules([score]) == []
+
+
+def _scored_with_retry(kinds: tuple[str, ...], messages: tuple[str, ...]) -> ItemScore:
+    item = ITEMS["case_01:diagnose"]
+    run = run_realtime(
+        [item], LLMClient(_SETTINGS, client=_Scripted([_message(EMIT_TOOL_NAME, _diagnosis(item))]))
+    )  # type: ignore[arg-type]
+    (score,) = run.scores
+    return replace(
+        score,
+        retry=RetryStats(
+            attempts=len(kinds) + 1, rejections=kinds, outcome="recovered", messages=messages
+        ),
+    )
 
 
 def test_an_empty_measurement_is_reported_as_not_measured():
