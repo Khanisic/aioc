@@ -42,6 +42,12 @@ configuration or image, the latency comes from payments-api downstream, and ever
 recommended action is withheld by the approval gate. The same scenario run in process on
 Day 15 is [`day15-demo.gif`](docs/assets/day15-demo.gif).*
 
+**The demo video:** [`docs/assets/demo.mp4`](docs/assets/demo.mp4) (2:44, 1080p, captioned,
+no audio) is the same run in four parts: production breaks, the agents diagnose, the request's
+Langfuse trace drawn at its measured times with the bill priced from its own tokens ($0.38,
+56% of the input from the prompt cache), and the architecture. It is rendered from the run's
+records by `scripts/render_demo_video.py`, for free.
+
 ---
 
 ## How it fits together
@@ -156,6 +162,7 @@ uv run python scripts/check_agent_selection.py      # coordinator routing (2 of 
 # see the whole system run: inject chaos, read Prometheus, respond() end to end (~3 calls)
 PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free; the GIF
+uv run python scripts/render_demo_video.py --run <a check_day25_service.py run>  # free; the video (needs ffmpeg)
 uv run python scripts/gate_recorded_run.py         # free; every recorded recommendation through the HITL gate
 uv run python scripts/gate_recorded_run.py --persist   # free; the decisions written to the append-only audit log
 uv run python scripts/audit_log.py                 # free; read the audit log back (--request, --decision, --since)

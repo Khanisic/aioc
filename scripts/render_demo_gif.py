@@ -97,14 +97,79 @@ def _wrap(line: str, cols: int) -> list[str]:
     return out
 
 
-def _load_font() -> ImageFont.FreeTypeFont:
+def load_font(size: int = FONT_SIZE) -> ImageFont.FreeTypeFont:
     for name in ("consola.ttf", "CascadiaMono.ttf", "cour.ttf"):
         try:
-            return ImageFont.truetype(name, FONT_SIZE)
+            return ImageFont.truetype(name, size)
         except OSError:
             continue
     print("no monospace TrueType font found; falling back to PIL default", file=sys.stderr)
-    return ImageFont.load_default(FONT_SIZE)  # type: ignore[return-value]
+    return ImageFont.load_default(size)  # type: ignore[return-value]
+
+
+def terminal_frames(
+    entries: list[dict[str, object]],
+    *,
+    title: str,
+    command: str,
+    font: ImageFont.FreeTypeFont,
+    cols: int = COLS,
+    rows: int = ROWS,
+    leading: int = 7,
+) -> tuple[list[Image.Image], list[int]]:
+    """The transcript as terminal frames and how long each holds, in milliseconds.
+
+    Frame 0 is the typed command alone; frame ``i`` is the screen after ``entries[i - 1]``
+    printed. `scripts/render_demo_video.py` cuts the same frames into chapters."""
+    box = font.getbbox("M")
+    line_h = (box[3] - box[1]) + leading
+    # A full row measured as drawn, not the ink box of one glyph times the columns: Consolas
+    # at 15px advances 8.25px a character against an 8px ink box, so a full row overran the
+    # image and its last character or two were clipped.
+    # The window chrome scales with the font; at FONT_SIZE every number is the GIF's own.
+    scale = font.size / FONT_SIZE
+
+    def px(n: int) -> int:
+        return round(n * scale)
+
+    pad_x, pad_top = px(PAD_X), px(PAD_TOP)
+    width = pad_x * 2 + math.ceil(font.getlength("M" * cols))
+    height = pad_top + rows * line_h + px(PAD_BOTTOM)
+
+    # The typed command opens the replay; everything after it is the recorded transcript.
+    shown: list[tuple[str, tuple[int, int, int]]] = [(f"$ {command}", GREEN)]
+    frames: list[Image.Image] = []
+    durations: list[int] = []
+
+    def snapshot(duration_ms: int) -> None:
+        img = Image.new("RGB", (width, height), BG)
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((0, 0, width, pad_top - px(14)), fill=BAR)
+        for i, color in enumerate(((255, 95, 86), (255, 189, 46), (39, 201, 63))):
+            left = pad_x + px(22 * i)
+            draw.ellipse((left, px(9), left + px(12), px(21)), fill=color)
+        title_w = int(draw.textlength(title, font=font))
+        draw.text(((width - title_w) // 2, px(7)), title, font=font, fill=TITLE)
+        for row, (text, color) in enumerate(shown[-rows:]):
+            draw.text((pad_x, pad_top + row * line_h), text, font=font, fill=color)
+        frames.append(img)
+        durations.append(duration_ms)
+
+    snapshot(900)
+    previous_t = 0.0
+    for entry in entries:
+        line = str(entry["line"])
+        t = float(str(entry["t"]))
+        gap_ms = int((t - previous_t) * 1000)
+        previous_t = t
+        color = _color_for(line)
+        for wrapped in _wrap(line, cols):
+            shown.append((wrapped, color))
+        # The whole answer section prints in one burst (gap ~0), which would flash past
+        # unreadably - so a line holds for the larger of its real gap and its reading time.
+        read_ms = MIN_FRAME_MS + READ_MS_PER_CHAR * len(line.strip())
+        snapshot(min(MAX_FRAME_MS, max(gap_ms, read_ms)))
+    return frames, durations
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -131,45 +196,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     entries = json.loads(transcript_path.read_text(encoding="utf-8"))
 
-    font = _load_font()
-    box = font.getbbox("M")
-    line_h = (box[3] - box[1]) + 7
-    # A full row measured as drawn, not the ink box of one glyph times COLS: Consolas at 15px
-    # advances 8.25px a character against an 8px ink box, so a full row overran the image
-    # and its last character or two were clipped.
-    width = PAD_X * 2 + math.ceil(font.getlength("M" * COLS))
-    height = PAD_TOP + ROWS * line_h + PAD_BOTTOM
-
-    # The typed command opens the replay; everything after it is the recorded transcript.
-    rows: list[tuple[str, tuple[int, int, int]]] = [(f"$ {args.command}", GREEN)]
-    frames: list[Image.Image] = []
-    durations: list[int] = []
-
-    def snapshot(duration_ms: int) -> None:
-        img = Image.new("RGB", (width, height), BG)
-        draw = ImageDraw.Draw(img)
-        draw.rectangle((0, 0, width, PAD_TOP - 14), fill=BAR)
-        for i, dot in enumerate(((255, 95, 86), (255, 189, 46), (39, 201, 63))):
-            draw.ellipse((PAD_X + i * 22, 9, PAD_X + 12 + i * 22, 21), fill=dot)
-        title_w = int(draw.textlength(args.title, font=font))
-        draw.text(((width - title_w) // 2, 7), args.title, font=font, fill=TITLE)
-        for row, (text, color) in enumerate(rows[-ROWS:]):
-            draw.text((PAD_X, PAD_TOP + row * line_h), text, font=font, fill=color)
-        frames.append(img)
-        durations.append(duration_ms)
-
-    snapshot(900)
-    previous_t = 0.0
-    for entry in entries:
-        gap_ms = int((float(entry["t"]) - previous_t) * 1000)
-        previous_t = float(entry["t"])
-        color = _color_for(entry["line"])
-        for wrapped in _wrap(entry["line"], COLS):
-            rows.append((wrapped, color))
-        # The whole answer section prints in one burst (gap ~0), which would flash past
-        # unreadably - so a line holds for the larger of its real gap and its reading time.
-        read_ms = MIN_FRAME_MS + READ_MS_PER_CHAR * len(entry["line"].strip())
-        snapshot(min(MAX_FRAME_MS, max(gap_ms, read_ms)))
+    frames, durations = terminal_frames(
+        entries, title=args.title, command=args.command, font=load_font()
+    )
     durations[-1] = END_HOLD_MS
 
     out = Path(args.out)
