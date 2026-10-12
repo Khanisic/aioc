@@ -276,10 +276,10 @@ Decision numbers refer to [`docs/interview-prep/decisions.md`](docs/interview-pr
 
 | Domain | Weight | Implemented in | Design note |
 |---|---|---|---|
-| 1 - Agentic Architecture & Orchestration | 27% | [`src/aioc/coordinator/`](src/aioc/coordinator/) | decisions #3, #11, #15, #20, #22, #23, #28 |
+| 1 - Agentic Architecture & Orchestration | 27% | [`src/aioc/coordinator/`](src/aioc/coordinator/) | [`workflow-vs-agent.md`](docs/design-notes/workflow-vs-agent.md), [`parallel-and-sequential.md`](docs/design-notes/parallel-and-sequential.md), decisions #3, #11, #15, #20, #22, #23, #28 |
 | 2 - Tool Design & MCP Integration | 18% | [`src/aioc/tools/`](src/aioc/tools/), [`src/aioc/llm/mcp.py`](src/aioc/llm/mcp.py) | [`case-study-tool-routing.md`](docs/case-study-tool-routing.md), [`contract-changes.md`](docs/design-notes/contract-changes.md) |
-| 3 - Claude Code Configuration & Workflows | 20% | [`.claude/`](.claude/), [`.github/workflows/`](.github/workflows/), [`.github/claude/review.md`](.github/claude/review.md) | [`domain-3-config-layer.md`](docs/design-notes/domain-3-config-layer.md), [`review-prompt-tuning.md`](docs/design-notes/review-prompt-tuning.md) |
-| 4 - Prompt Engineering & Structured Output | 20% | [`src/aioc/agents/`](src/aioc/agents/), [`src/aioc/contracts/`](src/aioc/contracts/), [`src/aioc/evals/`](src/aioc/evals/) | [`CONTRACTS.md`](docs/CONTRACTS.md), decisions #2, #13, #21, #30, #34 |
+| 3 - Claude Code Configuration & Workflows | 20% | [`.claude/`](.claude/), [`.github/workflows/`](.github/workflows/), [`.github/claude/review.md`](.github/claude/review.md) | [`domain-3-config-layer.md`](docs/design-notes/domain-3-config-layer.md), [`review-prompt-tuning.md`](docs/design-notes/review-prompt-tuning.md), [`secrets-audit.md`](docs/design-notes/secrets-audit.md) |
+| 4 - Prompt Engineering & Structured Output | 20% | [`src/aioc/agents/`](src/aioc/agents/), [`src/aioc/contracts/`](src/aioc/contracts/), [`src/aioc/evals/`](src/aioc/evals/) | [`CONTRACTS.md`](docs/CONTRACTS.md), [`retry-taxonomy.md`](docs/design-notes/retry-taxonomy.md), decisions #2, #13, #21, #30, #34 |
 | 5 - Context Management & Reliability | 15% | [`handoff.py`](src/aioc/coordinator/handoff.py), [`confidence.py`](src/aioc/coordinator/confidence.py), [`provenance.py`](src/aioc/coordinator/provenance.py), [`src/aioc/hitl/`](src/aioc/hitl/), [`src/aioc/llm/`](src/aioc/llm/) | decisions #25, #29, #31-#33, #35, #40, #43, [`model-routing.md`](docs/design-notes/model-routing.md) |
 
 ### Domain 1 - Agentic Architecture & Orchestration
@@ -290,9 +290,11 @@ A coordinator plans which of the four agents a query needs, then executes that p
 - **Explicit context passing.** Each agent receives `context_passed` and nothing else, and an empty context or one that only restates the query is a validation error (`test_subagent_receives_exactly_context_passed_and_nothing_else` in [`tests/test_executor.py`](tests/test_executor.py), `test_plan_rejects_context_that_only_restates_the_query`).
 - **Parallel and sequential.** [`executor.py`](src/aioc/coordinator/executor.py) runs independent agents on a thread pool and dependent ones in order, each dependent handed a bounded digest of its dependency ([`handoff.py`](src/aioc/coordinator/handoff.py)) that is recorded verbatim on the invocation.
   A barrier test fails if the parallel group runs serially (`test_parallel_group_runs_concurrently`), and on the Day 25 run every pair in the parallel group overlapped in the Langfuse trace.
+  A dependent starts when its own dependencies return, not when the whole group has (`test_a_dependent_starts_when_its_own_dependency_returns_not_the_whole_group`); why each path is parallel or sequential is [its own note](docs/design-notes/parallel-and-sequential.md).
 - **Refinement loop.** Open gaps that are `resolvable` and name a `suggested_agent` are re-delegated with their `suggested_query` verbatim, capped in rounds, and the same gap is never asked twice ([`tests/test_refinement.py`](tests/test_refinement.py)).
   An agent that does not exist yields a `resolvable: false` gap, never a fabricated report.
 - **Synthesis as a seam.** The deterministic synthesis is the default; the model-written one is grounded in code against the agents' evidence ids and falls back to the deterministic form when rejected ([`synthesis.py`](src/aioc/coordinator/synthesis.py)).
+- **Workflow where it beats an agent.** The refinement loop, the handoff, the scheduling, and every fact in a report are code; selection, tool use, and judgements are the model's. [`workflow-vs-agent.md`](docs/design-notes/workflow-vs-agent.md) says where the line is and why.
 
 ### Domain 2 - Tool Design & MCP Integration
 
@@ -303,7 +305,7 @@ Six contract-named tools run as real stdio MCP servers, and two agents consume t
 - **Four error classes.** `transient`, `validation`, `business`, and `permission` are each produced from a real code path and returned distinctly (`test_all_four_error_classes_return_distinctly`, in each tool's test module).
 - **Descriptions.** Every tool description follows the four-part template: what it does, three example queries, edge cases, and when to use it instead of the named alternative.
 - **The routing case study.** `analyze_logs` and `analyze_events` shipped deliberately overlapping, were measured, then split into `search_container_logs` and `search_recorded_events` through the contract's change process.
-  The result was 0/40 misrouted before and after with Sonnet, and [the write-up](docs/case-study-tool-routing.md) says what that does and does not show.
+  The result was 0/40 misrouted before and after with Sonnet, and [the write-up](docs/case-study-tool-routing.md) says what that does and does not show; the three runs are committed in [`evaluations/tool-routing/`](evaluations/tool-routing/).
 - **Safety at the tool.** Config values are hashed at parse time and only keys are returned ([`release.py`](src/aioc/tools/deployment/release.py)), and the chaos ground truth is a `permission` error at every server ([`policy.py`](src/aioc/tools/policy.py)).
 
 ### Domain 3 - Claude Code Configuration & Workflows
@@ -311,7 +313,7 @@ Six contract-named tools run as real stdio MCP servers, and two agents consume t
 The configuration is committed on purpose: it is the evidence, not local scratch.
 
 - **Configuration.** A user, project, and directory `CLAUDE.md` hierarchy; seven path-scoped rules in [`.claude/rules/`](.claude/rules/); the `/contract` and `/validate-schema` commands; the `contract-audit` skill running read-only in a forked context; and [`.claude/settings.json`](.claude/settings.json) as the shared permission layer, where destructive commands ask and secrets are unreadable.
-- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,122 tests on every pull request, with no secrets and no network.
+- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,144 tests on every pull request, with no secrets and no network; one of them fails the build if any tracked file carries a credential ([`audit_secrets.py`](scripts/audit_secrets.py), [the audit](docs/design-notes/secrets-audit.md)).
 - **Claude Code on pull requests.** [`claude-review.yml`](.github/workflows/claude-review.yml) runs a review or writes tests when a pull request is labelled.
   The review prompt names this repository's defect classes and allows "No defects found.", and generated tests are pushed only when they touch `tests/` alone and the suite passes.
   The prompt was tuned on scored local reviews.
@@ -323,7 +325,7 @@ Every agent returns a contract-valid `AgentResponse` through a forced `tool_use`
 - **Schemas.** The emit tool's JSON Schema is generated from the frozen models and annotated with the cross-field rules a shape cannot state ([`_annotate.py`](src/aioc/agents/_annotate.py)): `null` versus `[]`, the `other` enum with its detail string, and the confidence bands, with a gap instead of a guess below 0.25.
 - **The runtime owns facts.** Titles, SHAs, config keys, and health signals are stamped from tool replies, and a citation retrieval never returned or a paraphrased quote is refused in code ([`docs.py`](src/aioc/agents/docs.py), [`_toolset.py`](src/aioc/agents/_toolset.py)).
 - **Validation-retry loop.** A refused report is answered in the same conversation with the rendered error, and the loop records whether each rejection was a format error or a grounding error ([`_retry.py`](src/aioc/agents/_retry.py)).
-  In the Day 20 batch baseline, 7 of 38 items were recovered by a retry and none were given up on.
+  Across the four Sonnet eval runs, 120 of 152 reports were accepted first time and 31 of the 32 refused were recovered, every refusal a format error; what that taxonomy showed is [written up](docs/design-notes/retry-taxonomy.md).
 - **Evals.** [`src/aioc/evals/`](src/aioc/evals/) scores the shipped agents against the seeded incidents' recorded truth, read from the seed SQL, and a case whose context carries its own answer is refused at load.
   The results are below.
 

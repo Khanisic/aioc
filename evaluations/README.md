@@ -9,7 +9,10 @@ Committed eval sets and committed eval results.
 |---|---|
 | `cases/seeded-incidents.json` | The eval set: 20 cases, 38 items. One case for each of the 18 seeded incidents, each with a diagnose task and a recall task, plus two no-precedent recall probes. |
 | `baseline.md`, `baseline.json` | The Day 20 baseline (2026-09-30): the whole set run once for each configuration of the two cost levers, side by side. The Markdown is for reading; the JSON is what a later run is compared against. |
-| `results/` | One report for each run in the baseline, written with it. |
+| `results/` | One report for each run in the baseline, written with it, and `day24-batch-cached.md`, the Day 24 re-run. |
+| `day24-vs-baseline.md`, `.json` | The Day 24 re-run read against the Day 20 run of its configuration (`eval_baseline.py --against`). |
+| `routing/` | Day 23 model routing: the projection (`projection.md`) from free token counts (`token-counts.json`), and the one measured run of Haiku 4.5 subagents against Sonnet 5 (`haiku-vs-sonnet.md`). |
+| `tool-routing/` | The Domain 2 routing case study's three runs, before and after the `1.1.0` split, copied from `test-results/` so they can be shared. Read with `docs/case-study-tool-routing.md`. |
 
 ## The one rule: a case selects, it never authors
 

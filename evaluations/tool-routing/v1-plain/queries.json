@@ -1,0 +1,122 @@
+[
+  {
+    "key": "logs_error_lines",
+    "query": "Show me every ERROR line payments-api printed between 14:00 and 14:15 UTC today.",
+    "expected": "analyze_logs",
+    "why": "lines the process wrote, at a level"
+  },
+  {
+    "key": "logs_traceback",
+    "query": "Find the traceback inventory-api emitted when it started returning 500s around 09:40 UTC.",
+    "expected": "analyze_logs",
+    "why": "a traceback exists only in the process output"
+  },
+  {
+    "key": "logs_count_phrase",
+    "query": "How many times did 'connection refused' appear in checkout-api's output during the last hour?",
+    "expected": "analyze_logs",
+    "why": "a phrase count over output text"
+  },
+  {
+    "key": "logs_request_paths",
+    "query": "Which request paths were getting 502 responses in checkout-api's access log after 14:05 UTC?",
+    "expected": "analyze_logs",
+    "why": "access-log lines carry the path and status"
+  },
+  {
+    "key": "logs_stderr_startup",
+    "query": "What did payments-api write to stderr when it booted at 08:00 UTC this morning?",
+    "expected": "analyze_logs",
+    "why": "stderr is process output"
+  },
+  {
+    "key": "logs_warning_pattern",
+    "query": "Is inventory-api repeatedly warning about a slow downstream call? Look at the last 30 minutes.",
+    "expected": "analyze_logs",
+    "why": "a repeated warning line is a log pattern"
+  },
+  {
+    "key": "logs_exception_text",
+    "query": "What was the exact exception message checkout-api raised at 14:07:12 UTC?",
+    "expected": "analyze_logs",
+    "why": "the exact text lives in the output"
+  },
+  {
+    "key": "logs_latency_lines",
+    "query": "Pull the lines where payments-api reported a request taking longer than 2 seconds between 13:50 and 14:20 UTC.",
+    "expected": "analyze_logs",
+    "why": "per-request lines are output"
+  },
+  {
+    "key": "logs_health_probe",
+    "query": "Did checkout-api print anything unusual around its /healthz probes between 15:00 and 15:10 UTC?",
+    "expected": "analyze_logs",
+    "why": "what it printed"
+  },
+  {
+    "key": "logs_grep_sha",
+    "query": "Grep payments-api's output from the last two hours for the string 'NoneType'.",
+    "expected": "analyze_logs",
+    "why": "a grep over output"
+  },
+  {
+    "key": "events_deploy_before_alert",
+    "query": "Was there a deploy or config change on checkout-api in the hour before the 15:12 UTC alert on 2026-01-22?",
+    "expected": "analyze_events",
+    "why": "deploys and config changes are recorded operational events"
+  },
+  {
+    "key": "events_restarts_week",
+    "query": "List every restart recorded for payments-api during the week of 2026-02-16.",
+    "expected": "analyze_events",
+    "why": "restarts are recorded events"
+  },
+  {
+    "key": "events_alerts_day",
+    "query": "Which alerts fired on inventory-api on 2026-01-22?",
+    "expected": "analyze_events",
+    "why": "alerts are recorded events, not process output"
+  },
+  {
+    "key": "events_scale_actions",
+    "query": "Did anyone scale postgres up or down between 03:00 and 06:00 UTC on 2026-03-02?",
+    "expected": "analyze_events",
+    "why": "scale actions are recorded events"
+  },
+  {
+    "key": "events_config_changes",
+    "query": "Show me the recorded config changes on checkout-api in the last two days.",
+    "expected": "analyze_events",
+    "why": "config changes are recorded events"
+  },
+  {
+    "key": "events_rollback_sequence",
+    "query": "When was checkout-api rolled back on 2026-01-22, and what was recorded just before it?",
+    "expected": "analyze_events",
+    "why": "a rollback is a deploy event in the history"
+  },
+  {
+    "key": "events_threshold_crossings",
+    "query": "Which metric thresholds did payments-api cross on 2026-02-19 between 14:00 and 15:00 UTC?",
+    "expected": "analyze_events",
+    "why": "threshold crossings are recorded events"
+  },
+  {
+    "key": "events_what_changed",
+    "query": "Did anything change on redis around 15:10 UTC on 2026-04-08 - a deploy, a restart, a config push?",
+    "expected": "analyze_events",
+    "why": "changes to the service are recorded events"
+  },
+  {
+    "key": "events_incident_history",
+    "query": "According to the incident history, what happened to inventory-api on the afternoon of 2026-05-05?",
+    "expected": "analyze_events",
+    "why": "the incident history is the event store"
+  },
+  {
+    "key": "events_deploy_identity",
+    "query": "Which release was deployed to checkout-api at 15:11 UTC on 2026-01-22, per the recorded timeline?",
+    "expected": "analyze_events",
+    "why": "the deploy event carries the release"
+  }
+]

@@ -25,10 +25,11 @@ refinement loop must not spend rounds re-delegating to an agent that is not ther
 **The parallel group actually runs in parallel (Day 9).** Independent invocations
 (``mode: parallel``, empty ``depends_on``) run concurrently on a thread pool - the agents
 block on the Anthropic SDK, so threads buy real wall-clock overlap without rewriting them
-as async. The sequential chain then runs in dependency order, one at a time; a dependency
-that produced no response fails its dependents honestly rather than running them against
-an input that never arrived. Results are merged in *plan* order, not completion order, so
-the response is deterministic either way.
+as async. Each dependent starts as soon as the invocations it depends on have returned,
+not when the whole group has (Day 27: the Day 25 trace showed Deployment idle 34 s for an
+agent it did not depend on); a dependency that produced no response fails its dependents
+honestly rather than running them against an input that never arrived. Results are merged
+in *plan* order, not completion order, so the response is deterministic either way.
 
 **Every runner gets its own `Usage` accumulator, merged after the join.** The accumulator
 is a plain mutable object, and ``+=`` on a shared one from two threads loses counts
@@ -98,7 +99,7 @@ make a network call because a key happens to be in `.env`.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
@@ -394,8 +395,8 @@ class Executor:
         usage: Usage | None = None,
         trace: RequestTrace | None = None,
     ) -> CoordinatorResponse:
-        """Run every invocation the plan selected: the parallel group concurrently, then
-        the sequential chain in dependency order; then re-delegate open gaps for up to
+        """Run every invocation the plan selected, each as soon as its own dependencies
+        have returned (the parallel group at once); then re-delegate open gaps for up to
         ``max_refinement_rounds`` rounds; then synthesise.
 
         ``usage`` may arrive pre-seeded with the planning call's tokens (see `respond`);
@@ -468,45 +469,79 @@ class Executor:
     # ------------------------------------------------------------------- round zero
 
     def _run_plan(self, plan: SelectionPlan, run: _Run) -> None:
-        # -- the parallel group, concurrently. The plan validator guarantees every member
-        # has depends_on == [], so there is nothing to wait on and no unmet-dependency case.
-        group: list[tuple[AgentInvocation, AgentRunner, str]] = []
-        for inv in plan.parallel_group:
-            runner = self._runners.get(inv.agent)
-            if runner is None:
-                run.note_execution_gap(_agent_missing_gap(inv), inv.invocation_id)
-            else:
-                composed = inv.model_copy(update={"context_passed": _planned_context(inv, plan)})
-                group.append((composed, runner, run.query))
-        for outcome in self._run_group(group, run):
-            run.settle(outcome)
-
-        # -- the sequential chain, one at a time in dependency order.
+        # Every invocation starts the moment its own dependencies have settled: the
+        # parallel group at once (depends_on is [] by validation), each dependent when the
+        # invocations it names have returned, whatever its siblings are still doing.
         #
-        # Why this chain cannot be parallel: a dependent's context is composed FROM ITS
+        # Why a dependent cannot start earlier: its context is composed FROM ITS
         # DEPENDENCY'S RESPONSE. Deployment learns which PR shipped, its head SHA, and the
         # paths it touched from GitHub's report, and diffs the release those facts
         # identify; until GitHub has returned, that context does not exist and there is
         # nothing to hand over. Starting Deployment early would mean starting it with the
         # planner's block alone and letting it guess or assume the rest - exactly the
         # inherited/assumed context this project exists to demonstrate the absence of.
-        # It is a data dependency, not a scheduling preference: the parallel group above
-        # runs together because nothing any member needs is produced by another member.
-        for inv in _sequential_order(plan):
-            runner = self._runners.get(inv.agent)
-            if runner is None:
-                run.note_execution_gap(_agent_missing_gap(inv), inv.invocation_id)
-                continue
-            unmet = [dep for dep in inv.depends_on if dep not in run.by_invocation]
-            if unmet:
-                run.note_execution_gap(_dependency_unmet_gap(inv, unmet), inv.invocation_id)
-                continue
-            handed_off = compose_dependent_context(
-                _planned_context(inv, plan),
-                [(run.executed[dep], run.by_invocation[dep]) for dep in inv.depends_on],
-            )
-            composed = inv.model_copy(update={"context_passed": handed_off})
-            run.settle(self._run_invocation(composed, runner, run.query, run))
+        # It is a data dependency, not a scheduling preference, and it is the only wait:
+        # until Day 27 a dependent also waited for the whole parallel group, and on the
+        # Day 25 run Deployment sat idle 34 s for Docs, which it does not depend on.
+        #
+        # Workers only run agents. Composing a context and every merge into `run` happen
+        # on this thread, and outcomes are settled afterwards in the order the Day 7
+        # executor used (the parallel group in plan order, then the chain in dependency
+        # order), so the response never depends on which agent finished first.
+        settle_order = [*plan.parallel_group, *_sequential_order(plan)]
+        pending = list(settle_order)
+        outcomes: dict[str, _Outcome] = {}
+        not_run: dict[str, Gap] = {}
+        in_flight: dict[Future[_Outcome], str] = {}
+
+        def decided(inv_id: str) -> bool:
+            return inv_id in outcomes or inv_id in not_run
+
+        with ThreadPoolExecutor(
+            max_workers=max(1, len(settle_order)), thread_name_prefix="aioc-agent"
+        ) as pool:
+            while pending or in_flight:
+                ready = [inv for inv in pending if all(decided(d) for d in inv.depends_on)]
+                for inv in ready:
+                    pending.remove(inv)
+                    runner = self._runners.get(inv.agent)
+                    if runner is None:
+                        not_run[inv.invocation_id] = _agent_missing_gap(inv)
+                        continue
+                    answered: dict[str, tuple[AgentInvocation, AgentResponse]] = {}
+                    for dep in inv.depends_on:
+                        outcome = outcomes.get(dep)
+                        if outcome is not None and outcome.response is not None:
+                            answered[dep] = (outcome.invocation, outcome.response)
+                    unmet = [dep for dep in inv.depends_on if dep not in answered]
+                    if unmet:
+                        not_run[inv.invocation_id] = _dependency_unmet_gap(inv, unmet)
+                        continue
+                    context = _planned_context(inv, plan)
+                    if inv.depends_on:
+                        context = compose_dependent_context(
+                            context, [answered[dep] for dep in inv.depends_on]
+                        )
+                    composed = inv.model_copy(update={"context_passed": context})
+                    future = pool.submit(self._run_invocation, composed, runner, run.query, run)
+                    in_flight[future] = inv.invocation_id
+                if ready:
+                    continue  # a not-run decision may have made another invocation ready
+                if not in_flight:  # pragma: no cover - the SelectionPlan validator prevents it
+                    raise RuntimeError(
+                        "plan has an unsatisfiable depends_on despite validation; "
+                        f"stuck: {sorted(i.invocation_id for i in pending)}"
+                    )
+                # future.result() never raises: _run_invocation returns a failure as data.
+                done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                for future in done:
+                    outcomes[in_flight.pop(future)] = future.result()
+
+        for inv in settle_order:
+            if inv.invocation_id in not_run:
+                run.note_execution_gap(not_run[inv.invocation_id], inv.invocation_id)
+            else:
+                run.settle(outcomes[inv.invocation_id])
 
     # ------------------------------------------------------------- refinement rounds
 

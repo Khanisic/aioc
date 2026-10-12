@@ -173,6 +173,7 @@ def restore(
             attempts=retry["attempts"],
             rejections=tuple(retry["rejections"]),
             outcome=retry["outcome"],
+            messages=tuple(retry.get("messages", ())),
         ),
         seconds=score.get("seconds"),
     )

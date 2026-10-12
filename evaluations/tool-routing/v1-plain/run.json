@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "20260913T212851Z__llm__tool-routing-v1",
+  "kind": "llm",
+  "name": "tool-routing-v1",
+  "outcome": "passed",
+  "exit_code": null,
+  "started_at": "2026-09-13T21:28:51.630Z",
+  "finished_at": "2026-09-13T21:29:23.639Z",
+  "duration_ms": 32000.0,
+  "command": "check_tool_routing.py --variant v1",
+  "totals": {
+    "events": 20,
+    "passed": 20
+  },
+  "git": {
+    "branch": "main",
+    "commit": "a921f4cb443a2516e78dbaee54f4847356b52a32",
+    "dirty": true
+  },
+  "env": {
+    "python": "3.12.13",
+    "platform": "win32",
+    "aioc_model": null,
+    "aioc_llm_effort": null,
+    "anthropic_api_key_in_shell_env": false
+  },
+  "metadata": {
+    "variant": "v1",
+    "server_module": "aioc.tools.incident.analyze_server",
+    "model": "claude-sonnet-5",
+    "cases": [
+      "logs_error_lines",
+      "logs_traceback",
+      "logs_count_phrase",
+      "logs_request_paths",
+      "logs_stderr_startup",
+      "logs_warning_pattern",
+      "logs_exception_text",
+      "logs_latency_lines",
+      "logs_health_probe",
+      "logs_grep_sha",
+      "events_deploy_before_alert",
+      "events_restarts_week",
+      "events_alerts_day",
+      "events_scale_actions",
+      "events_config_changes",
+      "events_rollback_sequence",
+      "events_threshold_crossings",
+      "events_what_changed",
+      "events_incident_history",
+      "events_deploy_identity"
+    ],
+    "total_cases_defined": 20,
+    "queries_sha256": "b0da59605dcd382a42d73e2c9d9817369bd7ad5ce134a515456c511b6879c54a",
+    "part_four": {
+      "analyze_logs": "When to use this vs the alternative: Use this to analyze service output over a time window.",
+      "analyze_events": "When to use this vs the alternative: Use this to analyze service activity over a time window."
+    }
+  },
+  "events_file": "events.jsonl"
+}

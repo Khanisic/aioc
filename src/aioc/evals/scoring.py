@@ -105,12 +105,16 @@ class RetryStats:
     attempts: int = 1
     rejections: tuple[str, ...] = ()  # the kind of each refused attempt, in order
     outcome: str = "accepted"  # accepted | recovered | exhausted
+    # The refusal each attempt was shown, as the loop rendered it, one entry per rejection.
+    # Empty for a record written before Day 27, which kept the kind and not the reason.
+    messages: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "attempts": self.attempts,
             "rejections": list(self.rejections),
             "outcome": self.outcome,
+            "messages": list(self.messages),
         }
 
 

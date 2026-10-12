@@ -984,6 +984,86 @@ def test_parallel_group_runs_concurrently():
     assert resp.status is ResponseStatus.COMPLETE
 
 
+def test_a_dependent_starts_when_its_own_dependency_returns_not_the_whole_group():
+    """Day 27, from the Day 25 trace: Deployment depends on GitHub only, and waited 34 s
+    for Docs after GitHub had finished. Docs here cannot finish until Deployment has
+    started, so the run passes only if Deployment is started by GitHub's return alone; a
+    scheduler that joins the parallel group first times Docs out."""
+    import threading
+
+    deployment_started = threading.Event()
+
+    class _DocsWaitingOnDeployment:
+        def run(
+            self, query: str, *, context: str, request_id: str, invocation_id: str, usage: Usage
+        ) -> IncidentAgentResponse:
+            if not deployment_started.wait(timeout=5.0):
+                raise TimeoutError("deployment never started while docs was running")
+            return _incident_response(request_id, invocation_id)
+
+    class _Deployment(_RecordingRunner):
+        def run(self, query: str, **kw: Any) -> IncidentAgentResponse:
+            deployment_started.set()
+            return super().run(query, **kw)
+
+    deployment = _Deployment()
+    plan = _plan(
+        [
+            _invocation("docs", invocation_id="inv_docs"),
+            _invocation("github", invocation_id="inv_gh"),
+            _invocation(
+                "deployment",
+                invocation_id="inv_dep",
+                mode="sequential",
+                depends_on=["inv_gh"],
+                context_passed="Diff the release containing the PR github reports; "
+                "the suspect window is 14:00-14:15 UTC.",
+            ),
+        ]
+    )
+    resp = Executor(
+        {
+            AgentName.DOCS: _DocsWaitingOnDeployment(),
+            AgentName.GITHUB: _RecordingRunner(),
+            AgentName.DEPLOYMENT: deployment,
+        }
+    ).execute(plan, "Did the last PR break the rollout, and what does the runbook say?")
+
+    # No round 1: the old scheduler's timed-out Docs was rescued by the refinement loop's
+    # retry, which would make a status check alone pass.
+    assert resp.refinement_rounds == 0, resp.unresolved_gaps
+    assert resp.status is ResponseStatus.COMPLETE
+    # Still plan order, and still a handoff: the dependent got its dependency's digest.
+    assert [r.invocation_id for r in resp.agent_responses] == ["inv_docs", "inv_gh", "inv_dep"]
+    (call,) = deployment.calls
+    assert HANDOFF_HEADER in call["context"] and "inv_gh" in call["context"]
+
+
+def test_two_dependents_of_one_dependency_both_get_its_digest_and_keep_plan_order():
+    order: list[str] = []
+    github = _RecordingRunner(order_log=order)
+    first, second = _RecordingRunner(order_log=order), _RecordingRunner(order_log=order)
+    seq = {
+        "mode": "sequential",
+        "depends_on": ["inv_gh"],
+        "context_passed": "Diff the release containing the PR github reports; "
+        "the suspect window is 14:00-14:15 UTC.",
+    }
+    plan = _plan(
+        [
+            _invocation("github", invocation_id="inv_gh"),
+            _invocation("deployment", invocation_id="inv_dep", **seq),
+            _invocation("incident", invocation_id="inv_inc", **seq),
+        ]
+    )
+    resp = Executor(
+        {AgentName.GITHUB: github, AgentName.DEPLOYMENT: first, AgentName.INCIDENT: second}
+    ).execute(plan, "q?")
+    assert order[0] == "inv_gh" and sorted(order[1:]) == ["inv_dep", "inv_inc"]
+    assert [r.invocation_id for r in resp.agent_responses] == ["inv_gh", "inv_dep", "inv_inc"]
+    assert all(HANDOFF_HEADER in runner.calls[0]["context"] for runner in (first, second))
+
+
 def test_parallel_results_keep_plan_order_not_completion_order():
     import time
 

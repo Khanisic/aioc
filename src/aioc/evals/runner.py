@@ -242,6 +242,7 @@ def _retry_stats(log: RetryLog) -> RetryStats:
         attempts=record.attempts,
         rejections=tuple(kind.value for kind in record.kinds),
         outcome=record.outcome,
+        messages=tuple(rejection.message for rejection in record.rejections),
     )
 
 

@@ -9,7 +9,8 @@ the situation built from live Prometheus metrics, and then one `live` request to
 `POST /v1/requests` with no refinement round and the deterministic synthesis. The only
 thing that runs the agents is the service container - the same image a host would run.
 
-**Cost: one live request, ~$0.55** (the HANDOFF sec 1 exception; it needs the owner's yes).
+**Cost: one live request, $0.38-0.43 measured** on Day 25 (projected $0.55 before it ran;
+the HANDOFF sec 1 exception, and it needs the owner's yes).
 Everything else is free: the GitHub and Prometheus reads, the polls, and reading the trace
 back from Langfuse's public API, which this script waits for (it took over two minutes on
 the Day 24 rehearsal).

@@ -1,0 +1,398 @@
+{
+  "summary": {
+    "variant": "v1",
+    "model": "claude-sonnet-5",
+    "queries": 20,
+    "scored": 20,
+    "errors": 0,
+    "misrouted": 0,
+    "misrouting_rate": 0.0,
+    "by_expected": {
+      "analyze_logs": {
+        "n": 10,
+        "misrouted": 0
+      },
+      "analyze_events": {
+        "n": 10,
+        "misrouted": 0
+      }
+    },
+    "usage": {
+      "in": 57305,
+      "out": 2478
+    },
+    "queries_sha256": "b0da59605dcd382a42d73e2c9d9817369bd7ad5ce134a515456c511b6879c54a"
+  },
+  "results": [
+    {
+      "key": "logs_error_lines",
+      "query": "Show me every ERROR line payments-api printed between 14:00 and 14:15 UTC today.",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "payments-api",
+        "start": "2026-01-01T14:00:00Z",
+        "end": "2026-01-01T14:15:00Z",
+        "level": "error"
+      },
+      "why": "lines the process wrote, at a level",
+      "duration_ms": 1954,
+      "usage": {
+        "in": 2865,
+        "out": 132
+      }
+    },
+    {
+      "key": "logs_traceback",
+      "query": "Find the traceback inventory-api emitted when it started returning 500s around 09:40 UTC.",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "inventory-api",
+        "start": "2026-01-01T09:30:00Z",
+        "end": "2026-01-01T09:50:00Z",
+        "pattern": "Traceback|500"
+      },
+      "why": "a traceback exists only in the process output",
+      "duration_ms": 1640,
+      "usage": {
+        "in": 2865,
+        "out": 140
+      }
+    },
+    {
+      "key": "logs_count_phrase",
+      "query": "How many times did 'connection refused' appear in checkout-api's output during the last hour?",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-01T00:00:00Z",
+        "pattern": "connection refused"
+      },
+      "why": "a phrase count over output text",
+      "duration_ms": 1735,
+      "usage": {
+        "in": 2860,
+        "out": 104
+      }
+    },
+    {
+      "key": "logs_request_paths",
+      "query": "Which request paths were getting 502 responses in checkout-api's access log after 14:05 UTC?",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-01T14:05:00Z",
+        "pattern": "502"
+      },
+      "why": "access-log lines carry the path and status",
+      "duration_ms": 1546,
+      "usage": {
+        "in": 2865,
+        "out": 101
+      }
+    },
+    {
+      "key": "logs_stderr_startup",
+      "query": "What did payments-api write to stderr when it booted at 08:00 UTC this morning?",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "payments-api",
+        "start": "2026-01-01T07:59:00Z",
+        "end": "2026-01-01T08:10:00Z"
+      },
+      "why": "stderr is process output",
+      "duration_ms": 1391,
+      "usage": {
+        "in": 2861,
+        "out": 111
+      }
+    },
+    {
+      "key": "logs_warning_pattern",
+      "query": "Is inventory-api repeatedly warning about a slow downstream call? Look at the last 30 minutes.",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "inventory-api",
+        "start": "2025-06-XXT00:00:00Z"
+      },
+      "why": "a repeated warning line is a log pattern",
+      "duration_ms": 1562,
+      "usage": {
+        "in": 2868,
+        "out": 79
+      }
+    },
+    {
+      "key": "logs_exception_text",
+      "query": "What was the exact exception message checkout-api raised at 14:07:12 UTC?",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-01T14:06:52Z",
+        "end": "2026-01-01T14:07:32Z"
+      },
+      "why": "the exact text lives in the output",
+      "duration_ms": 1578,
+      "usage": {
+        "in": 2860,
+        "out": 112
+      }
+    },
+    {
+      "key": "logs_latency_lines",
+      "query": "Pull the lines where payments-api reported a request taking longer than 2 seconds between 13:50 and 14:20 UTC.",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "payments-api",
+        "start": "2026-01-01T13:50:00Z",
+        "end": "2026-01-01T14:20:00Z",
+        "pattern": "took [2-9]\\d*\\.\\d+s|took \\d+\\.\\d+s|[2-9]\\d{3,}ms|duration.*[2-9]\\.\\d+"
+      },
+      "why": "per-request lines are output",
+      "duration_ms": 2250,
+      "usage": {
+        "in": 2875,
+        "out": 188
+      }
+    },
+    {
+      "key": "logs_health_probe",
+      "query": "Did checkout-api print anything unusual around its /healthz probes between 15:00 and 15:10 UTC?",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-01T15:00:00Z",
+        "end": "2026-01-01T15:10:00Z",
+        "pattern": "healthz"
+      },
+      "why": "what it printed",
+      "duration_ms": 1484,
+      "usage": {
+        "in": 2870,
+        "out": 137
+      }
+    },
+    {
+      "key": "logs_grep_sha",
+      "query": "Grep payments-api's output from the last two hours for the string 'NoneType'.",
+      "expected": "analyze_logs",
+      "picked": "analyze_logs",
+      "misrouted": false,
+      "arguments": {
+        "service": "payments-api",
+        "start": "2025-01-01T00:00:00Z",
+        "pattern": "NoneType"
+      },
+      "why": "a grep over output",
+      "duration_ms": 1344,
+      "usage": {
+        "in": 2859,
+        "out": 103
+      }
+    },
+    {
+      "key": "events_deploy_before_alert",
+      "query": "Was there a deploy or config change on checkout-api in the hour before the 15:12 UTC alert on 2026-01-22?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-22T14:12:00Z",
+        "end": "2026-01-22T15:12:00Z"
+      },
+      "why": "deploys and config changes are recorded operational events",
+      "duration_ms": 1437,
+      "usage": {
+        "in": 2874,
+        "out": 111
+      }
+    },
+    {
+      "key": "events_restarts_week",
+      "query": "List every restart recorded for payments-api during the week of 2026-02-16.",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "payments-api",
+        "start": "2026-02-16T00:00:00Z",
+        "end": "2026-02-23T00:00:00Z",
+        "kind": "restart",
+        "max_matches": 500
+      },
+      "why": "restarts are recorded events",
+      "duration_ms": 1766,
+      "usage": {
+        "in": 2857,
+        "out": 157
+      }
+    },
+    {
+      "key": "events_alerts_day",
+      "query": "Which alerts fired on inventory-api on 2026-01-22?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "inventory-api",
+        "start": "2026-01-22T00:00:00Z",
+        "end": "2026-01-23T00:00:00Z",
+        "kind": "alert"
+      },
+      "why": "alerts are recorded events, not process output",
+      "duration_ms": 1422,
+      "usage": {
+        "in": 2855,
+        "out": 134
+      }
+    },
+    {
+      "key": "events_scale_actions",
+      "query": "Did anyone scale postgres up or down between 03:00 and 06:00 UTC on 2026-03-02?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "postgres",
+        "start": "2026-03-02T03:00:00Z",
+        "end": "2026-03-02T06:00:00Z",
+        "kind": "scale"
+      },
+      "why": "scale actions are recorded events",
+      "duration_ms": 1609,
+      "usage": {
+        "in": 2870,
+        "out": 132
+      }
+    },
+    {
+      "key": "events_config_changes",
+      "query": "Show me the recorded config changes on checkout-api in the last two days.",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-03-05T00:00:00Z",
+        "end": "2026-03-07T00:00:00Z",
+        "kind": "config_change"
+      },
+      "why": "config changes are recorded events",
+      "duration_ms": 1719,
+      "usage": {
+        "in": 2855,
+        "out": 135
+      }
+    },
+    {
+      "key": "events_rollback_sequence",
+      "query": "When was checkout-api rolled back on 2026-01-22, and what was recorded just before it?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-22T00:00:00Z",
+        "end": "2026-01-23T00:00:00Z"
+      },
+      "why": "a rollback is a deploy event in the history",
+      "duration_ms": 1515,
+      "usage": {
+        "in": 2863,
+        "out": 111
+      }
+    },
+    {
+      "key": "events_threshold_crossings",
+      "query": "Which metric thresholds did payments-api cross on 2026-02-19 between 14:00 and 15:00 UTC?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "payments-api",
+        "start": "2026-02-19T14:00:00Z",
+        "end": "2026-02-19T15:00:00Z",
+        "kind": "metric_threshold"
+      },
+      "why": "threshold crossings are recorded events",
+      "duration_ms": 1547,
+      "usage": {
+        "in": 2873,
+        "out": 137
+      }
+    },
+    {
+      "key": "events_what_changed",
+      "query": "Did anything change on redis around 15:10 UTC on 2026-04-08 - a deploy, a restart, a config push?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "redis",
+        "start": "2026-04-08T14:55:00Z",
+        "end": "2026-04-08T15:25:00Z"
+      },
+      "why": "changes to the service are recorded events",
+      "duration_ms": 1485,
+      "usage": {
+        "in": 2873,
+        "out": 108
+      }
+    },
+    {
+      "key": "events_incident_history",
+      "query": "According to the incident history, what happened to inventory-api on the afternoon of 2026-05-05?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "inventory-api",
+        "start": "2026-05-05T12:00:00Z",
+        "end": "2026-05-05T18:00:00Z"
+      },
+      "why": "the incident history is the event store",
+      "duration_ms": 1453,
+      "usage": {
+        "in": 2864,
+        "out": 111
+      }
+    },
+    {
+      "key": "events_deploy_identity",
+      "query": "Which release was deployed to checkout-api at 15:11 UTC on 2026-01-22, per the recorded timeline?",
+      "expected": "analyze_events",
+      "picked": "analyze_events",
+      "misrouted": false,
+      "arguments": {
+        "service": "checkout-api",
+        "start": "2026-01-22T15:00:00Z",
+        "end": "2026-01-22T15:20:00Z",
+        "kind": "deploy"
+      },
+      "why": "the deploy event carries the release",
+      "duration_ms": 1515,
+      "usage": {
+        "in": 2873,
+        "out": 135
+      }
+    }
+  ]
+}

@@ -840,3 +840,27 @@ The execution plan said Day 24 was the point to choose a migration tool.
 **What was rejected.** Alembic (SQLAlchemy, which nothing uses, and the schema re-expressed as Python), yoyo or sqitch (a new tool and a second copy of the schema), and down-migrations (the seeded corpus is the eval's answer key; a migration that can drop it is a footgun).
 
 **What I would watch.** The rule it asks of authors - never edit an applied file, add a later one - is enforced by refusal, which is loud but late: the refusal comes at deploy time. A test that compares the files with a recorded ledger would move it to CI if the schema starts changing often.
+
+## 50. A dependent starts when its own dependencies return, not when the parallel group does
+
+**Context.** The Day 9 executor ran the parallel group, joined it, then ran the sequential chain.
+The Day 25 trace showed the cost: Deployment depends on GitHub only and waited 34 s for Docs after GitHub had finished.
+Every earlier run had hidden it, because GitHub happened to be the slowest agent each time (war story #16).
+
+**Decision.** Round zero is one scheduler (`Executor._run_plan`): every invocation is submitted the moment the invocations it names in `depends_on` have settled, the parallel group at once.
+An invocation whose dependency gave no response, or whose agent is not registered, is decided without running and gets its honest gap; that decision can make another invocation ready, so readiness is re-checked before waiting.
+Workers only run agents; composing a dependent's context and every merge stay on the calling thread, and outcomes are settled in the old order, so the response is assembled exactly as before and only start times move.
+
+**What was rejected.** Starting the chain early with the planner's block alone and adding the digest later: the context would not be what the agent was given, and the contract says `context_passed` is the literal block. Serialising sibling dependents: `sequential` means "waits for its dependencies", and nothing a sibling produces is in a dependent's context.
+
+**What I would watch.** It is proven offline only (the $0 rule). The test makes the wrong schedule fail, not merely slow: Docs cannot finish until Deployment has started. Its first form passed on the old scheduler, because the refinement loop retried the timed-out Docs and the status came back `complete`; it now asserts no refinement round ran.
+
+## 51. An eval keeps the reason a report was refused, not only its kind
+
+**Context.** Day 27's read-back of every recorded eval run: 36 refusals across four Sonnet runs, all `format`, 33 of them in reports a retry recovered - and for those 33 the record kept the kind and dropped the message, so "which contract rule refuses these agents?" had no answer.
+
+**Decision.** `RetryStats.messages` keeps each refusal's rendered message, exactly as the model was shown it; the report groups a run's refusals by the rule that fired, counts folded to `N` so one rule refusing two reports is one row, and `eval.json` carries the same table as `refusals`. A record from before Day 27 still loads and yields no rules.
+
+**Why the rendered message.** It is already the stable form: `render_rejection` strips pydantic's URLs and echoed input so the identical-rejection rule can compare two attempts, which also makes it safe and small to keep.
+
+**What I would watch.** The grouping is by text. A rule whose message embeds a value (a field path with an index, a quoted string) splits into rows; the fold covers counts only.
