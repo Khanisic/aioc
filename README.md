@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 26 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
+> **Status: Day 29 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -320,7 +320,7 @@ Six contract-named tools run as real stdio MCP servers, and two agents consume t
 The configuration is committed on purpose: it is the evidence, not local scratch.
 
 - **Configuration.** A user, project, and directory `CLAUDE.md` hierarchy; seven path-scoped rules in [`.claude/rules/`](.claude/rules/); the `/contract` and `/validate-schema` commands; the `contract-audit` skill running read-only in a forked context; and [`.claude/settings.json`](.claude/settings.json) as the shared permission layer, where destructive commands ask and secrets are unreadable.
-- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,144 tests on every pull request, with no secrets and no network; one of them fails the build if any tracked file carries a credential ([`audit_secrets.py`](scripts/audit_secrets.py), [the audit](docs/design-notes/secrets-audit.md)).
+- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,164 tests on every pull request, with no secrets and no network; one of them fails the build if any tracked file carries a credential ([`audit_secrets.py`](scripts/audit_secrets.py), [the audit](docs/design-notes/secrets-audit.md)).
 - **Claude Code on pull requests.** [`claude-review.yml`](.github/workflows/claude-review.yml) runs a review or writes tests when a pull request is labelled.
   The review prompt names this repository's defect classes and allows "No defects found.", and generated tests are pushed only when they touch `tests/` alone and the suite passes.
   The prompt was tuned on scored local reviews.

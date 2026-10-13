@@ -1,8 +1,18 @@
 # Handoff - point a new session here
 
-Written during **Day 28** of 30 (2026-10-12). **The project spends $0 on the Anthropic API
+Written during **Day 29** of 30 (2026-10-13). **The project spends $0 on the Anthropic API
 (§1)**, with the exceptions the owner approved one at a time: the Day 24 eval re-run and the
 two Day 25 runs (below). Any further live call still needs a yes at the time.
+
+**Day 29 so far, at $0 (2026-10-13, still on `d28-demo-video`, PR #32):** CI had failed the
+Day 28 PR on one test: the Ubuntu runner has no Windows monospace font, PIL's default face is
+wider than Consolas, and the video's terminal shot came out 2458 px wide against an 1840 px
+content area. Reproduced locally by hiding every non-DejaVu font from `ImageFont.truetype`, then
+fixed: `render_demo_gif.load_font` also tries DejaVuSansMono and LiberationMono,
+`frame_size` is the frame arithmetic factored out, and `render_demo_video.terminal_font` steps
+down until the frame fits (this machine still gets Consolas at 24 px, so the committed renders
+are unchanged). CI is green on the PR. The README's status and test count are current. Still
+blocked: no Chrome extension connected and Docker Desktop down, so the screenshots wait.
 
 **Day 28 so far, at $0 (2026-10-12, branch `d28-demo-video`):** the demo video,
 `docs/assets/demo.mp4` (2:44, 1080p, captioned, no audio), rendered by
@@ -69,7 +79,7 @@ end of every working day.
 
   The user saw ~$4 go in one day and asked for this; quote it if a plan starts to need a
   paid call.
-- **Keep costs low.** The 1084-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 1164-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -306,15 +316,14 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1169 passed
+uv run pytest -q                                                   # expect 1189 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1144 passed** without the stack on Day 27 (2026-10-11), the
+Costs nothing. Last run: **1164 passed** without the stack on Day 29 (2026-10-13), the
 offline suite CI runs; with Docker Desktop up the 25 `integration`-marked tests run too, which
-should make 1169 - not run on Day 27, Docker Desktop was down (last run with the stack: 1140 on
-Day 24). CI runs the
-latter on every PR. Lint and mypy
+should make 1189 - not run since Day 24 (1140 then), because Docker Desktop has been down.
+CI runs the offline suite on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
 most of it.
