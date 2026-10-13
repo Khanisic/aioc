@@ -97,14 +97,42 @@ def _wrap(line: str, cols: int) -> list[str]:
     return out
 
 
+_warned_no_font = False
+
+
 def load_font(size: int = FONT_SIZE) -> ImageFont.FreeTypeFont:
-    for name in ("consola.ttf", "CascadiaMono.ttf", "cour.ttf"):
+    # Windows first (the committed renders), then what a Linux runner or desktop carries.
+    for name in (
+        "consola.ttf",
+        "CascadiaMono.ttf",
+        "cour.ttf",
+        "DejaVuSansMono.ttf",
+        "LiberationMono-Regular.ttf",
+    ):
         try:
             return ImageFont.truetype(name, size)
         except OSError:
             continue
-    print("no monospace TrueType font found; falling back to PIL default", file=sys.stderr)
+    global _warned_no_font
+    if not _warned_no_font:
+        print("no monospace TrueType font found; falling back to PIL default", file=sys.stderr)
+        _warned_no_font = True
     return ImageFont.load_default(size)  # type: ignore[return-value]
+
+
+def frame_size(
+    font: ImageFont.FreeTypeFont, *, cols: int = COLS, rows: int = ROWS, leading: int = 7
+) -> tuple[int, int]:
+    """The width and height of every frame `terminal_frames` draws with these settings."""
+    box = font.getbbox("M")
+    line_h = (box[3] - box[1]) + leading
+    scale = font.size / FONT_SIZE
+    # A full row measured as drawn, not the ink box of one glyph times the columns: Consolas
+    # at 15px advances 8.25px a character against an 8px ink box, so a full row overran the
+    # image and its last character or two were clipped.
+    width = round(PAD_X * scale) * 2 + math.ceil(font.getlength("M" * cols))
+    height = round(PAD_TOP * scale) + rows * line_h + round(PAD_BOTTOM * scale)
+    return width, height
 
 
 def terminal_frames(
@@ -123,9 +151,6 @@ def terminal_frames(
     printed. `scripts/render_demo_video.py` cuts the same frames into chapters."""
     box = font.getbbox("M")
     line_h = (box[3] - box[1]) + leading
-    # A full row measured as drawn, not the ink box of one glyph times the columns: Consolas
-    # at 15px advances 8.25px a character against an 8px ink box, so a full row overran the
-    # image and its last character or two were clipped.
     # The window chrome scales with the font; at FONT_SIZE every number is the GIF's own.
     scale = font.size / FONT_SIZE
 
@@ -133,8 +158,7 @@ def terminal_frames(
         return round(n * scale)
 
     pad_x, pad_top = px(PAD_X), px(PAD_TOP)
-    width = pad_x * 2 + math.ceil(font.getlength("M" * cols))
-    height = pad_top + rows * line_h + px(PAD_BOTTOM)
+    width, height = frame_size(font, cols=cols, rows=rows, leading=leading)
 
     # The typed command opens the replay; everything after it is the recorded transcript.
     shown: list[tuple[str, tuple[int, int, int]]] = [(f"$ {command}", GREEN)]

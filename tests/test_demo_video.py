@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from PIL import Image
-from render_demo_gif import FONT_SIZE, load_font, terminal_frames
+from PIL import Image, ImageFont
+from render_demo_gif import FONT_SIZE, frame_size, load_font, terminal_frames
 from render_demo_video import (
     CAPTION_LINES,
     CAPTION_MIN_MS,
@@ -19,6 +19,10 @@ from render_demo_video import (
     CHAPTERS,
     CONTENT_H,
     CONTENT_W,
+    TERMINAL_COLS,
+    TERMINAL_FONT,
+    TERMINAL_LEADING,
+    TERMINAL_ROWS,
     H,
     Shot,
     W,
@@ -30,6 +34,7 @@ from render_demo_video import (
     main,
     read_facts,
     read_timeline,
+    terminal_font,
 )
 
 T0 = "2026-10-10T03:56:39.704Z"
@@ -326,6 +331,38 @@ def test_terminal_frames_at_the_gif_defaults_match_the_gif_geometry() -> None:
     # The GIF's own size: COLS of Consolas at FONT_SIZE plus padding; a larger font scales it.
     big, _ = terminal_frames(entries, title="t", command="c", font=load_font(FONT_SIZE * 2))
     assert big[0].width > frames[0].width * 1.8
+
+
+def test_frame_size_is_the_size_terminal_frames_draws() -> None:
+    entries = [{"t": 0.0, "line": "x" * 300}]
+    for font in (load_font(), load_font(TERMINAL_FONT), ImageFont.load_default(30)):
+        frames, _ = terminal_frames(
+            entries, title="t", command="c", font=font, cols=90, rows=12, leading=9
+        )  # type: ignore[arg-type]
+        assert frames[0].size == frame_size(font, cols=90, rows=12, leading=9)  # type: ignore[arg-type]
+
+
+def _fits(font: ImageFont.FreeTypeFont) -> bool:
+    w, h = frame_size(font, cols=TERMINAL_COLS, rows=TERMINAL_ROWS, leading=TERMINAL_LEADING)
+    return w <= CONTENT_W and h <= CONTENT_H
+
+
+def test_the_terminal_font_fits_whatever_monospace_face_the_machine_has(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    font = terminal_font()
+    assert _fits(font) and font.size <= TERMINAL_FONT
+    # A runner with no monospace font at all (CI's first Day 28 run): PIL's default face is
+    # wider than Consolas, and the terminal shot overflowed the frame until it was stepped down.
+    monkeypatch.setattr(
+        "render_demo_gif.load_font", lambda size=FONT_SIZE: ImageFont.load_default(size)
+    )
+    monkeypatch.setattr(
+        "render_demo_video.load_font", lambda size=FONT_SIZE: ImageFont.load_default(size)
+    )
+    wide = terminal_font()
+    assert _fits(wide) and wide.size < TERMINAL_FONT
+    assert not _fits(ImageFont.load_default(wide.size + 1))  # type: ignore[arg-type]
 
 
 def test_a_frame_is_1080p_and_refuses_a_caption_that_does_not_fit() -> None:

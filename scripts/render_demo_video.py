@@ -54,6 +54,7 @@ from render_demo_gif import (  # noqa: E402
     DIM,
     GREEN,
     YELLOW,
+    frame_size,
     load_font,
     terminal_frames,
 )
@@ -452,10 +453,22 @@ def hold_for_reading(shots: list[Shot]) -> None:
         i = j + 1
 
 
+def terminal_font() -> ImageFont.FreeTypeFont:
+    """The terminal font at TERMINAL_FONT, or the largest smaller size whose frame fits the
+    content area. Consolas fits at TERMINAL_FONT; a wider face (a Linux runner's, or PIL's
+    own when no monospace font is installed) is stepped down rather than refused."""
+    for size in range(TERMINAL_FONT, 0, -1):
+        font = load_font(size)
+        w, h = frame_size(font, cols=TERMINAL_COLS, rows=TERMINAL_ROWS, leading=TERMINAL_LEADING)
+        if w <= CONTENT_W and h <= CONTENT_H:
+            return font
+    raise ValueError(f"no terminal font size fits the {CONTENT_W}x{CONTENT_H} area")
+
+
 def terminal_shots(
     entries: list[dict[str, Any]], facts: Facts, *, title: str, command: str
 ) -> list[Shot]:
-    font = load_font(TERMINAL_FONT)
+    font = terminal_font()
     frames, durations = terminal_frames(
         entries,
         title=title,
