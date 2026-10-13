@@ -217,6 +217,10 @@ under test (the health tool reports whatever `DEMO_GIT_SHA` they were started wi
 its run under `test-results/`, so the response, the plan, and the tool replies are readable
 after the fact.
 
+### What it looks like running
+
+The [quickstart](docs/guides/quickstart.md) shows each step's result: [Prometheus during an injected fault](docs/assets/prometheus-downstream-latency.png) (checkout-api's p99 following payments-api's from tens of milliseconds to about a second) and [the service's API docs](docs/assets/api-docs.png).
+
 ### Test results
 
 Every `pytest` run records itself under [`test-results/`](test-results/README.md) as JSON: what

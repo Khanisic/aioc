@@ -67,6 +67,11 @@ make chaos-downstream-latency   # payments-api slows down; checkout-api's p99 fo
 ```
 
 Open Prometheus at <http://localhost:9090> and graph `histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket[1m])))` to watch checkout-api's p99 climb.
+
+![checkout-api and payments-api p99 jumping from tens of milliseconds to about a second when the fault is injected at 22:53](../assets/prometheus-downstream-latency.png)
+
+*The fault injected at 22:53 after a healthy baseline: payments-api slows, and checkout-api, which calls it, follows at once. inventory-api stays flat.*
+
 Then put it back:
 
 ```bash
@@ -106,7 +111,9 @@ curl -s localhost:8080/v1/requests/<job id> -H "Authorization: Bearer $AIOC_API_
 ```
 
 The job comes back `succeeded` with a contract-valid `CoordinatorResponse`, zero tokens, and the gate's decision on the scripted restart: `denied`, because a server has nobody to approve it.
-The interactive API docs are at <http://localhost:8080/docs>.
+The interactive API docs are at <http://localhost:8080/docs>:
+
+![The service's API docs: index, liveness, readiness, submit a request, read a job](../assets/api-docs.png)
 
 ## 5. The live system (costs money)
 

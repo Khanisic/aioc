@@ -110,7 +110,8 @@ def create_app(
     # required query string (a 422 on every request, found by the container rehearsal).
     auth = [Depends(authorised)]
 
-    @app.get("/")
+    # Summaries name each route on the /docs page; FastAPI's default is the function name.
+    @app.get("/", summary="What this service is and which routes it serves")
     def index() -> dict[str, Any]:
         return {
             "service": "aioc",
@@ -119,16 +120,21 @@ def create_app(
             "routes": ["/healthz", "/readyz", "/v1/requests", "/v1/requests/{id}", "/docs"],
         }
 
-    @app.get("/healthz")
+    @app.get("/healthz", summary="Liveness: the process answers")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/readyz")
+    @app.get("/readyz", summary="Readiness: the database answers a query, the rest reported")
     def readyz(request: Request) -> JSONResponse:
         ready, body = readiness(request.app.state.checks)
         return JSONResponse(body, status_code=200 if ready else 503)
 
-    @app.post("/v1/requests", status_code=status.HTTP_202_ACCEPTED, dependencies=auth)
+    @app.post(
+        "/v1/requests",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=auth,
+        summary="Submit an operational query as a job (202, with its Location)",
+    )
     def submit(body: RequestBody, request: Request) -> JSONResponse:
         if body.mode == "live" and not settings.live_enabled:
             raise HTTPException(
@@ -152,7 +158,11 @@ def create_app(
             headers={"Location": f"/v1/requests/{job.id}"},
         )
 
-    @app.get("/v1/requests/{job_id}", dependencies=auth)
+    @app.get(
+        "/v1/requests/{job_id}",
+        dependencies=auth,
+        summary="Read a job: its status, then the CoordinatorResponse and the gate's decisions",
+    )
     def read(job_id: str, request: Request) -> dict[str, Any]:
         job = request.app.state.queue.get(job_id)
         if job is None:

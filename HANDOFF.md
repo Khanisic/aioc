@@ -11,8 +11,17 @@ content area. Reproduced locally by hiding every non-DejaVu font from `ImageFont
 fixed: `render_demo_gif.load_font` also tries DejaVuSansMono and LiberationMono,
 `frame_size` is the frame arithmetic factored out, and `render_demo_video.terminal_font` steps
 down until the frame fits (this machine still gets Consolas at 24 px, so the committed renders
-are unchanged). CI is green on the PR. The README's status and test count are current. Still
-blocked: no Chrome extension connected and Docker Desktop down, so the screenshots wait.
+are unchanged). CI is green; PR #32 merged and khanisic mirrored. Then, on `d29-polish`, the
+screenshots: `docs/assets/prometheus-downstream-latency.png` (a real
+`chaos-downstream-latency` after a 3-minute baseline) and `docs/assets/api-docs.png`, embedded
+in the quickstart at the steps that produce them. Local pages are shot with Playwright driving
+the installed Chrome (`channel="chrome"`, full page, PNG): the extension's screenshots are
+downscaled JPEGs, and headless Chrome's `--virtual-time-budget` drew Prometheus with no data.
+The API's routes got real summaries for `/docs` (they showed function names). The eval-tables
+screenshot is dropped on purpose: the tables are text in the README and `evaluations/`.
+**The Langfuse trace is not reachable from the logged-in browser:** that account's only
+project is `cmv79...` and empty; the Day 25 trace is in project `cmry520...`, another account
+or organization. The trace chapter of `demo.mp4` stands in for it.
 
 **Day 28 so far, at $0 (2026-10-12, branch `d28-demo-video`):** the demo video,
 `docs/assets/demo.mp4` (2:44, 1080p, captioned, no audio), rendered by
@@ -320,9 +329,8 @@ uv run pytest -q                                                   # expect 1189
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1164 passed** without the stack on Day 29 (2026-10-13), the
-offline suite CI runs; with Docker Desktop up the 25 `integration`-marked tests run too, which
-should make 1189 - not run since Day 24 (1140 then), because Docker Desktop has been down.
+Costs nothing. Last run: **1189 passed** with the stack up on Day 29 (2026-10-13); without
+it, the offline suite CI runs is 1164 (the 25 `integration`-marked tests need Docker).
 CI runs the offline suite on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
