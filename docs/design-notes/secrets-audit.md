@@ -22,6 +22,8 @@ What the scan does find, and allows by exact text:
 - `ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456`, the fixture that proves a GitHub patch's `token = ...` line is redacted.
 - `aioc_dev_only`, the local stack's Postgres password, in `docker-compose.yml`, `.env.example`, and tests: a development default for the local stack's database, never used by a hosted one (a host supplies its own `DATABASE_URL` as a secret, `infrastructure/k8s/secret.example.yaml`).
 
+**Re-run 2026-10-12, before Day 30** (with the pull request heads fetched, as below): 0 findings in 100 commits on every ref and 39 pull request heads.
+
 The khanisic force push of 2026-08-09 rewrote nothing with content (HANDOFF sec 3), and the pull request refs confirm no commit outside the scanned history survives on either remote.
 
 ## How

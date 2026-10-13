@@ -51,6 +51,8 @@ dev = [
     "types-PyYAML>=6.0",
     # Day 24 - Starlette's TestClient (`fastapi.testclient`) runs on httpx2.
     "httpx2>=2.13.1",
+    # Day 28 - scripts/render_demo_video.py draws its frames (ffmpeg encodes them).
+    "pillow>=10",
 ]
 
 [build-system]

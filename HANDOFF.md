@@ -1,8 +1,29 @@
 # Handoff - point a new session here
 
-Written during **Day 27** of 30 (2026-10-11). **The project spends $0 on the Anthropic API
+Written during **Day 29** of 30 (2026-10-13). **The project spends $0 on the Anthropic API
 (§1)**, with the exceptions the owner approved one at a time: the Day 24 eval re-run and the
 two Day 25 runs (below). Any further live call still needs a yes at the time.
+
+**Day 29 so far, at $0 (2026-10-13, still on `d28-demo-video`, PR #32):** CI had failed the
+Day 28 PR on one test: the Ubuntu runner has no Windows monospace font, PIL's default face is
+wider than Consolas, and the video's terminal shot came out 2458 px wide against an 1840 px
+content area. Reproduced locally by hiding every non-DejaVu font from `ImageFont.truetype`, then
+fixed: `render_demo_gif.load_font` also tries DejaVuSansMono and LiberationMono,
+`frame_size` is the frame arithmetic factored out, and `render_demo_video.terminal_font` steps
+down until the frame fits (this machine still gets Consolas at 24 px, so the committed renders
+are unchanged). CI is green on the PR. The README's status and test count are current. Still
+blocked: no Chrome extension connected and Docker Desktop down, so the screenshots wait.
+
+**Day 28 so far, at $0 (2026-10-12, branch `d28-demo-video`):** the demo video,
+`docs/assets/demo.mp4` (2:44, 1080p, captioned, no audio), rendered by
+`scripts/render_demo_video.py` from the Day 25 run's records: its terminal, its Langfuse trace
+(`trace.json`, drawn at measured times), its bill (priced by `aioc.llm.pricing`), then the
+architecture diagram. No re-enactment and no screenshot needed; the trace chapter stands in for
+the Langfuse screenshot until item 1 below can be done, and swapping one in later is a new shot
+in `timeline_shots`. The secrets history audit was re-run with PR heads (0 findings, 100 commits,
+39 heads). Day 27 is merged (PR #31) and khanisic mirrored. Still blocked: no Chrome extension
+was connected, and starting Docker Desktop from a session was refused by the auto-mode
+classifier - the owner starts it.
 
 **Day 27 is done at $0 (2026-10-11, branch `d27-design-notes`):** the three design notes the
 plan asks for (`docs/design-notes/workflow-vs-agent.md`, `parallel-and-sequential.md`,
@@ -58,7 +79,7 @@ end of every working day.
 
   The user saw ~$4 go in one day and asked for this; quote it if a plan starts to need a
   paid call.
-- **Keep costs low.** The 1084-test suite makes **zero API calls and zero network calls**
+- **Keep costs low.** The 1164-test suite makes **zero API calls and zero network calls**
   and must stay that way - which is why tracing is opt-in at the entry point rather than
   activated by keys in `.env`. Live checks live in `scripts/check_*.py`, are opt-in, and
   cost 1-3 calls each. Before running anything live, say how many calls it will cost -
@@ -295,15 +316,14 @@ Other traps:
 ```bash
 uv sync --all-groups
 docker compose up -d --wait
-uv run pytest -q                                                   # expect 1169 passed
+uv run pytest -q                                                   # expect 1189 passed
 uv run ruff check . && uv run ruff format --check . && uv run mypy  # all clean
 ```
 
-Costs nothing. Last run: **1144 passed** without the stack on Day 27 (2026-10-11), the
+Costs nothing. Last run: **1164 passed** without the stack on Day 29 (2026-10-13), the
 offline suite CI runs; with Docker Desktop up the 25 `integration`-marked tests run too, which
-should make 1169 - not run on Day 27, Docker Desktop was down (last run with the stack: 1140 on
-Day 24). CI runs the
-latter on every PR. Lint and mypy
+should make 1189 - not run since Day 24 (1140 then), because Docker Desktop has been down.
+CI runs the offline suite on every PR. Lint and mypy
 clean. The suite took ~30s on this machine with the stack up; the `test_mcp_toolset.py`
 tests launch the real GitHub, deployment, analyze, and search server subprocesses and are
 most of it.
@@ -368,17 +388,20 @@ video. All free from here unless a step says otherwise.
    and the guide named the wrong ports. Not covered by that test: a cold database and cold image
    pulls, because the compose file pins the volume name and this machine's data would have had
    to go. A second machine is the Day 29 test.
-3. **Video** (Day 28). `docs/assets/day25-demo.gif` is the terminal half. The plan's structure is
-   break -> diagnose -> trace and cost -> architecture; the trace and architecture halves need
-   item 1's screenshots and a diagram.
+3. **Video** (Day 28): **done** as `docs/assets/demo.mp4`, the plan's structure from the Day 25
+   run's records (`scripts/render_demo_video.py --run test-results/runs/2026-10-10/20261010T035831Z__llm__day25-service`;
+   `--plan` prints the timings, `--frames <dir>` keeps the PNGs for a pixel check). The run
+   directory is gitignored, so the video can only be re-rendered on this machine. Day 29's
+   "edit video" is now: watch it end to end once, and splice in item 1's Langfuse screenshot
+   if it adds anything the drawn trace does not.
 4. **Known and not fixed:** the deterministic synthesis adopts one agent's report, so the Day 25
    answer is GitHub's and does not name payments-api, which Incident did (the model synthesis
    combines them; `workflow-vs-agent.md` says why it stays opt-in). *Fixed on Day 27:* the
    executor started the sequential chain after the whole parallel group (Day 25 run 1:
    Deployment waited 34 s for Docs); each invocation now starts when its own dependencies settle.
 5. **Day 28-29 still need:** the screenshots (item 1), then the video (item 3), the final README
-   pass, and a fresh-clone test on a machine that is not this one. Before Day 30, re-run
-   `scripts/audit_secrets.py --history` with the PR heads fetched (`secrets-audit.md` says how).
+   pass, and a fresh-clone test on a machine that is not this one. The pre-Day-30 secrets
+   re-run is done (2026-10-12, `secrets-audit.md`); run it once more if anything lands after.
 6. **One cheap live run would close two open questions** (each needs the owner's yes): the next
    eval run fills the new "what refused them" table (`run_evals.py --mode batch --detach`,
    ~$0.71-0.87), and Haiku as the routing case study's router is ~$0.11 projected

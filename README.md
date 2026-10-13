@@ -4,7 +4,7 @@ A coordinator that dynamically routes operational questions to four deep subagen
 **Incident, Docs, GitHub, Deployment** - each producing schema-validated,
 confidence-scored output through custom MCP tools.
 
-> **Status: Day 26 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
+> **Status: Day 29 of 30.** All four agents run live on one query, locally or through the orchestrator's own HTTP service in a container. The coordinator plans
 > (dynamic selection and explicit context passing enforced by validators, not prompts),
 > runs independent agents in parallel and dependent ones sequentially with a bounded
 > handoff digest, re-delegates resolvable gaps in a capped refinement loop, and writes a
@@ -41,6 +41,12 @@ four agents inside its container: the PR touched tracing code only, the release 
 configuration or image, the latency comes from payments-api downstream, and every
 recommended action is withheld by the approval gate. The same scenario run in process on
 Day 15 is [`day15-demo.gif`](docs/assets/day15-demo.gif).*
+
+**The demo video:** [`docs/assets/demo.mp4`](docs/assets/demo.mp4) (2:44, 1080p, captioned,
+no audio) is the same run in four parts: production breaks, the agents diagnose, the request's
+Langfuse trace drawn at its measured times with the bill priced from its own tokens ($0.38,
+56% of the input from the prompt cache), and the architecture. It is rendered from the run's
+records by `scripts/render_demo_video.py`, for free.
 
 ---
 
@@ -156,6 +162,7 @@ uv run python scripts/check_agent_selection.py      # coordinator routing (2 of 
 # see the whole system run: inject chaos, read Prometheus, respond() end to end (~3 calls)
 PYTHONIOENCODING=utf-8 uv run python scripts/demo_day10.py
 uv run scripts/render_demo_gif.py --run test-results/runs/<date>/<run-dir>   # free; the GIF
+uv run python scripts/render_demo_video.py --run <a check_day25_service.py run>  # free; the video (needs ffmpeg)
 uv run python scripts/gate_recorded_run.py         # free; every recorded recommendation through the HITL gate
 uv run python scripts/gate_recorded_run.py --persist   # free; the decisions written to the append-only audit log
 uv run python scripts/audit_log.py                 # free; read the audit log back (--request, --decision, --since)
@@ -313,7 +320,7 @@ Six contract-named tools run as real stdio MCP servers, and two agents consume t
 The configuration is committed on purpose: it is the evidence, not local scratch.
 
 - **Configuration.** A user, project, and directory `CLAUDE.md` hierarchy; seven path-scoped rules in [`.claude/rules/`](.claude/rules/); the `/contract` and `/validate-schema` commands; the `contract-audit` skill running read-only in a forked context; and [`.claude/settings.json`](.claude/settings.json) as the shared permission layer, where destructive commands ask and secrets are unreadable.
-- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,144 tests on every pull request, with no secrets and no network; one of them fails the build if any tracked file carries a credential ([`audit_secrets.py`](scripts/audit_secrets.py), [the audit](docs/design-notes/secrets-audit.md)).
+- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs lint, mypy, and the offline suite of 1,164 tests on every pull request, with no secrets and no network; one of them fails the build if any tracked file carries a credential ([`audit_secrets.py`](scripts/audit_secrets.py), [the audit](docs/design-notes/secrets-audit.md)).
 - **Claude Code on pull requests.** [`claude-review.yml`](.github/workflows/claude-review.yml) runs a review or writes tests when a pull request is labelled.
   The review prompt names this repository's defect classes and allows "No defects found.", and generated tests are pushed only when they touch `tests/` alone and the suite passes.
   The prompt was tuned on scored local reviews.
